@@ -25,6 +25,7 @@
 #include "notes/notes_app.h"
 #include "appstore/appstore_app.h"
 #include "assistant/assistant_app.h"
+#include "wifiscanner/wifiscanner_app.h"
 
 int main(int argc, char **argv)
 {
@@ -57,6 +58,7 @@ int main(int argc, char **argv)
     notes_app_register();
     appstore_app_register();
     assistant_app_register();
+    wifiscanner_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);

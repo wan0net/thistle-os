@@ -46,6 +46,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/reader/reader_ui.c
     ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_app.c
     ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_transport.c
     ${THISTLE_DIR}/components/apps_builtin/navigator/navigator_app.c
     ${THISTLE_DIR}/components/apps_builtin/navigator/navigator_ui.c
     ${THISTLE_DIR}/components/apps_builtin/notes/notes_app.c
@@ -54,6 +55,8 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_ui.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_app.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_app.c
+    ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_ui.c
 )
 
 # Simulator sources

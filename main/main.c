@@ -20,6 +20,7 @@
 #include "notes/notes_app.h"
 #include "appstore/appstore_app.h"
 #include "assistant/assistant_app.h"
+#include "wifiscanner/wifiscanner_app.h"
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -89,6 +90,7 @@ void app_main(void)
     notes_app_register();
     appstore_app_register();
     assistant_app_register();
+    wifiscanner_app_register();
 
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.launcher",   PERM_ALL);
@@ -99,7 +101,8 @@ void app_main(void)
     permissions_grant("com.thistle.navigator",  PERM_GPS | PERM_STORAGE);
     permissions_grant("com.thistle.notes",      PERM_STORAGE);
     permissions_grant("com.thistle.appstore",   PERM_STORAGE | PERM_NETWORK);
-    permissions_grant("com.thistle.assistant",  PERM_NETWORK | PERM_STORAGE);
+    permissions_grant("com.thistle.assistant",   PERM_NETWORK | PERM_STORAGE);
+    permissions_grant("com.thistle.wifiscanner", PERM_NETWORK);
 
     app_manager_launch("com.thistle.launcher");
 

@@ -201,3 +201,9 @@ TEST_CASE("test_app_kill_calls_destroy: on_destroy invoked after kill", "[app]")
     TEST_ASSERT_EQUAL_INT(1, s_on_destroy_calls);
     TEST_ASSERT_EQUAL_INT(APP_STATE_UNLOADED, app_manager_get_state(fg));
 }
+
+TEST_CASE("test_app_manager_get_free_memory", "[app]")
+{
+    size_t free = app_manager_get_free_memory();
+    TEST_ASSERT_GREATER_THAN(0, free);
+}

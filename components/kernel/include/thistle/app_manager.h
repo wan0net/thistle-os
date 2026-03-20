@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -56,3 +57,9 @@ esp_err_t app_manager_kill(app_handle_t handle);
 
 /* Initialize app manager subsystem */
 esp_err_t app_manager_init(void);
+
+/* Get free memory available for apps */
+size_t app_manager_get_free_memory(void);
+
+/* Manually trigger LRU eviction */
+esp_err_t app_manager_evict_lru(void);

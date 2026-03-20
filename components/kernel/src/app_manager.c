@@ -1,21 +1,26 @@
 #include "thistle/app_manager.h"
+#include "thistle/kernel.h"
 #include "thistle/event.h"
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include <string.h>
+#include <limits.h>
 
 static const char *TAG = "app_mgr";
 
 #define APP_SLOTS_MAX 8
+#define APP_MEMORY_THRESHOLD_BYTES (50 * 1024)  /* 50 KB minimum free heap */
 
 typedef struct {
     const app_entry_t *entry;
     app_state_t        state;
     app_handle_t       handle;
-    TaskHandle_t       task;   /* Reserved for future per-app task support */
+    TaskHandle_t       task;         /* Reserved for future per-app task support */
+    uint32_t           last_used_ms; /* kernel_uptime_ms() when app was last foreground */
 } app_slot_t;
 
 static app_slot_t s_slots[APP_SLOTS_MAX];
@@ -73,6 +78,39 @@ static void pause_foreground(void)
     fg->state = APP_STATE_BACKGROUNDED;
 }
 
+static void evict_lru_app(void)
+{
+    int      oldest_idx  = -1;
+    uint32_t oldest_time = UINT32_MAX;
+
+    for (int i = 0; i < APP_SLOTS_MAX; i++) {
+        if (s_slots[i].entry == NULL) continue;
+        if (s_slots[i].state == APP_STATE_UNLOADED) continue;
+        if (s_slots[i].state == APP_STATE_RUNNING)  continue; /* never evict foreground */
+
+        /* Never evict the launcher */
+        if (s_slots[i].entry->manifest != NULL &&
+            strcmp(s_slots[i].entry->manifest->id, "com.thistle.launcher") == 0) continue;
+
+        if (s_slots[i].last_used_ms < oldest_time) {
+            oldest_time = s_slots[i].last_used_ms;
+            oldest_idx  = i;
+        }
+    }
+
+    if (oldest_idx >= 0) {
+        const char *name = (s_slots[oldest_idx].entry->manifest != NULL)
+                           ? s_slots[oldest_idx].entry->manifest->name
+                           : "?";
+        ESP_LOGI(TAG, "Evicting LRU app: %s (last used %lu ms ago)",
+                 name,
+                 (unsigned long)(kernel_uptime_ms() - oldest_time));
+        app_manager_kill((app_handle_t)oldest_idx);
+    } else {
+        ESP_LOGW(TAG, "evict_lru_app: no evictable app found");
+    }
+}
+
 /* --------------------------------------------------------------------------
  * Public API
  * -------------------------------------------------------------------------- */
@@ -119,6 +157,13 @@ esp_err_t app_manager_launch(const char *app_id)
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Check available heap before loading; evict LRU app if memory is low */
+    size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    if (free_heap < APP_MEMORY_THRESHOLD_BYTES) {
+        ESP_LOGW(TAG, "Low memory (%zu bytes free), evicting LRU app", free_heap);
+        evict_lru_app();
+    }
+
     /* Remember the current foreground so we can restore it if launch fails. */
     app_slot_t *prev_fg = foreground_slot();
 
@@ -155,7 +200,8 @@ esp_err_t app_manager_launch(const char *app_id)
     /* Bring to foreground.
      * First time: call on_start.  Subsequent times (app was backgrounded):
      * call on_resume so the app can show its UI without re-initialising. */
-    target->state = APP_STATE_RUNNING;
+    target->state         = APP_STATE_RUNNING;
+    target->last_used_ms  = kernel_uptime_ms();
     if (fresh_launch) {
         ESP_LOGI(TAG, "Starting app '%s' (handle %d)", app_id, target->handle);
         if (target->entry->on_start) {
@@ -203,7 +249,8 @@ esp_err_t app_manager_switch_to(app_handle_t handle)
 
     /* Resume target */
     ESP_LOGI(TAG, "Resuming app '%s' (handle %d)", target->entry->manifest->id, handle);
-    target->state = APP_STATE_RUNNING;
+    target->state        = APP_STATE_RUNNING;
+    target->last_used_ms = kernel_uptime_ms();
     if (target->entry->on_resume) {
         target->entry->on_resume();
     }
@@ -276,5 +323,16 @@ esp_err_t app_manager_kill(app_handle_t handle)
     };
     event_publish(&ev);
 
+    return ESP_OK;
+}
+
+size_t app_manager_get_free_memory(void)
+{
+    return heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+}
+
+esp_err_t app_manager_evict_lru(void)
+{
+    evict_lru_app();
     return ESP_OK;
 }
