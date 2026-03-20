@@ -87,3 +87,8 @@ esp_err_t elf_loader_init(void) {
     printf("I (elf_loader) ELF loader disabled in simulator\n");
     return ESP_OK;
 }
+
+/* A7682E modem PPP stubs — no modem hardware in simulator */
+esp_err_t drv_a7682e_start_ppp(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t drv_a7682e_stop_ppp(void) { return ESP_OK; }
+bool drv_a7682e_ppp_connected(void) { return false; }

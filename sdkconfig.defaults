@@ -51,5 +51,9 @@ CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
 
+# PPP for cellular data (required by drv_modem_a7682e esp_modem backend)
+CONFIG_LWIP_PPP_SUPPORT=y
+CONFIG_LWIP_PPP_PAP_SUPPORT=y
+
 # Uncomment to run ThistleOS unit tests on boot instead of normal boot sequence
 # CONFIG_THISTLE_RUN_TESTS=y

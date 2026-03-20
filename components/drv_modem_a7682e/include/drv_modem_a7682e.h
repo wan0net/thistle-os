@@ -141,8 +141,42 @@ esp_err_t drv_a7682e_connect_tcp(const char *host, uint16_t port);
 /** @brief Send raw bytes over an open socket. */
 esp_err_t drv_a7682e_send_data(const uint8_t *data, size_t len);
 
-/** @brief Perform an HTTP GET request and store the body in buf. */
+/**
+ * @brief Perform an HTTP GET request and store the body in buf.
+ *
+ * With PPP active, prefer using esp_http_client directly — it routes through
+ * the PPP netif automatically, just like WiFi.
+ */
 esp_err_t drv_a7682e_http_get(const char *url, char *buf, size_t buf_len);
+
+/* -------------------------------------------------------------------------
+ * PPP data connection (routes ESP-IDF TCP/IP stack through 4G)
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Switch the modem to PPP data mode and obtain an IP address.
+ *
+ * After this returns ESP_OK, the entire ESP-IDF networking stack (sockets,
+ * esp_http_client, MQTT, …) is routed over the 4G connection — no
+ * application-level changes are needed beyond calling this function.
+ *
+ * @return ESP_OK on successful PPP link-up, ESP_ERR_TIMEOUT if no IP address
+ *         was obtained within 30 s, ESP_ERR_INVALID_STATE if modem is off.
+ */
+esp_err_t drv_a7682e_start_ppp(void);
+
+/**
+ * @brief Return the modem to AT command mode and tear down the PPP link.
+ *
+ * @return ESP_OK, or an ESP-IDF error if the mode switch failed.
+ */
+esp_err_t drv_a7682e_stop_ppp(void);
+
+/**
+ * @brief Return true if the PPP link is up and an IP address has been
+ *        assigned.
+ */
+bool drv_a7682e_ppp_connected(void);
 
 #ifdef __cplusplus
 }
