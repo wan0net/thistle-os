@@ -336,3 +336,14 @@ esp_err_t app_manager_evict_lru(void)
     evict_lru_app();
     return ESP_OK;
 }
+
+int app_manager_list_apps(const app_manifest_t **out, int max_count)
+{
+    int count = 0;
+    for (int i = 0; i < APP_SLOTS_MAX && count < max_count; i++) {
+        if (s_slots[i].entry && s_slots[i].entry->manifest) {
+            out[count++] = s_slots[i].entry->manifest;
+        }
+    }
+    return count;
+}

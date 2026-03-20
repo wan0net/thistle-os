@@ -63,3 +63,7 @@ size_t app_manager_get_free_memory(void);
 
 /* Manually trigger LRU eviction */
 esp_err_t app_manager_evict_lru(void);
+
+/* Get list of all registered app manifests.
+ * Returns count of apps written to out[] (up to max_count). */
+int app_manager_list_apps(const app_manifest_t **out, int max_count);
