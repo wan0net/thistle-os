@@ -2,12 +2,17 @@
  * SPDX-License-Identifier: BSD-3-Clause
  * ThistleOS — App Store UI
  *
- * Two tabs:
- *   Catalog  — browse and install apps from local catalog.json on SD card
+ * Three tabs:
+ *   Catalog  — browse and install apps from the live remote catalog
+ *   Firmware — firmware and driver updates from the catalog
  *   Installed — manage apps already in /sdcard/apps/
  *
- * Catalog is read from THISTLE_SDCARD/appstore/catalog.json.
- * Download is an MVP stub — shows a toast when connectivity is required.
+ * The catalog is loaded from the local cache at startup.
+ * "Refresh from Server" fetches the live catalog, saves it as the cache,
+ * and rebuilds both the Catalog and Firmware tab lists.
+ *
+ * Install button calls appstore_install_entry() which downloads, verifies
+ * SHA-256 hash, and verifies the Ed25519 signature.
  */
 #include "appstore/appstore_app.h"
 
@@ -15,6 +20,9 @@
 #include "ui/theme.h"
 #include "ui/toast.h"
 #include "thistle/app_manager.h"
+#include "thistle/appstore_client.h"
+#include "thistle/wifi_manager.h"
+#include "thistle/ota.h"
 
 #include "lvgl.h"
 #include "esp_log.h"
@@ -48,22 +56,9 @@ static const char *TAG = "appstore_ui";
 /* Data types                                                           */
 /* ------------------------------------------------------------------ */
 
-#define MAX_CATALOG_APPS 20
+#define MAX_CATALOG_APPS CATALOG_MAX_ENTRIES
 #define APPS_DIR         THISTLE_SDCARD "/apps"
 #define CATALOG_PATH     THISTLE_SDCARD "/appstore/catalog.json"
-
-typedef struct {
-    char     id[64];
-    char     name[32];
-    char     version[16];
-    char     author[32];
-    char     description[128];
-    char     permissions[64];   /* comma-separated list from JSON */
-    uint32_t size_kb;
-    bool     is_signed;
-    bool     is_installed;      /* true if APPS_DIR/<id>.app.elf exists */
-    char     download_url[128];
-} appstore_entry_t;
 
 /* Installed-app record (scanned from /sdcard/apps/) */
 #define MAX_INSTALLED_APPS 20
@@ -80,18 +75,27 @@ typedef struct {
 
 typedef enum {
     TAB_CATALOG,
+    TAB_FIRMWARE,
     TAB_INSTALLED,
 } appstore_tab_t;
 
 static struct {
     lv_obj_t *root;
 
+    /* Tab buttons */
+    lv_obj_t *cat_tab_btn;
+    lv_obj_t *fw_tab_btn;
+    lv_obj_t *inst_tab_btn;
+
     /* Catalog tab */
     lv_obj_t *catalog_screen;
     lv_obj_t *catalog_list;
     lv_obj_t *catalog_status_label;
-    lv_obj_t *cat_tab_btn;
-    lv_obj_t *inst_tab_btn;
+
+    /* Firmware tab */
+    lv_obj_t *firmware_screen;
+    lv_obj_t *firmware_list;
+    lv_obj_t *firmware_status_label;
 
     /* Detail sub-screen */
     lv_obj_t *detail_screen;
@@ -101,10 +105,10 @@ static struct {
     lv_obj_t *installed_list;
     lv_obj_t *installed_status_label;
 
-    /* Data */
-    appstore_entry_t  apps[MAX_CATALOG_APPS];
-    int               app_count;
-    int               selected_idx;
+    /* Catalog data (apps + drivers + firmware from both local and remote) */
+    catalog_entry_t  entries[MAX_CATALOG_APPS];
+    int              entry_count;
+    int              selected_idx;  /* index into entries[] */
 
     installed_entry_t installed[MAX_INSTALLED_APPS];
     int               installed_count;
@@ -158,7 +162,7 @@ static lv_obj_t *create_tab_button(lv_obj_t *parent, const char *label, bool act
     const theme_colors_t *tc = theme_get_colors();
 
     lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_size(btn, 90, 22);
+    lv_obj_set_size(btn, 80, 22);
     lv_obj_set_style_bg_color(btn, active ? tc->primary : tc->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(btn, tc->text, LV_PART_MAIN);
@@ -176,7 +180,7 @@ static lv_obj_t *create_tab_button(lv_obj_t *parent, const char *label, bool act
     return btn;
 }
 
-/* Standard action button used on detail screen */
+/* Standard action button used on detail/list screens */
 static lv_obj_t *create_action_button(lv_obj_t *parent, const char *label, int width)
 {
     const theme_colors_t *tc = theme_get_colors();
@@ -205,129 +209,17 @@ static lv_obj_t *create_action_button(lv_obj_t *parent, const char *label, int w
 }
 
 /* ------------------------------------------------------------------ */
-/* Minimal JSON parser helpers (strstr-based, same approach as theme.c)*/
-/* ------------------------------------------------------------------ */
-
-/* Extract string value for key from json text, writing into out[out_len]. */
-static bool json_get_string(const char *json, const char *key, char *out, size_t out_len)
-{
-    char search[80];
-    snprintf(search, sizeof(search), "\"%s\"", key);
-    const char *pos = strstr(json, search);
-    if (!pos) return false;
-
-    pos = strchr(pos + strlen(search), '"');
-    if (!pos) return false;
-    pos++; /* skip opening quote */
-
-    const char *end = strchr(pos, '"');
-    if (!end) return false;
-
-    size_t len = (size_t)(end - pos);
-    if (len >= out_len) len = out_len - 1;
-    memcpy(out, pos, len);
-    out[len] = '\0';
-    return true;
-}
-
-/* Extract integer value for key. */
-static bool json_get_int(const char *json, const char *key, int *out)
-{
-    char search[80];
-    snprintf(search, sizeof(search), "\"%s\"", key);
-    const char *pos = strstr(json, search);
-    if (!pos) return false;
-
-    pos = strchr(pos + strlen(search), ':');
-    if (!pos) return false;
-    pos++;
-    while (*pos == ' ') pos++;
-
-    *out = atoi(pos);
-    return true;
-}
-
-/* Extract boolean value ("true"/"false") for key. */
-static bool json_get_bool(const char *json, const char *key, bool *out)
-{
-    char search[80];
-    snprintf(search, sizeof(search), "\"%s\"", key);
-    const char *pos = strstr(json, search);
-    if (!pos) return false;
-
-    pos = strchr(pos + strlen(search), ':');
-    if (!pos) return false;
-    pos++;
-    while (*pos == ' ') pos++;
-
-    if (strncmp(pos, "true", 4) == 0) {
-        *out = true;
-        return true;
-    }
-    if (strncmp(pos, "false", 5) == 0) {
-        *out = false;
-        return true;
-    }
-    return false;
-}
-
-/*
- * Extract a JSON array of strings for key into out_buf (comma-joined).
- * Works for simple arrays like ["radio", "gps"] and [].
- */
-static void json_get_string_array(const char *json, const char *key,
-                                  char *out_buf, size_t out_len)
-{
-    out_buf[0] = '\0';
-
-    char search[80];
-    snprintf(search, sizeof(search), "\"%s\"", key);
-    const char *pos = strstr(json, search);
-    if (!pos) return;
-
-    pos = strchr(pos + strlen(search), '[');
-    if (!pos) return;
-    pos++; /* skip '[' */
-
-    /* Collect comma-joined strings until ']' */
-    size_t written = 0;
-    while (*pos && *pos != ']') {
-        /* Skip whitespace */
-        while (*pos == ' ' || *pos == '\n' || *pos == '\r' || *pos == '\t') pos++;
-        if (*pos == ']') break;
-        if (*pos == '"') {
-            pos++; /* skip quote */
-            const char *end = strchr(pos, '"');
-            if (!end) break;
-
-            if (written > 0 && written < out_len - 1) {
-                out_buf[written++] = ',';
-            }
-            size_t len = (size_t)(end - pos);
-            if (written + len >= out_len) len = out_len - written - 1;
-            memcpy(out_buf + written, pos, len);
-            written += len;
-            out_buf[written] = '\0';
-            pos = end + 1; /* skip closing quote */
-        } else {
-            pos++;
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
 /* Installed-app check                                                  */
 /* ------------------------------------------------------------------ */
 
 static bool app_is_installed(const char *app_id)
 {
-    char path[256];
+    char path[300];
     snprintf(path, sizeof(path), "%s/%s.app.elf", APPS_DIR, app_id);
     struct stat st;
     return (stat(path, &st) == 0);
 }
 
-/* Ensure the /sdcard/apps/ directory exists */
 static void ensure_apps_dir(void)
 {
     struct stat st;
@@ -341,16 +233,76 @@ static void ensure_apps_dir(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Catalog loading                                                      */
+/* Local catalog cache — save fetched catalog to SD card               */
 /* ------------------------------------------------------------------ */
 
-static esp_err_t load_catalog(void)
+/*
+ * Save a freshly-fetched catalog back to the local cache so that the
+ * app store can still show entries when the device is offline.
+ *
+ * We write a minimal JSON array: one flat object per entry, using only
+ * the fields that appstore_client.c's json_str/json_int helpers can read.
+ */
+static void save_catalog_cache(void)
 {
-    s_store.app_count = 0;
+    /* Ensure the appstore directory exists */
+    char dir[128];
+    snprintf(dir, sizeof(dir), "%s/appstore", THISTLE_SDCARD);
+    struct stat st;
+    if (stat(dir, &st) != 0) {
+        mkdir(dir, 0755);
+    }
+
+    FILE *f = fopen(CATALOG_PATH, "w");
+    if (!f) {
+        ESP_LOGW(TAG, "Cannot write catalog cache: %s", CATALOG_PATH);
+        return;
+    }
+
+    fprintf(f, "[\n");
+    for (int i = 0; i < s_store.entry_count; i++) {
+        const catalog_entry_t *e = &s_store.entries[i];
+        const char *type_str =
+            (e->type == CATALOG_TYPE_FIRMWARE) ? "firmware" :
+            (e->type == CATALOG_TYPE_DRIVER)   ? "driver"   : "app";
+
+        fprintf(f,
+            "    {\n"
+            "        \"id\": \"%s\",\n"
+            "        \"type\": \"%s\",\n"
+            "        \"name\": \"%s\",\n"
+            "        \"version\": \"%s\",\n"
+            "        \"author\": \"%s\",\n"
+            "        \"description\": \"%s\",\n"
+            "        \"size_bytes\": %u,\n"
+            "        \"url\": \"%s\",\n"
+            "        \"sig_url\": \"%s\",\n"
+            "        \"sha256\": \"%s\",\n"
+            "        \"permissions\": \"%s\",\n"
+            "        \"min_os_version\": \"%s\"\n"
+            "    }%s\n",
+            e->id, type_str, e->name, e->version, e->author,
+            e->description, (unsigned)e->size_bytes,
+            e->url, e->sig_url, e->sha256_hex,
+            e->permissions, e->min_os_version,
+            (i < s_store.entry_count - 1) ? "," : "");
+    }
+    fprintf(f, "]\n");
+    fclose(f);
+    ESP_LOGI(TAG, "Catalog cache saved: %d entries", s_store.entry_count);
+}
+
+/* ------------------------------------------------------------------ */
+/* Catalog loading from local cache                                     */
+/* ------------------------------------------------------------------ */
+
+static esp_err_t load_catalog_local(void)
+{
+    s_store.entry_count = 0;
 
     FILE *f = fopen(CATALOG_PATH, "r");
     if (!f) {
-        ESP_LOGW(TAG, "No catalog file at %s — place one on SD card", CATALOG_PATH);
+        ESP_LOGW(TAG, "No catalog cache at %s", CATALOG_PATH);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -363,10 +315,10 @@ static esp_err_t load_catalog(void)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    char *buf = (char *)malloc((size_t)fsize + 1);
+    char *buf = malloc((size_t)fsize + 1);
     if (!buf) {
         fclose(f);
-        ESP_LOGE(TAG, "OOM loading catalog");
+        ESP_LOGE(TAG, "OOM loading catalog cache");
         return ESP_ERR_NO_MEM;
     }
 
@@ -375,55 +327,95 @@ static esp_err_t load_catalog(void)
     fclose(f);
 
     /*
-     * Split entries on object boundaries.  Each catalog entry is a JSON
-     * object { ... }.  We find the start of each '{' and extract fields
-     * using json_get_string/int/bool within the object text.
+     * Re-use the same object-extraction approach as appstore_client.c:
+     * scan for '{' ... '}' pairs and parse fields with the inline helpers.
      */
-    const char *p = buf;
-    while (*p && s_store.app_count < MAX_CATALOG_APPS) {
-        /* Find next object open brace */
-        p = strchr(p, '{');
-        if (!p) break;
+    const char *cursor = buf;
+    while (s_store.entry_count < MAX_CATALOG_APPS) {
+        const char *obj_start = strchr(cursor, '{');
+        if (!obj_start) break;
 
-        /* Find matching closing brace */
-        const char *end = strchr(p, '}');
-        if (!end) break;
+        const char *obj_end = strchr(obj_start + 1, '}');
+        if (!obj_end) break;
 
-        /* Null-terminate a temporary copy of this object */
-        size_t obj_len = (size_t)(end - p) + 1;
-        char *obj = (char *)malloc(obj_len + 1);
+        size_t obj_len = (size_t)(obj_end - obj_start) + 1;
+        char  *obj     = malloc(obj_len + 1);
         if (!obj) break;
-        memcpy(obj, p, obj_len);
+        memcpy(obj, obj_start, obj_len);
         obj[obj_len] = '\0';
 
-        appstore_entry_t *e = &s_store.apps[s_store.app_count];
+        catalog_entry_t *e = &s_store.entries[s_store.entry_count];
         memset(e, 0, sizeof(*e));
 
-        int size_val = 0;
-        json_get_string(obj, "id",          e->id,           sizeof(e->id));
-        json_get_string(obj, "name",        e->name,         sizeof(e->name));
-        json_get_string(obj, "version",     e->version,      sizeof(e->version));
-        json_get_string(obj, "author",      e->author,       sizeof(e->author));
-        json_get_string(obj, "description", e->description,  sizeof(e->description));
-        json_get_string(obj, "download_url",e->download_url, sizeof(e->download_url));
-        json_get_string_array(obj, "permissions", e->permissions, sizeof(e->permissions));
-        json_get_int(obj,  "size_kb",    &size_val);
-        json_get_bool(obj, "signed",     &e->is_signed);
+        /* Reuse the same minimal inline JSON helpers */
+        #define _STR(k, f) do { \
+            char _s[80]; snprintf(_s, sizeof(_s), "\"%s\"", k); \
+            const char *_p = strstr(obj, _s); \
+            if (_p) { \
+                _p = strchr(_p + strlen(_s), '"'); \
+                if (_p) { _p++; const char *_e = strchr(_p, '"'); \
+                    if (_e) { size_t _l = (size_t)(_e-_p); \
+                        if (_l >= sizeof(e->f)) _l = sizeof(e->f)-1; \
+                        memcpy(e->f, _p, _l); e->f[_l] = '\0'; } } } \
+        } while(0)
 
-        e->size_kb = (uint32_t)size_val;
-        e->is_installed = (e->id[0] != '\0') && app_is_installed(e->id);
+        _STR("id",           id);
+        _STR("name",         name);
+        _STR("version",      version);
+        _STR("author",       author);
+        _STR("description",  description);
+        _STR("url",          url);
+        _STR("sig_url",      sig_url);
+        _STR("sha256",       sha256_hex);
+        _STR("permissions",  permissions);
+        _STR("min_os_version", min_os_version);
 
-        if (e->id[0] != '\0' && e->name[0] != '\0') {
-            s_store.app_count++;
+        #undef _STR
+
+        /* size_bytes */
+        {
+            const char *p = strstr(obj, "\"size_bytes\"");
+            if (p) {
+                p = strchr(p + 12, ':');
+                if (p) { p++; while (*p == ' ') p++; e->size_bytes = (uint32_t)atoi(p); }
+            }
         }
 
+        /* type */
+        char type_str[16] = {0};
+        {
+            const char *p = strstr(obj, "\"type\"");
+            if (p) {
+                p = strchr(p + 6, '"');
+                if (p) {
+                    p++;
+                    const char *end = strchr(p, '"');
+                    if (end) {
+                        size_t len = (size_t)(end - p);
+                        if (len >= sizeof(type_str)) len = sizeof(type_str) - 1;
+                        memcpy(type_str, p, len);
+                        type_str[len] = '\0';
+                    }
+                }
+            }
+        }
+        if (strcmp(type_str, "firmware") == 0)   e->type = CATALOG_TYPE_FIRMWARE;
+        else if (strcmp(type_str, "driver") == 0) e->type = CATALOG_TYPE_DRIVER;
+        else                                       e->type = CATALOG_TYPE_APP;
+
+        e->is_signed    = (e->sig_url[0] != '\0');
+        e->is_installed = (e->id[0] != '\0') && app_is_installed(e->id);
+
         free(obj);
-        p = end + 1;
+
+        if (e->id[0] != '\0' && e->name[0] != '\0') {
+            s_store.entry_count++;
+        }
+        cursor = obj_end + 1;
     }
 
     free(buf);
-
-    ESP_LOGI(TAG, "Catalog loaded: %d apps", s_store.app_count);
+    ESP_LOGI(TAG, "Loaded %d entries from local cache", s_store.entry_count);
     return ESP_OK;
 }
 
@@ -445,7 +437,6 @@ static void scan_installed_apps(void)
     while ((ent = readdir(d)) != NULL && s_store.installed_count < MAX_INSTALLED_APPS) {
         if (ent->d_type != DT_REG && ent->d_type != DT_UNKNOWN) continue;
 
-        /* Only *.app.elf files */
         const char *dot = strstr(ent->d_name, ".app.elf");
         if (!dot) continue;
 
@@ -453,13 +444,11 @@ static void scan_installed_apps(void)
         strncpy(inst->filename, ent->d_name, sizeof(inst->filename) - 1);
         inst->filename[sizeof(inst->filename) - 1] = '\0';
 
-        /* Display name: strip ".app.elf" suffix */
         strncpy(inst->display_name, ent->d_name, sizeof(inst->display_name) - 1);
         inst->display_name[sizeof(inst->display_name) - 1] = '\0';
         char *suffix = strstr(inst->display_name, ".app.elf");
         if (suffix) *suffix = '\0';
 
-        /* Get file size */
         char full_path[512];
         snprintf(full_path, sizeof(full_path), "%s/%s", APPS_DIR, ent->d_name);
         struct stat st;
@@ -480,9 +469,11 @@ static void scan_installed_apps(void)
 /* ------------------------------------------------------------------ */
 
 static void show_catalog(void);
+static void show_firmware(void);
 static void show_installed(void);
 static void show_detail(int idx);
 static void build_catalog_list(void);
+static void build_firmware_list(void);
 static void build_installed_list(void);
 
 /* ------------------------------------------------------------------ */
@@ -496,6 +487,13 @@ static void tab_catalog_cb(lv_event_t *e)
     show_catalog();
 }
 
+static void tab_firmware_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_store.current_tab == TAB_FIRMWARE) return;
+    show_firmware();
+}
+
 static void tab_installed_cb(lv_event_t *e)
 {
     (void)e;
@@ -504,7 +502,7 @@ static void tab_installed_cb(lv_event_t *e)
 }
 
 /* ------------------------------------------------------------------ */
-/* Catalog detail screen                                               */
+/* Detail screen                                                        */
 /* ------------------------------------------------------------------ */
 
 static void back_to_catalog_cb(lv_event_t *e)
@@ -517,47 +515,106 @@ static void back_to_catalog_cb(lv_event_t *e)
     if (s_store.current_tab == TAB_CATALOG && s_store.catalog_screen) {
         lv_obj_remove_flag(s_store.catalog_screen, LV_OBJ_FLAG_HIDDEN);
     }
+    if (s_store.current_tab == TAB_FIRMWARE && s_store.firmware_screen) {
+        lv_obj_remove_flag(s_store.firmware_screen, LV_OBJ_FLAG_HIDDEN);
+    }
     if (s_store.current_tab == TAB_INSTALLED && s_store.installed_screen) {
         lv_obj_remove_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Install / remove callbacks                                           */
+/* ------------------------------------------------------------------ */
+
 static void install_btn_cb(lv_event_t *e)
 {
     (void)e;
     int idx = s_store.selected_idx;
-    if (idx < 0 || idx >= s_store.app_count) return;
+    if (idx < 0 || idx >= s_store.entry_count) return;
 
-    appstore_entry_t *app = &s_store.apps[idx];
+    catalog_entry_t *entry = &s_store.entries[idx];
 
-    /* Check if already installed */
-    app->is_installed = app_is_installed(app->id);
-    if (app->is_installed) {
+    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
+        toast_warn("Connect to WiFi first");
+        return;
+    }
+
+    /* Re-check installed state */
+    if (entry->type == CATALOG_TYPE_APP && app_is_installed(entry->id)) {
         toast_info("Already installed");
         return;
     }
 
-    /* MVP: network download not yet implemented */
-    toast_warn("Download requires network connection");
-    ESP_LOGI(TAG, "Would download: %s", app->download_url);
+    toast_show("Downloading...", TOAST_INFO, 30000);
+
+    esp_err_t ret = appstore_install_entry(entry, NULL, NULL);
+    if (ret == ESP_OK) {
+        toast_show("Installed!", TOAST_SUCCESS, 3000);
+        entry->is_installed = true;
+        /* Go back and refresh the list so the [i] badge appears */
+        back_to_catalog_cb(NULL);
+        build_catalog_list();
+    } else if (ret == ESP_ERR_INVALID_CRC) {
+        toast_warn("Download corrupted or signature invalid!");
+    } else if (ret == ESP_ERR_NOT_SUPPORTED) {
+        toast_warn("Downloads not available in simulator");
+    } else {
+        toast_warn("Download failed");
+    }
+}
+
+/* "Update OS" button — shown only for CATALOG_TYPE_FIRMWARE entries */
+static void ota_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    int idx = s_store.selected_idx;
+    if (idx < 0 || idx >= s_store.entry_count) return;
+
+    catalog_entry_t *entry = &s_store.entries[idx];
+    if (entry->type != CATALOG_TYPE_FIRMWARE) return;
+
+    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
+        toast_warn("Connect to WiFi first");
+        return;
+    }
+
+    toast_show("Downloading firmware...", TOAST_INFO, 60000);
+
+    esp_err_t ret = appstore_install_entry(entry, NULL, NULL);
+    if (ret == ESP_OK) {
+        /* File is now at /sdcard/update/thistle_os.bin — apply via OTA */
+        toast_show("Applying update, rebooting...", TOAST_SUCCESS, 5000);
+        esp_err_t ota_ret = ota_apply_from_sd(NULL, NULL);
+        if (ota_ret != ESP_OK) {
+            toast_warn("OTA apply failed");
+            ESP_LOGE(TAG, "ota_apply_from_sd: %s", esp_err_to_name(ota_ret));
+        }
+        /* ota_apply_from_sd reboots on success, so we won't reach here */
+    } else if (ret == ESP_ERR_INVALID_CRC) {
+        toast_warn("Firmware corrupted or signature invalid!");
+    } else if (ret == ESP_ERR_NOT_SUPPORTED) {
+        toast_warn("Downloads not available in simulator");
+    } else {
+        toast_warn("Firmware download failed");
+    }
 }
 
 static void remove_btn_cb(lv_event_t *e)
 {
     (void)e;
     int idx = s_store.selected_idx;
-    if (idx < 0 || idx >= s_store.app_count) return;
+    if (idx < 0 || idx >= s_store.entry_count) return;
 
-    appstore_entry_t *app = &s_store.apps[idx];
+    catalog_entry_t *entry = &s_store.entries[idx];
 
-    char path[256];
-    snprintf(path, sizeof(path), "%s/%s.app.elf", APPS_DIR, app->id);
+    char path[300];
+    snprintf(path, sizeof(path), "%s/%s.app.elf", APPS_DIR, entry->id);
 
     if (remove(path) == 0) {
-        app->is_installed = false;
+        entry->is_installed = false;
         toast_show("App removed", TOAST_SUCCESS, 2000);
         ESP_LOGI(TAG, "Removed: %s", path);
-        /* Go back and refresh the catalog list */
         back_to_catalog_cb(NULL);
         build_catalog_list();
     } else {
@@ -568,11 +625,11 @@ static void remove_btn_cb(lv_event_t *e)
 
 static void remove_installed_btn_cb(lv_event_t *e)
 {
-    lv_obj_t *btn  = lv_event_get_target(e);
-    const char *fn = (const char *)lv_obj_get_user_data(btn);
+    lv_obj_t    *btn = lv_event_get_target(e);
+    const char  *fn  = (const char *)lv_obj_get_user_data(btn);
     if (!fn) return;
 
-    char path[256];
+    char path[300];
     snprintf(path, sizeof(path), "%s/%s", APPS_DIR, fn);
 
     if (remove(path) == 0) {
@@ -585,27 +642,31 @@ static void remove_installed_btn_cb(lv_event_t *e)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Show detail screen (shared by Catalog and Firmware tabs)            */
+/* ------------------------------------------------------------------ */
+
 static void show_detail(int idx)
 {
-    if (idx < 0 || idx >= s_store.app_count) return;
+    if (idx < 0 || idx >= s_store.entry_count) return;
 
     s_store.selected_idx = idx;
-    const appstore_entry_t *app = &s_store.apps[idx];
+    const catalog_entry_t *entry = &s_store.entries[idx];
 
     const theme_colors_t *tc = theme_get_colors();
 
-    /* Hide the current tab screen */
+    /* Hide the active tab screen */
     if (s_store.catalog_screen)  lv_obj_add_flag(s_store.catalog_screen,  LV_OBJ_FLAG_HIDDEN);
+    if (s_store.firmware_screen) lv_obj_add_flag(s_store.firmware_screen, LV_OBJ_FLAG_HIDDEN);
     if (s_store.installed_screen) lv_obj_add_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
 
-    /* Build detail screen */
     lv_obj_t *screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(screen, 0, 0);
     lv_obj_set_size(screen, APP_AREA_W, APP_AREA_H);
     style_panel(screen);
     s_store.detail_screen = screen;
 
-    /* Title bar: "< Back" */
+    /* Title bar — "< Back" */
     lv_obj_t *title_bar = lv_obj_create(screen);
     lv_obj_set_pos(title_bar, 0, 0);
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
@@ -622,7 +683,7 @@ static void show_detail(int idx)
     lv_obj_set_style_text_color(back_lbl, lv_color_white(), LV_STATE_PRESSED);
     lv_obj_align(back_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-    /* Scrollable content area */
+    /* Scrollable content */
     lv_obj_t *content = lv_obj_create(screen);
     lv_obj_set_pos(content, 0, TITLE_BAR_H);
     lv_obj_set_size(content, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
@@ -640,41 +701,55 @@ static void show_detail(int idx)
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);
 
-    /* App name (larger font) */
+    /* App / firmware name */
     lv_obj_t *name_lbl = lv_label_create(content);
-    lv_label_set_text(name_lbl, app->name);
+    lv_label_set_text(name_lbl, entry->name);
     lv_obj_set_width(name_lbl, LV_PCT(100));
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, tc->text, LV_PART_MAIN);
 
     create_separator(content);
 
-    /* Meta info rows */
-    char line[160];
+    char line[192];
 
-    snprintf(line, sizeof(line), "Version: %s", app->version);
+    /* Type badge */
+    const char *type_label =
+        (entry->type == CATALOG_TYPE_FIRMWARE) ? "Type: Firmware Update" :
+        (entry->type == CATALOG_TYPE_DRIVER)   ? "Type: Driver"          : "Type: App";
+    lv_obj_t *type_lbl = lv_label_create(content);
+    lv_label_set_text(type_lbl, type_label);
+    lv_obj_set_width(type_lbl, LV_PCT(100));
+    lv_obj_set_style_text_font(type_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(type_lbl, tc->primary, LV_PART_MAIN);
+
+    snprintf(line, sizeof(line), "Version: %s", entry->version);
     lv_obj_t *ver_lbl = lv_label_create(content);
     lv_label_set_text(ver_lbl, line);
     lv_obj_set_width(ver_lbl, LV_PCT(100));
     lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(ver_lbl, tc->text, LV_PART_MAIN);
 
-    snprintf(line, sizeof(line), "Author: %s", app->author);
+    snprintf(line, sizeof(line), "Author: %s", entry->author);
     lv_obj_t *auth_lbl = lv_label_create(content);
     lv_label_set_text(auth_lbl, line);
     lv_obj_set_width(auth_lbl, LV_PCT(100));
     lv_obj_set_style_text_font(auth_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(auth_lbl, tc->text, LV_PART_MAIN);
 
-    snprintf(line, sizeof(line), "Size: %u KB", (unsigned)app->size_kb);
+    if (entry->size_bytes > 0) {
+        uint32_t kb = (entry->size_bytes + 1023) / 1024;
+        snprintf(line, sizeof(line), "Size: %u KB", (unsigned)kb);
+    } else {
+        snprintf(line, sizeof(line), "Size: unknown");
+    }
     lv_obj_t *size_lbl = lv_label_create(content);
     lv_label_set_text(size_lbl, line);
     lv_obj_set_width(size_lbl, LV_PCT(100));
     lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(size_lbl, tc->text, LV_PART_MAIN);
 
-    if (app->permissions[0] != '\0') {
-        snprintf(line, sizeof(line), "Permissions: %s", app->permissions);
+    if (entry->permissions[0] != '\0') {
+        snprintf(line, sizeof(line), "Permissions: %s", entry->permissions);
     } else {
         snprintf(line, sizeof(line), "Permissions: none");
     }
@@ -684,7 +759,7 @@ static void show_detail(int idx)
     lv_obj_set_style_text_font(perm_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(perm_lbl, tc->text, LV_PART_MAIN);
 
-    snprintf(line, sizeof(line), "Signed: %s", app->is_signed ? "Yes" : "No");
+    snprintf(line, sizeof(line), "Signed: %s", entry->is_signed ? "Yes" : "No");
     lv_obj_t *sign_lbl = lv_label_create(content);
     lv_label_set_text(sign_lbl, line);
     lv_obj_set_width(sign_lbl, LV_PCT(100));
@@ -693,9 +768,8 @@ static void show_detail(int idx)
 
     create_separator(content);
 
-    /* Description */
     lv_obj_t *desc_lbl = lv_label_create(content);
-    lv_label_set_text(desc_lbl, app->description);
+    lv_label_set_text(desc_lbl, entry->description);
     lv_obj_set_width(desc_lbl, LV_PCT(100));
     lv_obj_set_style_text_font(desc_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(desc_lbl, tc->text_secondary, LV_PART_MAIN);
@@ -703,7 +777,7 @@ static void show_detail(int idx)
 
     create_separator(content);
 
-    /* Action buttons row */
+    /* Action buttons */
     lv_obj_t *btn_row = lv_obj_create(content);
     lv_obj_set_size(btn_row, LV_PCT(100), 34);
     lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -712,17 +786,24 @@ static void show_detail(int idx)
     lv_obj_set_style_radius(btn_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Re-check installed state */
-    bool installed = app_is_installed(app->id);
+    if (entry->type == CATALOG_TYPE_FIRMWARE || entry->type == CATALOG_TYPE_DRIVER) {
+        /* Firmware / driver: single "Update OS" or "Install Driver" button */
+        const char *btn_label = (entry->type == CATALOG_TYPE_FIRMWARE) ?
+                                "Update OS" : "Install Driver";
+        lv_obj_t *ota_btn = create_action_button(btn_row, btn_label, 120);
+        lv_obj_align(ota_btn, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_add_event_cb(ota_btn, ota_btn_cb, LV_EVENT_CLICKED, NULL);
+    } else {
+        /* App: Install + optionally Remove */
+        lv_obj_t *install_btn = create_action_button(btn_row, "Install", 100);
+        lv_obj_align(install_btn, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_add_event_cb(install_btn, install_btn_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *install_btn = create_action_button(btn_row, "Install", 100);
-    lv_obj_align(install_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_add_event_cb(install_btn, install_btn_cb, LV_EVENT_CLICKED, NULL);
-
-    if (installed) {
-        lv_obj_t *remove_btn = create_action_button(btn_row, "Remove", 100);
-        lv_obj_align(remove_btn, LV_ALIGN_LEFT_MID, 110, 0);
-        lv_obj_add_event_cb(remove_btn, remove_btn_cb, LV_EVENT_CLICKED, NULL);
+        if (app_is_installed(entry->id)) {
+            lv_obj_t *remove_btn = create_action_button(btn_row, "Remove", 100);
+            lv_obj_align(remove_btn, LV_ALIGN_LEFT_MID, 110, 0);
+            lv_obj_add_event_cb(remove_btn, remove_btn_cb, LV_EVENT_CLICKED, NULL);
+        }
     }
 }
 
@@ -732,13 +813,13 @@ static void show_detail(int idx)
 
 static void catalog_row_clicked_cb(lv_event_t *e)
 {
-    lv_obj_t *row = lv_event_get_target(e);
-    intptr_t idx = (intptr_t)lv_obj_get_user_data(row);
+    lv_obj_t *row  = lv_event_get_target(e);
+    intptr_t  idx  = (intptr_t)lv_obj_get_user_data(row);
     show_detail((int)idx);
 }
 
 /* ------------------------------------------------------------------ */
-/* Build catalog list                                                   */
+/* Build catalog list (apps + drivers only)                            */
 /* ------------------------------------------------------------------ */
 
 static void build_catalog_list(void)
@@ -749,9 +830,16 @@ static void build_catalog_list(void)
 
     const theme_colors_t *tc = theme_get_colors();
 
-    if (s_store.app_count == 0) {
+    /* Count non-firmware entries */
+    int app_count = 0;
+    for (int i = 0; i < s_store.entry_count; i++) {
+        if (s_store.entries[i].type != CATALOG_TYPE_FIRMWARE) app_count++;
+    }
+
+    if (app_count == 0) {
         lv_obj_t *empty_lbl = lv_label_create(s_store.catalog_list);
-        lv_label_set_text(empty_lbl, "No apps in catalog.\nPlace catalog.json on SD card.");
+        lv_label_set_text(empty_lbl,
+            "No apps in catalog.\nRefresh from server or place catalog.json on SD card.");
         lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(empty_lbl, tc->text, LV_PART_MAIN);
         lv_obj_set_style_pad_all(empty_lbl, 8, LV_PART_MAIN);
@@ -760,10 +848,10 @@ static void build_catalog_list(void)
         return;
     }
 
-    for (int i = 0; i < s_store.app_count; i++) {
-        const appstore_entry_t *app = &s_store.apps[i];
+    for (int i = 0; i < s_store.entry_count; i++) {
+        const catalog_entry_t *e = &s_store.entries[i];
+        if (e->type == CATALOG_TYPE_FIRMWARE) continue;
 
-        /* Row container */
         lv_obj_t *row = lv_obj_create(s_store.catalog_list);
         lv_obj_set_size(row, LV_PCT(100), ITEM_H);
         lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
@@ -778,21 +866,18 @@ static void build_catalog_list(void)
         lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-
-        /* Store index for click callback */
         lv_obj_set_user_data(row, (void *)(intptr_t)i);
         lv_obj_add_event_cb(row, catalog_row_clicked_cb, LV_EVENT_CLICKED, NULL);
 
-        /* Top line: "> Name   v1.0.0" */
-        char top_line[64];
-        snprintf(top_line, sizeof(top_line), "> %s%s   %s",
-                 app->name,
-                 app->is_installed ? " [i]" : "",
-                 app->version);
-
-        /* Use flex column layout so name and description stack vertically */
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(row, 2, LV_PART_MAIN);
+
+        char top_line[80];
+        snprintf(top_line, sizeof(top_line), "> %s%s%s   %s",
+                 e->name,
+                 e->is_installed ? " [i]" : "",
+                 (e->type == CATALOG_TYPE_DRIVER) ? " [drv]" : "",
+                 e->version);
 
         lv_obj_t *name_lbl = lv_label_create(row);
         lv_label_set_text(name_lbl, top_line);
@@ -802,7 +887,7 @@ static void build_catalog_list(void)
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
 
         lv_obj_t *desc_lbl = lv_label_create(row);
-        lv_label_set_text(desc_lbl, app->description);
+        lv_label_set_text(desc_lbl, e->description);
         lv_obj_set_width(desc_lbl, LV_PCT(100));
         lv_obj_set_style_text_font(desc_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(desc_lbl, tc->text_secondary, LV_PART_MAIN);
@@ -811,28 +896,204 @@ static void build_catalog_list(void)
         create_separator(s_store.catalog_list);
     }
 
-    /* Update status label */
     if (s_store.catalog_status_label) {
-        char status[64];
-        snprintf(status, sizeof(status), "Catalog loaded (%d apps)", s_store.app_count);
+        char status[80];
+        snprintf(status, sizeof(status), "Catalog: %d app(s)", app_count);
         lv_label_set_text(s_store.catalog_status_label, status);
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Refresh catalog callback                                             */
+/* Build firmware list (CATALOG_TYPE_FIRMWARE entries only)            */
 /* ------------------------------------------------------------------ */
 
-static void refresh_catalog_cb(lv_event_t *e)
+static void build_firmware_list(void)
+{
+    if (!s_store.firmware_list) return;
+
+    lv_obj_clean(s_store.firmware_list);
+
+    const theme_colors_t *tc = theme_get_colors();
+
+    int fw_count = 0;
+    for (int i = 0; i < s_store.entry_count; i++) {
+        if (s_store.entries[i].type == CATALOG_TYPE_FIRMWARE) fw_count++;
+    }
+
+    if (fw_count == 0) {
+        lv_obj_t *empty_lbl = lv_label_create(s_store.firmware_list);
+        lv_label_set_text(empty_lbl,
+            "No firmware updates available.\nRefresh from server to check.");
+        lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(empty_lbl, tc->text, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(empty_lbl, 8, LV_PART_MAIN);
+        lv_label_set_long_mode(empty_lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(empty_lbl, APP_AREA_W - 16);
+
+        /* Current version info */
+        char ver_line[64];
+        snprintf(ver_line, sizeof(ver_line), "Running: %s (%s)",
+                 ota_get_current_version(), ota_get_running_partition());
+        lv_obj_t *ver_lbl = lv_label_create(s_store.firmware_list);
+        lv_label_set_text(ver_lbl, ver_line);
+        lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(ver_lbl, tc->text_secondary, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(ver_lbl, 8, LV_PART_MAIN);
+        return;
+    }
+
+    /* Current version row */
+    {
+        char ver_line[80];
+        snprintf(ver_line, sizeof(ver_line), "Running: v%s  [%s]",
+                 ota_get_current_version(), ota_get_running_partition());
+        lv_obj_t *ver_lbl = lv_label_create(s_store.firmware_list);
+        lv_label_set_text(ver_lbl, ver_line);
+        lv_obj_set_style_text_font(ver_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(ver_lbl, tc->text_secondary, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(ver_lbl, ITEM_PAD_LEFT, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(ver_lbl, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(ver_lbl, 4, LV_PART_MAIN);
+        create_separator(s_store.firmware_list);
+    }
+
+    for (int i = 0; i < s_store.entry_count; i++) {
+        const catalog_entry_t *e = &s_store.entries[i];
+        if (e->type != CATALOG_TYPE_FIRMWARE) continue;
+
+        lv_obj_t *row = lv_obj_create(s_store.firmware_list);
+        lv_obj_set_size(row, LV_PCT(100), ITEM_H);
+        lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, tc->primary, LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+        lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(row, 3, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(row, 3, LV_PART_MAIN);
+        lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_user_data(row, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(row, catalog_row_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(row, 2, LV_PART_MAIN);
+
+        char top_line[80];
+        snprintf(top_line, sizeof(top_line), "> %s  v%s", e->name, e->version);
+
+        lv_obj_t *name_lbl = lv_label_create(row);
+        lv_label_set_text(name_lbl, top_line);
+        lv_obj_set_width(name_lbl, LV_PCT(100));
+        lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(name_lbl, tc->text, LV_PART_MAIN);
+        lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+
+        lv_obj_t *desc_lbl = lv_label_create(row);
+        lv_label_set_text(desc_lbl, e->description);
+        lv_obj_set_width(desc_lbl, LV_PCT(100));
+        lv_obj_set_style_text_font(desc_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(desc_lbl, tc->text_secondary, LV_PART_MAIN);
+        lv_label_set_long_mode(desc_lbl, LV_LABEL_LONG_DOT);
+
+        create_separator(s_store.firmware_list);
+    }
+
+    if (s_store.firmware_status_label) {
+        char status[80];
+        snprintf(status, sizeof(status), "%d firmware update(s) available", fw_count);
+        lv_label_set_text(s_store.firmware_status_label, status);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Refresh from server callback                                         */
+/* ------------------------------------------------------------------ */
+
+static void refresh_server_cb(lv_event_t *e)
+{
+    (void)e;
+
+    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
+        toast_warn("Connect to WiFi first");
+        if (s_store.catalog_status_label) {
+            lv_label_set_text(s_store.catalog_status_label, "WiFi not connected");
+        }
+        return;
+    }
+
+    if (s_store.catalog_status_label) {
+        lv_label_set_text(s_store.catalog_status_label, "Fetching catalog...");
+    }
+
+    catalog_entry_t fetched[CATALOG_MAX_ENTRIES];
+    int count = 0;
+
+    esp_err_t err = appstore_fetch_catalog(NULL, fetched, CATALOG_MAX_ENTRIES, &count);
+
+    if (err == ESP_OK && count > 0) {
+        /* Replace in-memory catalog with the fresh data */
+        memcpy(s_store.entries, fetched, sizeof(catalog_entry_t) * (size_t)count);
+        s_store.entry_count = count;
+
+        /* Mark installed state */
+        for (int i = 0; i < s_store.entry_count; i++) {
+            catalog_entry_t *en = &s_store.entries[i];
+            en->is_installed = (en->type == CATALOG_TYPE_APP) && app_is_installed(en->id);
+        }
+
+        /* Persist as local cache */
+        save_catalog_cache();
+
+        build_catalog_list();
+        build_firmware_list();
+        toast_show("Catalog updated", TOAST_SUCCESS, 2000);
+
+        if (s_store.catalog_status_label) {
+            char status[80];
+            snprintf(status, sizeof(status), "Fetched %d entries from server", count);
+            lv_label_set_text(s_store.catalog_status_label, status);
+        }
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        /* Simulator build */
+        if (s_store.catalog_status_label) {
+            lv_label_set_text(s_store.catalog_status_label, "Network N/A (simulator)");
+        }
+        toast_warn("Downloads not available in simulator");
+    } else {
+        /* Network error — fall back to local cache */
+        ESP_LOGW(TAG, "Server fetch failed (%s), using local cache",
+                 esp_err_to_name(err));
+        esp_err_t load_err = load_catalog_local();
+        build_catalog_list();
+        build_firmware_list();
+
+        if (s_store.catalog_status_label) {
+            lv_label_set_text(s_store.catalog_status_label,
+                              (load_err == ESP_OK) ? "Server failed — showing cache"
+                                                   : "Server failed — no cache");
+        }
+        toast_warn("Server unavailable — showing cached catalog");
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Refresh from local cache callback                                    */
+/* ------------------------------------------------------------------ */
+
+static void refresh_local_cb(lv_event_t *e)
 {
     (void)e;
 
     if (s_store.catalog_status_label) {
-        lv_label_set_text(s_store.catalog_status_label, "Loading...");
+        lv_label_set_text(s_store.catalog_status_label, "Loading cache...");
     }
 
-    esp_err_t err = load_catalog();
+    esp_err_t err = load_catalog_local();
     build_catalog_list();
+    build_firmware_list();
 
     if (err == ESP_ERR_NOT_FOUND) {
         if (s_store.catalog_status_label) {
@@ -885,10 +1146,10 @@ static void build_installed_list(void)
         lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
-        /* Name + size */
         char info[80];
         if (inst->size_kb > 0) {
-            snprintf(info, sizeof(info), "%s  (%u KB)", inst->display_name, (unsigned)inst->size_kb);
+            snprintf(info, sizeof(info), "%s  (%u KB)",
+                     inst->display_name, (unsigned)inst->size_kb);
         } else {
             snprintf(info, sizeof(info), "%s", inst->display_name);
         }
@@ -901,7 +1162,6 @@ static void build_installed_list(void)
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(name_lbl, APP_AREA_W - ITEM_PAD_LEFT - ITEM_PAD_RIGHT - 70);
 
-        /* Remove button — stores filename as user_data */
         lv_obj_t *rem_btn = create_action_button(row, "Remove", 65);
         lv_obj_align(rem_btn, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_set_user_data(rem_btn, (void *)inst->filename);
@@ -918,25 +1178,24 @@ static void build_installed_list(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Show catalog tab                                                     */
+/* Tab-switch implementations                                           */
 /* ------------------------------------------------------------------ */
 
 static void update_tab_button_styles(void)
 {
     const theme_colors_t *tc = theme_get_colors();
 
-    if (s_store.cat_tab_btn) {
-        bool active = (s_store.current_tab == TAB_CATALOG);
-        lv_obj_set_style_bg_color(s_store.cat_tab_btn, active ? tc->primary : tc->surface, LV_PART_MAIN);
-        /* Update child label color */
-        lv_obj_t *lbl = lv_obj_get_child(s_store.cat_tab_btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, active ? lv_color_white() : tc->text, LV_PART_MAIN);
-    }
-    if (s_store.inst_tab_btn) {
-        bool active = (s_store.current_tab == TAB_INSTALLED);
-        lv_obj_set_style_bg_color(s_store.inst_tab_btn, active ? tc->primary : tc->surface, LV_PART_MAIN);
-        lv_obj_t *lbl = lv_obj_get_child(s_store.inst_tab_btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, active ? lv_color_white() : tc->text, LV_PART_MAIN);
+    lv_obj_t *btns[3] = { s_store.cat_tab_btn, s_store.fw_tab_btn, s_store.inst_tab_btn };
+    appstore_tab_t tabs[3] = { TAB_CATALOG, TAB_FIRMWARE, TAB_INSTALLED };
+
+    for (int i = 0; i < 3; i++) {
+        if (!btns[i]) continue;
+        bool active = (s_store.current_tab == tabs[i]);
+        lv_obj_set_style_bg_color(btns[i], active ? tc->primary : tc->surface, LV_PART_MAIN);
+        lv_obj_t *lbl = lv_obj_get_child(btns[i], 0);
+        if (lbl) {
+            lv_obj_set_style_text_color(lbl, active ? lv_color_white() : tc->text, LV_PART_MAIN);
+        }
     }
 }
 
@@ -945,12 +1204,19 @@ static void show_catalog(void)
     s_store.current_tab = TAB_CATALOG;
     update_tab_button_styles();
 
-    if (s_store.installed_screen) {
-        lv_obj_add_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (s_store.catalog_screen) {
-        lv_obj_remove_flag(s_store.catalog_screen, LV_OBJ_FLAG_HIDDEN);
-    }
+    if (s_store.firmware_screen)  lv_obj_add_flag(s_store.firmware_screen,  LV_OBJ_FLAG_HIDDEN);
+    if (s_store.installed_screen) lv_obj_add_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
+    if (s_store.catalog_screen)   lv_obj_remove_flag(s_store.catalog_screen, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_firmware(void)
+{
+    s_store.current_tab = TAB_FIRMWARE;
+    update_tab_button_styles();
+
+    if (s_store.catalog_screen)   lv_obj_add_flag(s_store.catalog_screen,   LV_OBJ_FLAG_HIDDEN);
+    if (s_store.installed_screen) lv_obj_add_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
+    if (s_store.firmware_screen)  lv_obj_remove_flag(s_store.firmware_screen, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_installed(void)
@@ -958,15 +1224,62 @@ static void show_installed(void)
     s_store.current_tab = TAB_INSTALLED;
     update_tab_button_styles();
 
-    if (s_store.catalog_screen) {
-        lv_obj_add_flag(s_store.catalog_screen, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (s_store.installed_screen) {
-        lv_obj_remove_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
-    }
+    if (s_store.catalog_screen)   lv_obj_add_flag(s_store.catalog_screen,   LV_OBJ_FLAG_HIDDEN);
+    if (s_store.firmware_screen)  lv_obj_add_flag(s_store.firmware_screen,  LV_OBJ_FLAG_HIDDEN);
+    if (s_store.installed_screen) lv_obj_remove_flag(s_store.installed_screen, LV_OBJ_FLAG_HIDDEN);
 
     scan_installed_apps();
     build_installed_list();
+}
+
+/* ------------------------------------------------------------------ */
+/* Helper: build a scrollable list + status bar inside a parent screen */
+/* ------------------------------------------------------------------ */
+
+static lv_obj_t *build_list_area(lv_obj_t *parent, int list_h)
+{
+    const theme_colors_t *tc = theme_get_colors();
+
+    lv_obj_t *list = lv_obj_create(parent);
+    lv_obj_set_pos(list, 0, 0);
+    lv_obj_set_size(list, APP_AREA_W, list_h);
+    lv_obj_set_style_bg_color(list, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(list, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    return list;
+}
+
+static lv_obj_t *build_status_bar(lv_obj_t *parent, int y, const char *init_text)
+{
+    const theme_colors_t *tc = theme_get_colors();
+
+    lv_obj_t *bar = lv_obj_create(parent);
+    lv_obj_set_pos(bar, 0, y);
+    lv_obj_set_size(bar, APP_AREA_W, STATUS_BAR_H);
+    lv_obj_set_style_bg_color(bar, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(bar, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(bar, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *lbl = lv_label_create(bar);
+    lv_label_set_text(lbl, init_text);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, tc->text, LV_PART_MAIN);
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+    return lbl;
 }
 
 /* ------------------------------------------------------------------ */
@@ -986,104 +1299,115 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
 
     const theme_colors_t *tc = theme_get_colors();
 
-    /* Root container — fills the entire app area */
+    /* Root */
     s_store.root = lv_obj_create(parent);
     lv_obj_set_size(s_store.root, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(s_store.root, 0, 0);
     style_panel(s_store.root);
 
-    /* ----------------------------------------------------------------
-     * Shared title bar across both tabs
-     * ---------------------------------------------------------------- */
+    /* ---------------------------------------------------------------
+     * Shared title bar with three tab buttons
+     * --------------------------------------------------------------- */
     lv_obj_t *title_bar = lv_obj_create(s_store.root);
     lv_obj_set_pos(title_bar, 0, 0);
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
     style_title_bar(title_bar);
 
-    /* Title text */
     lv_obj_t *title_lbl = lv_label_create(title_bar);
     lv_label_set_text(title_lbl, "App Store");
     lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(title_lbl, tc->text, LV_PART_MAIN);
     lv_obj_align(title_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-    /* Tab buttons: "Catalog" and "Installed" on the right */
-    lv_obj_t *cat_btn = create_tab_button(title_bar, "Catalog", true);
-    lv_obj_align(cat_btn, LV_ALIGN_RIGHT_MID, -96, 0);
-    lv_obj_add_event_cb(cat_btn, tab_catalog_cb, LV_EVENT_CLICKED, NULL);
-    s_store.cat_tab_btn = cat_btn;
-
+    /* Three tab buttons on the right, 80px wide each with 2px gap */
     lv_obj_t *inst_btn = create_tab_button(title_bar, "Installed", false);
     lv_obj_align(inst_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(inst_btn, tab_installed_cb, LV_EVENT_CLICKED, NULL);
     s_store.inst_tab_btn = inst_btn;
 
-    /* ----------------------------------------------------------------
+    lv_obj_t *fw_btn = create_tab_button(title_bar, "Firmware", false);
+    lv_obj_align(fw_btn, LV_ALIGN_RIGHT_MID, -82, 0);
+    lv_obj_add_event_cb(fw_btn, tab_firmware_cb, LV_EVENT_CLICKED, NULL);
+    s_store.fw_tab_btn = fw_btn;
+
+    lv_obj_t *cat_btn = create_tab_button(title_bar, "Catalog", true);
+    lv_obj_align(cat_btn, LV_ALIGN_RIGHT_MID, -164, 0);
+    lv_obj_add_event_cb(cat_btn, tab_catalog_cb, LV_EVENT_CLICKED, NULL);
+    s_store.cat_tab_btn = cat_btn;
+
+    /* ---------------------------------------------------------------
      * Catalog screen
-     * ---------------------------------------------------------------- */
+     * List + refresh button row + status bar
+     * --------------------------------------------------------------- */
+    int btn_row_h    = 28;
+    int cat_list_h   = APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
+    int cat_btn_y    = cat_list_h;
+    int cat_status_y = cat_list_h + btn_row_h;
+
     lv_obj_t *cat_screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(cat_screen, 0, TITLE_BAR_H);
     lv_obj_set_size(cat_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
     style_panel(cat_screen);
     s_store.catalog_screen = cat_screen;
 
-    /* Scrollable list area */
-    lv_obj_t *cat_list = lv_obj_create(cat_screen);
-    lv_obj_set_pos(cat_list, 0, 0);
-    lv_obj_set_size(cat_list, APP_AREA_W, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - 30);
-    lv_obj_set_style_bg_color(cat_list, tc->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(cat_list, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(cat_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(cat_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(cat_list, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(cat_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(cat_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_add_flag(cat_list, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(cat_list, LV_DIR_VER);
-    s_store.catalog_list = cat_list;
+    s_store.catalog_list = build_list_area(cat_screen, cat_list_h);
 
-    /* Refresh button */
-    lv_obj_t *refresh_btn_area = lv_obj_create(cat_screen);
-    int refresh_y = APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - 30;
-    lv_obj_set_pos(refresh_btn_area, 0, refresh_y);
-    lv_obj_set_size(refresh_btn_area, APP_AREA_W, 28);
-    lv_obj_set_style_bg_color(refresh_btn_area, tc->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(refresh_btn_area, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(refresh_btn_area, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(refresh_btn_area, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(refresh_btn_area, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(refresh_btn_area, LV_OBJ_FLAG_SCROLLABLE);
+    /* Button row: "Refresh Cache" + "Refresh from Server" */
+    lv_obj_t *cat_btn_area = lv_obj_create(cat_screen);
+    lv_obj_set_pos(cat_btn_area, 0, cat_btn_y);
+    lv_obj_set_size(cat_btn_area, APP_AREA_W, btn_row_h);
+    lv_obj_set_style_bg_color(cat_btn_area, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(cat_btn_area, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(cat_btn_area, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(cat_btn_area, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(cat_btn_area, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(cat_btn_area, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *refresh_btn = create_action_button(refresh_btn_area, "Refresh Catalog", 140);
-    lv_obj_align(refresh_btn, LV_ALIGN_LEFT_MID, ITEM_PAD_LEFT, 0);
-    lv_obj_add_event_cb(refresh_btn, refresh_catalog_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *reload_local_btn = create_action_button(cat_btn_area, "Reload Cache", 120);
+    lv_obj_align(reload_local_btn, LV_ALIGN_LEFT_MID, ITEM_PAD_LEFT, 0);
+    lv_obj_add_event_cb(reload_local_btn, refresh_local_cb, LV_EVENT_CLICKED, NULL);
 
-    /* Status bar at bottom of catalog screen */
-    lv_obj_t *cat_status_bar = lv_obj_create(cat_screen);
-    lv_obj_set_pos(cat_status_bar, 0, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H);
-    lv_obj_set_size(cat_status_bar, APP_AREA_W, STATUS_BAR_H);
-    lv_obj_set_style_bg_color(cat_status_bar, tc->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(cat_status_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_side(cat_status_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
-    lv_obj_set_style_border_color(cat_status_bar, tc->text, LV_PART_MAIN);
-    lv_obj_set_style_border_width(cat_status_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_pad_left(cat_status_bar, ITEM_PAD_LEFT, LV_PART_MAIN);
-    lv_obj_set_style_pad_right(cat_status_bar, ITEM_PAD_RIGHT, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(cat_status_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(cat_status_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(cat_status_bar, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(cat_status_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *refresh_srv_btn = create_action_button(cat_btn_area, "Refresh from Server", 160);
+    lv_obj_align(refresh_srv_btn, LV_ALIGN_LEFT_MID, ITEM_PAD_LEFT + 128, 0);
+    lv_obj_add_event_cb(refresh_srv_btn, refresh_server_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *cat_status_lbl = lv_label_create(cat_status_bar);
-    lv_label_set_text(cat_status_lbl, "Status: Loading...");
-    lv_obj_set_style_text_font(cat_status_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cat_status_lbl, tc->text, LV_PART_MAIN);
-    lv_obj_align(cat_status_lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    s_store.catalog_status_label = cat_status_lbl;
+    s_store.catalog_status_label = build_status_bar(cat_screen, cat_status_y, "Loading...");
 
-    /* ----------------------------------------------------------------
+    /* ---------------------------------------------------------------
+     * Firmware screen (hidden by default)
+     * --------------------------------------------------------------- */
+    int fw_list_h   = APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
+    int fw_btn_y    = fw_list_h;
+    int fw_status_y = fw_list_h + btn_row_h;
+
+    lv_obj_t *fw_screen = lv_obj_create(s_store.root);
+    lv_obj_set_pos(fw_screen, 0, TITLE_BAR_H);
+    lv_obj_set_size(fw_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    style_panel(fw_screen);
+    lv_obj_add_flag(fw_screen, LV_OBJ_FLAG_HIDDEN);
+    s_store.firmware_screen = fw_screen;
+
+    s_store.firmware_list = build_list_area(fw_screen, fw_list_h);
+
+    lv_obj_t *fw_btn_area = lv_obj_create(fw_screen);
+    lv_obj_set_pos(fw_btn_area, 0, fw_btn_y);
+    lv_obj_set_size(fw_btn_area, APP_AREA_W, btn_row_h);
+    lv_obj_set_style_bg_color(fw_btn_area, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(fw_btn_area, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(fw_btn_area, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(fw_btn_area, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(fw_btn_area, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(fw_btn_area, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *fw_refresh_btn = create_action_button(fw_btn_area, "Refresh from Server", 160);
+    lv_obj_align(fw_refresh_btn, LV_ALIGN_LEFT_MID, ITEM_PAD_LEFT, 0);
+    lv_obj_add_event_cb(fw_refresh_btn, refresh_server_cb, LV_EVENT_CLICKED, NULL);
+
+    s_store.firmware_status_label = build_status_bar(fw_screen, fw_status_y, "Firmware updates");
+
+    /* ---------------------------------------------------------------
      * Installed screen (hidden by default)
-     * ---------------------------------------------------------------- */
+     * --------------------------------------------------------------- */
     lv_obj_t *inst_screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(inst_screen, 0, TITLE_BAR_H);
     lv_obj_set_size(inst_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
@@ -1091,59 +1415,28 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
     lv_obj_add_flag(inst_screen, LV_OBJ_FLAG_HIDDEN);
     s_store.installed_screen = inst_screen;
 
-    /* Scrollable installed list */
-    lv_obj_t *inst_list = lv_obj_create(inst_screen);
-    lv_obj_set_pos(inst_list, 0, 0);
-    lv_obj_set_size(inst_list, APP_AREA_W, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H);
-    lv_obj_set_style_bg_color(inst_list, tc->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(inst_list, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(inst_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(inst_list, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(inst_list, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(inst_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(inst_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_add_flag(inst_list, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(inst_list, LV_DIR_VER);
-    s_store.installed_list = inst_list;
+    s_store.installed_list = build_list_area(inst_screen,
+                                              APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H);
 
-    /* Status bar at bottom of installed screen */
-    lv_obj_t *inst_status_bar = lv_obj_create(inst_screen);
-    lv_obj_set_pos(inst_status_bar, 0, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H);
-    lv_obj_set_size(inst_status_bar, APP_AREA_W, STATUS_BAR_H);
-    lv_obj_set_style_bg_color(inst_status_bar, tc->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(inst_status_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_side(inst_status_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
-    lv_obj_set_style_border_color(inst_status_bar, tc->text, LV_PART_MAIN);
-    lv_obj_set_style_border_width(inst_status_bar, 1, LV_PART_MAIN);
-    lv_obj_set_style_pad_left(inst_status_bar, ITEM_PAD_LEFT, LV_PART_MAIN);
-    lv_obj_set_style_pad_right(inst_status_bar, ITEM_PAD_RIGHT, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(inst_status_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(inst_status_bar, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(inst_status_bar, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(inst_status_bar, LV_OBJ_FLAG_SCROLLABLE);
+    s_store.installed_status_label =
+        build_status_bar(inst_screen, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H, "Installed apps");
 
-    lv_obj_t *inst_status_lbl = lv_label_create(inst_status_bar);
-    lv_label_set_text(inst_status_lbl, "Installed apps");
-    lv_obj_set_style_text_font(inst_status_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(inst_status_lbl, tc->text, LV_PART_MAIN);
-    lv_obj_align(inst_status_lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    s_store.installed_status_label = inst_status_lbl;
-
-    /* ----------------------------------------------------------------
-     * Load catalog and populate
-     * ---------------------------------------------------------------- */
+    /* ---------------------------------------------------------------
+     * Initial data load from local cache
+     * --------------------------------------------------------------- */
     ensure_apps_dir();
 
-    esp_err_t err = load_catalog();
+    esp_err_t err = load_catalog_local();
     build_catalog_list();
+    build_firmware_list();
 
     if (err == ESP_ERR_NOT_FOUND) {
-        lv_label_set_text(s_store.catalog_status_label, "Status: catalog.json not found");
+        lv_label_set_text(s_store.catalog_status_label, "catalog.json not found on SD");
     } else if (err != ESP_OK) {
-        lv_label_set_text(s_store.catalog_status_label, "Status: catalog load error");
+        lv_label_set_text(s_store.catalog_status_label, "Catalog load error");
     }
 
-    ESP_LOGI(TAG, "App Store UI created");
+    ESP_LOGI(TAG, "App Store UI created (%d entries loaded)", s_store.entry_count);
     return ESP_OK;
 }
 

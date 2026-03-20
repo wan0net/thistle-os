@@ -90,3 +90,26 @@ const char *signing_get_public_key_hex(void) {
 esp_err_t drv_a7682e_start_ppp(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t drv_a7682e_stop_ppp(void) { return ESP_OK; }
 _Bool drv_a7682e_ppp_connected(void) { return 0; }
+
+/* appstore_client stubs — network not available in simulator */
+#include "thistle/appstore_client.h"
+esp_err_t appstore_fetch_catalog(const char *url, catalog_entry_t *entries,
+                                  int max, int *count) {
+    (void)url; (void)entries; (void)max;
+    if (count) *count = 0;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t appstore_download_file(const char *url, const char *path,
+                                  const char *hash, download_progress_cb_t cb,
+                                  void *ud) {
+    (void)url; (void)path; (void)hash; (void)cb; (void)ud;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t appstore_install_entry(const catalog_entry_t *entry,
+                                  download_progress_cb_t cb, void *ud) {
+    (void)entry; (void)cb; (void)ud;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+const char *appstore_get_catalog_url(void) {
+    return "https://wan0net.github.io/thistle-apps/catalog.json";
+}

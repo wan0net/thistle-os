@@ -1,35 +1,62 @@
-[
-    {
-        "id": "com.meshcore.chat",
-        "name": "MeshCore Chat",
-        "version": "1.0.0",
-        "author": "MeshCore Team",
-        "description": "Off-grid mesh messaging app for LoRa-equipped devices.",
-        "size_kb": 48,
-        "permissions": ["radio", "gps"],
-        "signed": true,
-        "download_url": "https://apps.thistleos.dev/meshcore-1.0.0.app.elf"
-    },
-    {
-        "id": "com.thistle.weather",
-        "name": "Weather Widget",
-        "version": "0.2.0",
-        "author": "ThistleOS",
-        "description": "Barometric weather forecast using IMU sensors.",
-        "size_kb": 22,
-        "permissions": ["ipc"],
-        "signed": true,
-        "download_url": "https://apps.thistleos.dev/weather-0.2.0.app.elf"
-    },
-    {
-        "id": "com.thistle.flashlight",
-        "name": "Flashlight",
-        "version": "1.0.0",
-        "author": "ThistleOS",
-        "description": "SOS and flashlight utility for LCD backlight.",
-        "size_kb": 8,
-        "permissions": [],
-        "signed": true,
-        "download_url": "https://apps.thistleos.dev/flashlight-1.0.0.app.elf"
-    }
-]
+{
+    "version": 1,
+    "catalog_url": "https://wan0net.github.io/thistle-apps/catalog.json",
+    "entries": [
+        {
+            "id": "com.meshcore.chat",
+            "type": "app",
+            "name": "MeshCore Chat",
+            "version": "1.0.0",
+            "author": "MeshCore Team",
+            "description": "Off-grid LoRa mesh messaging",
+            "size_bytes": 49152,
+            "url": "https://wan0net.github.io/thistle-apps/apps/meshcore-1.0.0.app.elf",
+            "sig_url": "https://wan0net.github.io/thistle-apps/apps/meshcore-1.0.0.app.elf.sig",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "permissions": "radio,gps",
+            "min_os_version": "0.1.0"
+        },
+        {
+            "id": "thistle-os-update",
+            "type": "firmware",
+            "name": "ThistleOS",
+            "version": "0.2.0",
+            "author": "ThistleOS",
+            "description": "ThistleOS firmware update",
+            "size_bytes": 1501867,
+            "url": "https://wan0net.github.io/thistle-apps/firmware/thistle_os-0.2.0.bin",
+            "sig_url": "https://wan0net.github.io/thistle-apps/firmware/thistle_os-0.2.0.bin.sig",
+            "sha256": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            "permissions": "",
+            "min_os_version": "0.1.0"
+        },
+        {
+            "id": "com.thistle.weather",
+            "type": "app",
+            "name": "Weather Widget",
+            "version": "0.2.0",
+            "author": "ThistleOS",
+            "description": "Barometric weather forecast using IMU sensors",
+            "size_bytes": 22528,
+            "url": "https://wan0net.github.io/thistle-apps/apps/weather-0.2.0.app.elf",
+            "sig_url": "",
+            "sha256": "",
+            "permissions": "ipc",
+            "min_os_version": "0.1.0"
+        },
+        {
+            "id": "com.thistle.flashlight",
+            "type": "app",
+            "name": "Flashlight",
+            "version": "1.0.0",
+            "author": "ThistleOS",
+            "description": "SOS and flashlight utility for LCD backlight",
+            "size_bytes": 8192,
+            "url": "https://wan0net.github.io/thistle-apps/apps/flashlight-1.0.0.app.elf",
+            "sig_url": "https://wan0net.github.io/thistle-apps/apps/flashlight-1.0.0.app.elf.sig",
+            "sha256": "",
+            "permissions": "",
+            "min_os_version": "0.1.0"
+        }
+    ]
+}
