@@ -95,6 +95,13 @@ static lv_obj_t   *s_gps_sat_lbl    = NULL;
 /* GPS enabled state */
 static bool s_gps_enabled = false;
 
+/* Main list dynamic value labels */
+static lv_obj_t *s_wifi_value_label = NULL;
+static lv_obj_t *s_bt_value_label   = NULL;
+
+/* Main list live-update timer */
+static lv_timer_t *s_main_timer = NULL;
+
 /* ------------------------------------------------------------------ */
 /* Driver type enum                                                     */
 /* ------------------------------------------------------------------ */
@@ -144,7 +151,8 @@ static const settings_item_t s_items[] = {
 /* Apply the standard BlackBerry monochrome style to a container/panel. */
 static void style_panel(lv_obj_t *obj)
 {
-    lv_obj_set_style_bg_color(obj, lv_color_white(), LV_PART_MAIN);
+    const theme_colors_t *tc = theme_get_colors();
+    lv_obj_set_style_bg_color(obj, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
@@ -152,23 +160,25 @@ static void style_panel(lv_obj_t *obj)
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
-/* Apply the title bar style (white bg, 1px bottom border). */
+/* Apply the title bar style (bg color, 1px bottom border). */
 static void style_title_bar(lv_obj_t *obj)
 {
     style_panel(obj);
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_set_style_pad_left(obj, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(obj, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(obj, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(obj, tc->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
 }
 
 /* Create a standard row separator (1px horizontal line). */
 static lv_obj_t *create_separator(lv_obj_t *parent)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *sep = lv_obj_create(parent);
     lv_obj_set_size(sep, LV_PCT(100), 1);
-    lv_obj_set_style_bg_color(sep, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sep, tc->text, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sep, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(sep, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(sep, 0, LV_PART_MAIN);
@@ -180,9 +190,10 @@ static lv_obj_t *create_separator(lv_obj_t *parent)
 /* Create an info row: "label: value" with Montserrat 14. */
 static lv_obj_t *create_info_row(lv_obj_t *parent, const char *text)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -195,7 +206,7 @@ static lv_obj_t *create_info_row(lv_obj_t *parent, const char *text)
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, tc->text, LV_PART_MAIN);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     return row;
@@ -204,9 +215,10 @@ static lv_obj_t *create_info_row(lv_obj_t *parent, const char *text)
 /* Create a plain label row and return the label for live updates. */
 static lv_obj_t *create_live_row(lv_obj_t *parent, const char *initial_text)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -219,10 +231,33 @@ static lv_obj_t *create_live_row(lv_obj_t *parent, const char *initial_text)
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, initial_text ? initial_text : "");
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, tc->text, LV_PART_MAIN);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     return lbl; /* caller saves for lv_label_set_text later */
+}
+
+/* ------------------------------------------------------------------ */
+/* Main list live-update timer                                          */
+/* ------------------------------------------------------------------ */
+
+static void settings_main_update_timer(lv_timer_t *t)
+{
+    (void)t;
+    if (s_current_screen != SETTINGS_MAIN) return;
+
+    if (s_wifi_value_label) {
+        wifi_state_t ws = (wifi_state_t)wifi_manager_get_state();
+        const char *wifi_val = (ws == WIFI_STATE_CONNECTED)  ? "Connected"    :
+                               (ws == WIFI_STATE_CONNECTING) ? "Connecting..." : "Off";
+        lv_label_set_text(s_wifi_value_label, wifi_val);
+    }
+    if (s_bt_value_label) {
+        ble_state_t bs = ble_manager_get_state();
+        const char *bt_val = (bs == BLE_STATE_CONNECTED)   ? "Connected"  :
+                             (bs == BLE_STATE_ADVERTISING) ? "Scanning..." : "Off";
+        lv_label_set_text(s_bt_value_label, bt_val);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,6 +311,7 @@ static void back_to_main(lv_event_t *e)
     s_ble_peer_label       = NULL;
     s_ble_toggle_btn_lbl   = NULL;
     s_driver_row_pool_used = 0;
+    /* Value labels on the main list are still valid after returning */
     lv_obj_remove_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
     s_current_screen = SETTINGS_MAIN;
 }
@@ -303,12 +339,14 @@ static lv_obj_t *alloc_sub_screen(lv_obj_t *container_parent,
 
     if (out_screen) *out_screen = screen;
 
+    const theme_colors_t *tc = theme_get_colors();
+
     lv_obj_t *title_bar = lv_obj_create(screen);
     lv_obj_set_pos(title_bar, 0, 0);
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
     style_title_bar(title_bar);
     lv_obj_add_flag(title_bar, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(title_bar, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(title_bar, tc->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(title_bar, back_cb, LV_EVENT_CLICKED, back_udata);
 
@@ -317,14 +355,14 @@ static lv_obj_t *alloc_sub_screen(lv_obj_t *container_parent,
     lv_obj_t *lbl = lv_label_create(title_bar);
     lv_label_set_text(lbl, back_text);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, tc->bg, LV_STATE_PRESSED);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     lv_obj_t *content = lv_obj_create(screen);
     lv_obj_set_pos(content, 0, TITLE_BAR_H);
     lv_obj_set_size(content, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
-    lv_obj_set_style_bg_color(content, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(content, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(content, 0, LV_PART_MAIN);
@@ -335,7 +373,7 @@ static lv_obj_t *alloc_sub_screen(lv_obj_t *container_parent,
                           LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_bg_color(content, lv_color_black(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(content, tc->text, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_width(content, 2, LV_PART_SCROLLBAR);
     lv_obj_set_style_radius(content, 0, LV_PART_SCROLLBAR);
@@ -385,6 +423,153 @@ static void wifi_update_status_label(void)
     lv_label_set_text(s_wifi_status_label, buf);
 }
 
+/* ------------------------------------------------------------------ */
+/* WiFi password dialog                                                 */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    char  ssid[WIFI_SSID_MAX_LEN + 1];
+    lv_obj_t *dialog;
+    lv_obj_t *ta;
+} wifi_pwd_ctx_t;
+
+static wifi_pwd_ctx_t s_wifi_pwd_ctx; /* single-instance, screen lifetime */
+
+static void wifi_pwd_connect_cb(lv_event_t *e)
+{
+    wifi_pwd_ctx_t *ctx = (wifi_pwd_ctx_t *)lv_event_get_user_data(e);
+    if (!ctx) return;
+
+    const char *password = lv_textarea_get_text(ctx->ta);
+    ESP_LOGI(TAG, "WiFi: connecting to \"%s\" with password", ctx->ssid);
+
+    if (s_wifi_status_label) {
+        lv_label_set_text(s_wifi_status_label, "Status: Connecting...");
+    }
+
+    /* Delete dialog before blocking connect call */
+    if (ctx->dialog) {
+        lv_obj_delete(ctx->dialog);
+        ctx->dialog = NULL;
+        ctx->ta     = NULL;
+    }
+
+    esp_err_t err = wifi_manager_connect(ctx->ssid, password, 10000);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi: connected to \"%s\"", ctx->ssid);
+        wifi_manager_ntp_sync();
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGI(TAG, "WiFi: connect not supported in simulator");
+    } else {
+        ESP_LOGW(TAG, "WiFi: connect to \"%s\" failed: 0x%x", ctx->ssid, err);
+    }
+    wifi_update_status_label();
+}
+
+static void wifi_pwd_cancel_cb(lv_event_t *e)
+{
+    wifi_pwd_ctx_t *ctx = (wifi_pwd_ctx_t *)lv_event_get_user_data(e);
+    if (!ctx) return;
+    if (ctx->dialog) {
+        lv_obj_delete(ctx->dialog);
+        ctx->dialog = NULL;
+        ctx->ta     = NULL;
+    }
+}
+
+static void show_wifi_password_dialog(const char *ssid)
+{
+    const theme_colors_t *tc = theme_get_colors();
+
+    /* Fill context */
+    strncpy(s_wifi_pwd_ctx.ssid, ssid, sizeof(s_wifi_pwd_ctx.ssid) - 1);
+    s_wifi_pwd_ctx.ssid[sizeof(s_wifi_pwd_ctx.ssid) - 1] = '\0';
+
+    /* Overlay on sub_screen */
+    lv_obj_t *dialog = lv_obj_create(s_sub_screen);
+    lv_obj_set_size(dialog, 280, 140);
+    lv_obj_align(dialog, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(dialog, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dialog, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(dialog, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_radius(dialog, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(dialog, 6, LV_PART_MAIN);
+    lv_obj_clear_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_move_foreground(dialog);
+
+    s_wifi_pwd_ctx.dialog = dialog;
+
+    /* SSID title */
+    lv_obj_t *title = lv_label_create(dialog);
+    lv_label_set_text_fmt(title, "Connect to: %s", ssid);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, tc->text, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 2);
+
+    /* Password textarea */
+    lv_obj_t *ta = lv_textarea_create(dialog);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_password_mode(ta, true);
+    lv_textarea_set_placeholder_text(ta, "Password");
+    lv_obj_set_width(ta, 250);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(ta, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ta, tc->surface, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ta, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ta, 1, LV_PART_MAIN);
+    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, 26);
+
+    s_wifi_pwd_ctx.ta = ta;
+
+    /* Cancel button */
+    lv_obj_t *btn_cancel = lv_obj_create(dialog);
+    lv_obj_set_size(btn_cancel, 100, 28);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    lv_obj_set_style_bg_color(btn_cancel, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn_cancel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn_cancel, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn_cancel, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn_cancel, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(btn_cancel, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn_cancel, tc->primary, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn_cancel, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(btn_cancel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(btn_cancel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn_cancel, wifi_pwd_cancel_cb, LV_EVENT_CLICKED, &s_wifi_pwd_ctx);
+
+    lv_obj_t *lbl_cancel = lv_label_create(btn_cancel);
+    lv_label_set_text(lbl_cancel, "Cancel");
+    lv_obj_set_style_text_font(lbl_cancel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_cancel, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_cancel, tc->bg, LV_STATE_PRESSED);
+    lv_obj_align(lbl_cancel, LV_ALIGN_CENTER, 0, 0);
+
+    /* Connect button */
+    lv_obj_t *btn_connect = lv_obj_create(dialog);
+    lv_obj_set_size(btn_connect, 100, 28);
+    lv_obj_align(btn_connect, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    lv_obj_set_style_bg_color(btn_connect, tc->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn_connect, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn_connect, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn_connect, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn_connect, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(btn_connect, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn_connect, tc->primary, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn_connect, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(btn_connect, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(btn_connect, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn_connect, wifi_pwd_connect_cb, LV_EVENT_CLICKED, &s_wifi_pwd_ctx);
+
+    lv_obj_t *lbl_connect = lv_label_create(btn_connect);
+    lv_label_set_text(lbl_connect, "Connect");
+    lv_obj_set_style_text_font(lbl_connect, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_connect, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_connect, tc->bg, LV_STATE_PRESSED);
+    lv_obj_align(lbl_connect, LV_ALIGN_CENTER, 0, 0);
+}
+
 /* Called when a scan result network row is clicked. */
 static void wifi_network_clicked_cb(lv_event_t *e)
 {
@@ -393,13 +578,18 @@ static void wifi_network_clicked_cb(lv_event_t *e)
 
     ESP_LOGI(TAG, "WiFi: attempting connect to \"%s\" (open=%d)", net->ssid, net->is_open);
 
-    /* Update status label to "Connecting..." immediately */
+    if (!net->is_open) {
+        /* Secured network — show password dialog */
+        show_wifi_password_dialog(net->ssid);
+        return;
+    }
+
+    /* Open network — connect directly */
     if (s_wifi_status_label) {
         lv_label_set_text(s_wifi_status_label, "Status: Connecting...");
     }
 
-    const char *password = net->is_open ? NULL : "";
-    esp_err_t err = wifi_manager_connect(net->ssid, password, 10000);
+    esp_err_t err = wifi_manager_connect(net->ssid, NULL, 10000);
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "WiFi: connected to \"%s\"", net->ssid);
@@ -455,13 +645,14 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
 
     if (!s_wifi_scan_list) return;
 
+    const theme_colors_t *tc_scan = theme_get_colors();
     for (uint8_t i = 0; i < s_scan_count; i++) {
         wifi_scan_result_t *net = &s_scan_results[i];
 
         /* Row */
         lv_obj_t *row = lv_obj_create(s_wifi_scan_list);
         lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-        lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, tc_scan->bg, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -469,9 +660,9 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
         lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
         lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-        lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_border_color(row, tc_scan->text, LV_PART_MAIN);
         lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(row, tc_scan->primary, LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row,
@@ -493,8 +684,8 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
         }
         lv_label_set_text(lbl_ssid, ssid_text);
         lv_obj_set_style_text_font(lbl_ssid, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_ssid, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_ssid, lv_color_white(), LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(lbl_ssid, tc_scan->text, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl_ssid, tc_scan->bg, LV_STATE_PRESSED);
         lv_obj_set_flex_grow(lbl_ssid, 1);
 
         /* RSSI label */
@@ -503,8 +694,8 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
         snprintf(rssi_text, sizeof(rssi_text), "%d dBm", net->rssi);
         lv_label_set_text(lbl_rssi, rssi_text);
         lv_obj_set_style_text_font(lbl_rssi, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_rssi, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_rssi, lv_color_white(), LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(lbl_rssi, tc_scan->text, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl_rssi, tc_scan->bg, LV_STATE_PRESSED);
     }
 }
 
@@ -523,10 +714,12 @@ static void open_wifi_screen(void)
     lv_obj_t *content = create_sub_screen("WiFi");
     s_current_screen = SETTINGS_WIFI;
 
+    const theme_colors_t *tc_wifi = theme_get_colors();
+
     /* Status row */
     lv_obj_t *status_row = lv_obj_create(content);
     lv_obj_set_size(status_row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(status_row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(status_row, tc_wifi->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(status_row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(status_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(status_row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -539,7 +732,7 @@ static void open_wifi_screen(void)
     s_wifi_status_label = lv_label_create(status_row);
     lv_label_set_text(s_wifi_status_label, "Status: Disconnected");
     lv_obj_set_style_text_font(s_wifi_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_wifi_status_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_wifi_status_label, tc_wifi->text, LV_PART_MAIN);
     lv_obj_align(s_wifi_status_label, LV_ALIGN_LEFT_MID, 0, 0);
     wifi_update_status_label();
 
@@ -548,17 +741,17 @@ static void open_wifi_screen(void)
     /* Scan Networks button */
     lv_obj_t *btn = lv_obj_create(content);
     lv_obj_set_size(btn, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, tc_wifi->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(btn, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, tc_wifi->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, tc_wifi->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
@@ -567,8 +760,8 @@ static void open_wifi_screen(void)
     lv_obj_t *lbl_btn = lv_label_create(btn);
     lv_label_set_text(lbl_btn, "Scan Networks");
     lv_obj_set_style_text_font(lbl_btn, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_btn, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_btn, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_btn, tc_wifi->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_btn, tc_wifi->bg, LV_STATE_PRESSED);
     lv_obj_align(lbl_btn, LV_ALIGN_CENTER, 0, 0);
 
     create_separator(content);
@@ -577,7 +770,7 @@ static void open_wifi_screen(void)
     s_wifi_scan_list = lv_obj_create(content);
     lv_obj_set_width(s_wifi_scan_list, LV_PCT(100));
     lv_obj_set_height(s_wifi_scan_list, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(s_wifi_scan_list, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_wifi_scan_list, tc_wifi->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_wifi_scan_list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_wifi_scan_list, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_wifi_scan_list, 0, LV_PART_MAIN);
@@ -662,10 +855,12 @@ static void open_bluetooth_screen(void)
     lv_obj_t *content = create_sub_screen("Bluetooth");
     s_current_screen = SETTINGS_BLUETOOTH;
 
+    const theme_colors_t *tc_bt = theme_get_colors();
+
     /* Status row */
     lv_obj_t *status_row = lv_obj_create(content);
     lv_obj_set_size(status_row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(status_row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(status_row, tc_bt->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(status_row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(status_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(status_row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -678,7 +873,7 @@ static void open_bluetooth_screen(void)
     s_ble_status_label = lv_label_create(status_row);
     lv_label_set_text(s_ble_status_label, "Status: Off");
     lv_obj_set_style_text_font(s_ble_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_ble_status_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ble_status_label, tc_bt->text, LV_PART_MAIN);
     lv_obj_align(s_ble_status_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     create_separator(content);
@@ -699,17 +894,17 @@ static void open_bluetooth_screen(void)
     /* Enable / Disable toggle button */
     lv_obj_t *toggle_btn = lv_obj_create(content);
     lv_obj_set_size(toggle_btn, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(toggle_btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(toggle_btn, tc_bt->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(toggle_btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(toggle_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(toggle_btn, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(toggle_btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_pad_top(toggle_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(toggle_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(toggle_btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(toggle_btn, tc_bt->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(toggle_btn, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(toggle_btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(toggle_btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(toggle_btn, tc_bt->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(toggle_btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_flag(toggle_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(toggle_btn, LV_OBJ_FLAG_SCROLLABLE);
@@ -718,8 +913,8 @@ static void open_bluetooth_screen(void)
     s_ble_toggle_btn_lbl = lv_label_create(toggle_btn);
     lv_label_set_text(s_ble_toggle_btn_lbl, "Enable");
     lv_obj_set_style_text_font(s_ble_toggle_btn_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, tc_bt->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, tc_bt->bg, LV_STATE_PRESSED);
     lv_obj_align(s_ble_toggle_btn_lbl, LV_ALIGN_CENTER, 0, 0);
 
     create_separator(content);
@@ -727,17 +922,17 @@ static void open_bluetooth_screen(void)
     /* Disconnect button (dimmed when not connected) */
     lv_obj_t *disc_btn = lv_obj_create(content);
     lv_obj_set_size(disc_btn, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(disc_btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(disc_btn, tc_bt->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(disc_btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(disc_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(disc_btn, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(disc_btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_pad_top(disc_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(disc_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(disc_btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(disc_btn, tc_bt->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(disc_btn, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(disc_btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(disc_btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(disc_btn, tc_bt->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(disc_btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_style_opa(disc_btn,
                          (ble_manager_get_state() == BLE_STATE_CONNECTED)
@@ -750,8 +945,8 @@ static void open_bluetooth_screen(void)
     lv_obj_t *lbl_disc = lv_label_create(disc_btn);
     lv_label_set_text(lbl_disc, "Disconnect");
     lv_obj_set_style_text_font(lbl_disc, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_disc, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_disc, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_disc, tc_bt->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_disc, tc_bt->bg, LV_STATE_PRESSED);
     lv_obj_align(lbl_disc, LV_ALIGN_CENTER, 0, 0);
 
     ble_update_labels();
@@ -815,9 +1010,10 @@ static void wallpaper_clear_cb(lv_event_t *e)
 static void create_theme_row(lv_obj_t *content, const char *display_name,
                              const char *payload_name, bool is_active)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *row = lv_obj_create(content);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT + 8, LV_PART_MAIN);
@@ -825,9 +1021,9 @@ static void create_theme_row(lv_obj_t *content, const char *display_name,
     lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, tc->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(row, tc->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row,
@@ -842,34 +1038,35 @@ static void create_theme_row(lv_obj_t *content, const char *display_name,
     lv_obj_t *lbl_name = lv_label_create(row);
     lv_label_set_text(lbl_name, display_name);
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_name, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, tc->bg, LV_STATE_PRESSED);
     lv_obj_set_flex_grow(lbl_name, 1);
 
     lv_obj_t *lbl_sel = lv_label_create(row);
     lv_label_set_text(lbl_sel, is_active ? "[x]" : "[ ]");
     lv_obj_set_style_text_font(lbl_sel, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_sel, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_sel, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_sel, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_sel, tc->bg, LV_STATE_PRESSED);
 }
 
 /* Create a clickable action button row (for Browse / Clear wallpaper) */
 static void create_action_row(lv_obj_t *content, const char *label,
                                lv_event_cb_t cb)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *btn = lv_obj_create(content);
     lv_obj_set_size(btn, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(btn, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, tc->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, tc->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
@@ -878,8 +1075,8 @@ static void create_action_row(lv_obj_t *content, const char *label,
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, tc->bg, LV_STATE_PRESSED);
     lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
 }
 
@@ -892,11 +1089,10 @@ static void open_appearance_screen(void)
     create_info_row(content, "Theme");
     create_separator(content);
 
-    /* Default (built-in monochrome) — always first, no SD required.
-     * We treat it as active when no SD theme is loaded (i.e. theme_get_colors()
-     * returns the default white bg).  A simple heuristic: bg == white. */
-    const theme_colors_t *cur = theme_get_colors();
-    bool default_active = (cur->bg.red == 0xFF && cur->bg.green == 0xFF && cur->bg.blue == 0xFF);
+    /* Use theme_get_current_name() to determine active theme.
+     * Default name is "Default"; SD themes are stored as e.g. "dark.json". */
+    const char *current_name = theme_get_current_name();
+    bool default_active = (strcmp(current_name, "Default") == 0);
 
     /* Store "__default__" in the first payload slot */
     strncpy(s_theme_payloads[0].name, "__default__", sizeof(s_theme_payloads[0].name) - 1);
@@ -923,9 +1119,8 @@ static void open_appearance_screen(void)
                 sizeof(s_theme_payloads[slot].name) - 1);
         s_theme_payloads[slot].name[sizeof(s_theme_payloads[slot].name) - 1] = '\0';
 
-        /* Mark active if this theme's filename matches the last loaded path
-         * (heuristic: default_active is false, so any SD theme can show [x]) */
-        bool active = false; /* TODO: track last-loaded theme name */
+        /* Mark active if this filename matches the currently loaded theme */
+        bool active = (strcmp(current_name, theme_names[i]) == 0);
 
         create_theme_row(content, display, s_theme_payloads[slot].name, active);
     }
@@ -957,10 +1152,12 @@ static void open_about_screen(void)
     lv_obj_t *content = create_sub_screen("About");
     s_current_screen = SETTINGS_ABOUT;
 
+    const theme_colors_t *tc_about = theme_get_colors();
+
     /* ThistleOS title */
     lv_obj_t *title_row = lv_obj_create(content);
     lv_obj_set_size(title_row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(title_row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(title_row, tc_about->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(title_row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(title_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(title_row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -973,7 +1170,7 @@ static void open_about_screen(void)
     lv_obj_t *lbl_os = lv_label_create(title_row);
     lv_label_set_text(lbl_os, "ThistleOS");
     lv_obj_set_style_text_font(lbl_os, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_os, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_os, tc_about->text, LV_PART_MAIN);
     lv_obj_align(lbl_os, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* Version */
@@ -1092,9 +1289,10 @@ static void open_detail_display(lv_obj_t *content)
         create_info_row(content, "Refresh mode:");
         create_separator(content);
 
+        const theme_colors_t *tc_disp = theme_get_colors();
         lv_obj_t *btn_row = lv_obj_create(content);
         lv_obj_set_size(btn_row, LV_PCT(100), ITEM_H + 4);
-        lv_obj_set_style_bg_color(btn_row, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn_row, tc_disp->bg, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(btn_row, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_radius(btn_row, 0, LV_PART_MAIN);
         lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
@@ -1122,9 +1320,9 @@ static void open_detail_display(lv_obj_t *content)
         for (int i = 0; i < 3; i++) {
             lv_obj_t *b = lv_obj_create(btn_row);
             lv_obj_set_size(b, LV_SIZE_CONTENT, ITEM_H - 4);
-            lv_obj_set_style_bg_color(b, lv_color_white(), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(b, tc_disp->bg, LV_PART_MAIN);
             lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_border_color(b, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_border_color(b, tc_disp->text, LV_PART_MAIN);
             lv_obj_set_style_border_width(b, 1, LV_PART_MAIN);
             lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
             lv_obj_set_style_radius(b, 0, LV_PART_MAIN);
@@ -1132,7 +1330,7 @@ static void open_detail_display(lv_obj_t *content)
             lv_obj_set_style_pad_right(b, 6, LV_PART_MAIN);
             lv_obj_set_style_pad_top(b, 0, LV_PART_MAIN);
             lv_obj_set_style_pad_bottom(b, 0, LV_PART_MAIN);
-            lv_obj_set_style_bg_color(b, lv_color_black(), LV_STATE_PRESSED);
+            lv_obj_set_style_bg_color(b, tc_disp->primary, LV_STATE_PRESSED);
             lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
             lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
@@ -1142,8 +1340,8 @@ static void open_detail_display(lv_obj_t *content)
             lv_obj_t *bl = lv_label_create(b);
             lv_label_set_text(bl, modes[i].label);
             lv_obj_set_style_text_font(bl, &lv_font_montserrat_14, LV_PART_MAIN);
-            lv_obj_set_style_text_color(bl, lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_text_color(bl, lv_color_white(), LV_STATE_PRESSED);
+            lv_obj_set_style_text_color(bl, tc_disp->text, LV_PART_MAIN);
+            lv_obj_set_style_text_color(bl, tc_disp->bg, LV_STATE_PRESSED);
             lv_obj_align(bl, LV_ALIGN_CENTER, 0, 0);
         }
         create_separator(content);
@@ -1577,9 +1775,10 @@ static void add_driver_row(lv_obj_t *list,
     payload->type  = dtype;
     payload->index = index;
 
+    const theme_colors_t *tc_drv = theme_get_colors();
     lv_obj_t *row = lv_obj_create(list);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, tc_drv->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -1587,9 +1786,9 @@ static void add_driver_row(lv_obj_t *list,
     lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, tc_drv->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(row, tc_drv->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row,
@@ -1605,23 +1804,23 @@ static void add_driver_row(lv_obj_t *list,
     lv_obj_t *lbl_name = lv_label_create(row);
     lv_label_set_text(lbl_name, name ? name : "(unknown)");
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_name, tc_drv->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, tc_drv->bg, LV_STATE_PRESSED);
     lv_obj_set_flex_grow(lbl_name, 1);
 
     /* Type label */
     lv_obj_t *lbl_type = lv_label_create(row);
     lv_label_set_text(lbl_type, type_label ? type_label : "");
     lv_obj_set_style_text_font(lbl_type, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_type, tc_drv->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_type, tc_drv->bg, LV_STATE_PRESSED);
 
     /* Chevron */
     lv_obj_t *lbl_chev = lv_label_create(row);
     lv_label_set_text(lbl_chev, ">");
     lv_obj_set_style_text_font(lbl_chev, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_chev, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_chev, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_chev, tc_drv->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_chev, tc_drv->bg, LV_STATE_PRESSED);
 }
 
 static void open_drivers_screen(void)

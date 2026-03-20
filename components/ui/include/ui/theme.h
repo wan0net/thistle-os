@@ -31,3 +31,6 @@ esp_err_t theme_apply(lv_display_t *disp);
  * Writes up to max_count filenames (without path) into names[].
  * Returns actual count found. */
 int theme_list_available(char names[][32], int max_count);
+
+/* Get the basename of the currently active theme (e.g. "Default" or "dark.json") */
+const char *theme_get_current_name(void);

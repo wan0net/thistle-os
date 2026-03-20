@@ -1,6 +1,7 @@
 #include "file_manager/filemgr_app.h"
 
 #include "hal/board.h"
+#include "ui/theme.h"
 
 #include "lvgl.h"
 #include "esp_log.h"
@@ -77,6 +78,56 @@ static int entry_cmp(const void *a, const void *b)
 static void navigate_to(const char *path);
 
 /* ------------------------------------------------------------------ */
+/* File-type indicator by extension                                     */
+/* ------------------------------------------------------------------ */
+
+static const char *file_type_indicator(const char *name)
+{
+    /* Check compound extension first */
+    const char *app_ext = strstr(name, ".app.elf");
+    if (app_ext && app_ext[8] == '\0') return "[A]";
+
+    const char *dot = strrchr(name, '.');
+    if (!dot) return "[F]";
+
+    if (strcmp(dot, ".txt") == 0 || strcmp(dot, ".md") == 0 ||
+        strcmp(dot, ".log") == 0) return "[T]";
+
+    if (strcmp(dot, ".json") == 0 || strcmp(dot, ".csv") == 0) return "[D]";
+
+    if (strcmp(dot, ".bin") == 0 || strcmp(dot, ".img") == 0) return "[B]";
+
+    return "[F]";
+}
+
+/* ------------------------------------------------------------------ */
+/* Title-bar click handler — navigate to parent                        */
+/* ------------------------------------------------------------------ */
+
+static void title_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    if (strcmp(s_fm.current_path, "/sdcard") == 0) return;
+
+    char parent[256];
+    strncpy(parent, s_fm.current_path, sizeof(parent) - 1);
+    parent[sizeof(parent) - 1] = '\0';
+
+    char *last_slash = strrchr(parent, '/');
+    if (last_slash && last_slash != parent) {
+        *last_slash = '\0';
+    } else {
+        strncpy(parent, "/sdcard", sizeof(parent) - 1);
+    }
+
+    if (strncmp(parent, "/sdcard", 7) != 0) {
+        strncpy(parent, "/sdcard", sizeof(parent) - 1);
+    }
+
+    navigate_to(parent);
+}
+
+/* ------------------------------------------------------------------ */
 /* Delete handler — frees malloc'd user_data on object deletion        */
 /* ------------------------------------------------------------------ */
 
@@ -117,6 +168,8 @@ static void entry_clicked_cb(lv_event_t *e)
 static void create_entry_row(lv_obj_t *list, const char *base_path,
                              const fm_entry_t *entry)
 {
+    const theme_colors_t *clr = theme_get_colors();
+
     /* Build full path — stored as user_data for the click handler */
     char *full_path = malloc(512);
     if (!full_path) return;
@@ -130,7 +183,7 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
     /* Row container */
     lv_obj_t *row = lv_obj_create(list);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -140,11 +193,11 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
 
     /* 1px bottom border separator */
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, clr->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
 
-    /* Pressed state: invert */
-    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    /* Pressed state: primary highlight */
+    lv_obj_set_style_bg_color(row, clr->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
 
     /* Flex row, items vertically centred */
@@ -162,20 +215,20 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
     lv_obj_add_event_cb(row, entry_clicked_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(row, entry_delete_cb,  LV_EVENT_DELETE,  NULL);
 
-    /* Type indicator: "[D]" or "[F]" */
+    /* Type indicator: extension-aware for files, "[D]" for dirs */
     lv_obj_t *lbl_type = lv_label_create(row);
-    lv_label_set_text(lbl_type, entry->is_dir ? "[D]" : "[F]");
+    lv_label_set_text(lbl_type, entry->is_dir ? "[D]" : file_type_indicator(entry->name));
     lv_obj_set_style_text_font(lbl_type, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_type, clr->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_type, clr->bg, LV_STATE_PRESSED);
 
     /* Filename — flex_grow=1 so it fills remaining space */
     lv_obj_t *lbl_name = lv_label_create(row);
     lv_label_set_text(lbl_name, entry->name);
     lv_label_set_long_mode(lbl_name, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_name, clr->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, clr->bg, LV_STATE_PRESSED);
     lv_obj_set_flex_grow(lbl_name, 1);
 
     /* Size label — only for files */
@@ -186,8 +239,8 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
         lv_obj_t *lbl_size = lv_label_create(row);
         lv_label_set_text(lbl_size, size_str);
         lv_obj_set_style_text_font(lbl_size, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_size, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_size, lv_color_white(), LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(lbl_size, clr->text_secondary, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl_size, clr->bg, LV_STATE_PRESSED);
     }
 }
 
@@ -206,6 +259,8 @@ static void parent_clicked_cb(lv_event_t *e)
 
 static void create_parent_row(lv_obj_t *list, const char *parent_path)
 {
+    const theme_colors_t *clr = theme_get_colors();
+
     char *stored_path = malloc(256);
     if (!stored_path) return;
     strncpy(stored_path, parent_path, 255);
@@ -213,7 +268,7 @@ static void create_parent_row(lv_obj_t *list, const char *parent_path)
 
     lv_obj_t *row = lv_obj_create(list);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -222,10 +277,10 @@ static void create_parent_row(lv_obj_t *list, const char *parent_path)
     lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
 
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, clr->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
 
-    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(row, clr->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
 
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -244,14 +299,14 @@ static void create_parent_row(lv_obj_t *list, const char *parent_path)
     lv_obj_t *lbl_type = lv_label_create(row);
     lv_label_set_text(lbl_type, "[D]");
     lv_obj_set_style_text_font(lbl_type, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_type, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_type, clr->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_type, clr->bg, LV_STATE_PRESSED);
 
     lv_obj_t *lbl_name = lv_label_create(row);
     lv_label_set_text(lbl_name, "..");
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_name, clr->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, clr->bg, LV_STATE_PRESSED);
     lv_obj_set_flex_grow(lbl_name, 1);
 }
 
@@ -273,14 +328,18 @@ static void navigate_to(const char *path)
     /* Clear existing list entries */
     lv_obj_clean(s_fm.list_container);
 
+    /* Reset scroll position to top */
+    lv_obj_scroll_to_y(s_fm.list_container, 0, LV_ANIM_OFF);
+
     /* Open directory */
     DIR *dir = opendir(path);
     if (!dir) {
+        const theme_colors_t *clr = theme_get_colors();
         ESP_LOGW(TAG, "Cannot open directory: %s", path);
         lv_obj_t *lbl = lv_label_create(s_fm.list_container);
         lv_label_set_text(lbl, "SD card not mounted");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, clr->text, LV_PART_MAIN);
         lv_obj_set_style_pad_all(lbl, 8, LV_PART_MAIN);
         return;
     }
@@ -319,6 +378,11 @@ static void navigate_to(const char *path)
             continue;
         }
 
+        /* Skip hidden files (dot-files) */
+        if (de->d_name[0] == '.') {
+            continue;
+        }
+
         /* Build full path for stat */
         char full[512];
         if (strcmp(path, "/") == 0) {
@@ -348,6 +412,18 @@ static void navigate_to(const char *path)
     /* Populate list rows */
     for (int i = 0; i < count; i++) {
         create_entry_row(s_fm.list_container, path, &entries[i]);
+    }
+
+    /* Show "Empty directory" message if no entries (after filtering) */
+    if (count == 0) {
+        const theme_colors_t *clr = theme_get_colors();
+        lv_obj_t *lbl_empty = lv_label_create(s_fm.list_container);
+        lv_label_set_text(lbl_empty, "Empty directory");
+        lv_obj_set_style_text_font(lbl_empty, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl_empty, clr->text_secondary, LV_PART_MAIN);
+        lv_obj_set_width(lbl_empty, LV_PCT(100));
+        lv_obj_set_style_text_align(lbl_empty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(lbl_empty, 16, LV_PART_MAIN);
     }
 
     /* Update storage info bar */
@@ -400,13 +476,15 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_fm.root, 0, LV_PART_MAIN);
     lv_obj_clear_flag(s_fm.root, LV_OBJ_FLAG_SCROLLABLE);
 
+    const theme_colors_t *clr = theme_get_colors();
+
     /* ----------------------------------------------------------------
      * Title bar (30px)
      * ---------------------------------------------------------------- */
     lv_obj_t *title_bar = lv_obj_create(s_fm.root);
     lv_obj_set_pos(title_bar, 0, 0);
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
-    lv_obj_set_style_bg_color(title_bar, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(title_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(title_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(title_bar, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -414,15 +492,18 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_set_style_pad_top(title_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(title_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_border_side(title_bar, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(title_bar, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(title_bar, clr->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(title_bar, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(title_bar, clr->primary, LV_STATE_PRESSED);
     lv_obj_clear_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(title_bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(title_bar, title_clicked_cb, LV_EVENT_CLICKED, NULL);
 
     s_fm.title_label = lv_label_create(title_bar);
     lv_label_set_text(s_fm.title_label, "< Files: /sdcard");
     lv_label_set_long_mode(s_fm.title_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(s_fm.title_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_fm.title_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_fm.title_label, clr->text, LV_PART_MAIN);
     lv_obj_align(s_fm.title_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* ----------------------------------------------------------------
@@ -431,7 +512,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     s_fm.list_container = lv_obj_create(s_fm.root);
     lv_obj_set_pos(s_fm.list_container, 0, TITLE_BAR_H);
     lv_obj_set_size(s_fm.list_container, APP_AREA_W, LIST_H);
-    lv_obj_set_style_bg_color(s_fm.list_container, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_fm.list_container, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_fm.list_container, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_fm.list_container, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_fm.list_container, 0, LV_PART_MAIN);
@@ -443,9 +524,9 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
 
-    /* Thin black scrollbar, no track */
+    /* Thin scrollbar using primary color, no track */
     lv_obj_set_scrollbar_mode(s_fm.list_container, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_bg_color(s_fm.list_container, lv_color_black(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(s_fm.list_container, clr->primary, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(s_fm.list_container, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_width(s_fm.list_container, 2, LV_PART_SCROLLBAR);
     lv_obj_set_style_radius(s_fm.list_container, 0, LV_PART_SCROLLBAR);
@@ -456,7 +537,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_t *storage_bar = lv_obj_create(s_fm.root);
     lv_obj_set_pos(storage_bar, 0, TITLE_BAR_H + LIST_H);
     lv_obj_set_size(storage_bar, APP_AREA_W, STORAGE_BAR_H);
-    lv_obj_set_style_bg_color(storage_bar, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(storage_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(storage_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(storage_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(storage_bar, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -464,7 +545,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_set_style_pad_top(storage_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(storage_bar, 0, LV_PART_MAIN);
     lv_obj_set_style_border_side(storage_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
-    lv_obj_set_style_border_color(storage_bar, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(storage_bar, clr->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(storage_bar, 1, LV_PART_MAIN);
     lv_obj_clear_flag(storage_bar, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -472,7 +553,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_label_set_text(s_fm.storage_label, "Free: -- / --");
     lv_label_set_long_mode(s_fm.storage_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(s_fm.storage_label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_fm.storage_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_fm.storage_label, clr->text_secondary, LV_PART_MAIN);
     lv_obj_align(s_fm.storage_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* Populate list starting at SD card root */

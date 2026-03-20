@@ -11,6 +11,9 @@ static const char *TAG = "theme";
 /* Default monochrome theme — optimized for e-paper (black on white) */
 static theme_colors_t s_current_theme;
 
+/* Name of the currently active theme */
+static char s_current_theme_name[32] = "Default";
+
 static void theme_colors_init_defaults(void)
 {
     s_current_theme.primary        = lv_color_black();
@@ -133,6 +136,10 @@ esp_err_t theme_init(lv_display_t *disp)
     /* Initialize default colors */
     theme_colors_init_defaults();
 
+    /* Reset name to Default */
+    strncpy(s_current_theme_name, "Default", sizeof(s_current_theme_name) - 1);
+    s_current_theme_name[sizeof(s_current_theme_name) - 1] = '\0';
+
     /* Create theme and wire into LVGL */
     s_theme = lv_theme_simple_init(disp);
     lv_theme_set_apply_cb(s_theme, theme_apply_cb);
@@ -214,8 +221,19 @@ esp_err_t theme_load(const char *json_path)
     /* Refresh status bar colors immediately */
     statusbar_refresh_theme();
 
+    /* Track the active theme name (basename without path) */
+    const char *basename = strrchr(json_path, '/');
+    basename = basename ? basename + 1 : json_path;
+    strncpy(s_current_theme_name, basename, sizeof(s_current_theme_name) - 1);
+    s_current_theme_name[sizeof(s_current_theme_name) - 1] = '\0';
+
     ESP_LOGI(TAG, "Theme loaded: %s", json_path);
     return ESP_OK;
+}
+
+const char *theme_get_current_name(void)
+{
+    return s_current_theme_name;
 }
 
 const theme_colors_t *theme_get_colors(void)
