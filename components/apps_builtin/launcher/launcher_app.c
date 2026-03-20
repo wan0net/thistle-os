@@ -15,7 +15,9 @@ static int launcher_on_create(void)
     /* Launcher runs on the root display object; parent is provided
      * by the kernel when it calls on_create.  For now the UI is
      * initialised with a NULL parent — launcher_ui_create handles it. */
-    launcher_ui_create(NULL);
+    /* Use the UI manager's app content area as parent */
+    extern lv_obj_t *ui_manager_get_app_area(void);
+    launcher_ui_create(ui_manager_get_app_area());
     return 0;
 }
 

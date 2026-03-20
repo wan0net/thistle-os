@@ -6,7 +6,11 @@
 #include "freertos/task.h"
 
 #include "thistle/kernel.h"
+#include "thistle/app_manager.h"
 #include "ui/manager.h"
+#include "launcher/launcher_app.h"
+#include "settings/settings_app.h"
+#include "file_manager/filemgr_app.h"
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -34,6 +38,12 @@ void app_main(void)
 
     /* Start LVGL and the ThistleOS window manager / UI */
     ESP_ERROR_CHECK(ui_manager_init());
+
+    /* Register and launch built-in apps */
+    launcher_app_register();
+    settings_app_register();
+    filemgr_app_register();
+    app_manager_launch("com.thistle.launcher");
 
     ESP_LOGI(TAG, "ThistleOS ready");
 

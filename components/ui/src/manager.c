@@ -155,17 +155,17 @@ esp_err_t ui_manager_init(void)
     lv_obj_set_style_border_width(s_app_area, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_app_area, 0, LV_PART_MAIN);
 
-    /* 8. Create status bar widgets */
-    err = statusbar_create(s_statusbar_cont);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "statusbar_create failed: %s", esp_err_to_name(err));
-        return err;
-    }
-
-    /* 9. Apply default theme */
+    /* 8. Apply default theme FIRST (statusbar reads theme colors) */
     err = theme_init(s_display);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "theme_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    /* 9. Create status bar widgets (uses theme colors) */
+    err = statusbar_create(s_statusbar_cont);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "statusbar_create failed: %s", esp_err_to_name(err));
         return err;
     }
 

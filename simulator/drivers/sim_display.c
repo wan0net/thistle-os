@@ -11,7 +11,7 @@
 static SDL_Window   *s_window   = NULL;
 static SDL_Renderer *s_renderer = NULL;
 static SDL_Texture  *s_texture  = NULL;
-static uint8_t       s_fb[SIM_WIDTH * SIM_HEIGHT];  /* 8-bit grayscale framebuffer */
+static uint16_t      s_fb[SIM_WIDTH * SIM_HEIGHT];  /* RGB565 framebuffer */
 static bool          s_initialized = false;
 
 static esp_err_t sim_display_init(const void *config)
@@ -29,14 +29,14 @@ static esp_err_t sim_display_init(const void *config)
         "ThistleOS Simulator",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         SIM_WIDTH * SIM_SCALE, SIM_HEIGHT * SIM_SCALE,
-        0
+        SDL_WINDOW_SHOWN
     );
     if (!s_window) {
         printf("SDL_CreateWindow failed: %s\n", SDL_GetError());
         return ESP_FAIL;
     }
 
-    s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_ACCELERATED);
+    s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!s_renderer) {
         s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_SOFTWARE);
     }
@@ -47,9 +47,10 @@ static esp_err_t sim_display_init(const void *config)
         return ESP_FAIL;
     }
 
+    /* RGB565 texture matching LVGL's 16-bit color output */
     s_texture = SDL_CreateTexture(
         s_renderer,
-        SDL_PIXELFORMAT_RGB332,
+        SDL_PIXELFORMAT_RGB565,
         SDL_TEXTUREACCESS_STREAMING,
         SIM_WIDTH, SIM_HEIGHT
     );
@@ -62,9 +63,17 @@ static esp_err_t sim_display_init(const void *config)
         return ESP_FAIL;
     }
 
-    memset(s_fb, 0xFF, sizeof(s_fb));  /* white */
+    /* White background */
+    memset(s_fb, 0xFF, sizeof(s_fb));
+
+    /* Initial render — white screen */
+    SDL_UpdateTexture(s_texture, NULL, s_fb, SIM_WIDTH * sizeof(uint16_t));
+    SDL_RenderClear(s_renderer);
+    SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
+    SDL_RenderPresent(s_renderer);
+
     s_initialized = true;
-    printf("Simulator display initialized (%dx%d, %dx scale)\n",
+    printf("Simulator display initialized (%dx%d, %dx scale, RGB565)\n",
            SIM_WIDTH, SIM_HEIGHT, SIM_SCALE);
     return ESP_OK;
 }
@@ -85,17 +94,19 @@ static esp_err_t sim_display_flush(const hal_area_t *area, const uint8_t *data)
 {
     if (!s_initialized || !area || !data) return ESP_FAIL;
 
-    /* Copy pixel data into framebuffer */
+    /* LVGL sends RGB565 pixels (2 bytes per pixel) */
+    const uint16_t *pixels = (const uint16_t *)data;
     uint16_t w = area->x2 - area->x1 + 1;
+
     for (uint16_t y = area->y1; y <= area->y2 && y < SIM_HEIGHT; y++) {
         for (uint16_t x = area->x1; x <= area->x2 && x < SIM_WIDTH; x++) {
             size_t src_idx = (size_t)(y - area->y1) * w + (x - area->x1);
-            s_fb[y * SIM_WIDTH + x] = data[src_idx];
+            s_fb[y * SIM_WIDTH + x] = pixels[src_idx];
         }
     }
 
     /* Update SDL texture and render */
-    SDL_UpdateTexture(s_texture, NULL, s_fb, SIM_WIDTH);
+    SDL_UpdateTexture(s_texture, NULL, s_fb, SIM_WIDTH * sizeof(uint16_t));
     SDL_RenderClear(s_renderer);
     SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
     SDL_RenderPresent(s_renderer);
@@ -103,28 +114,9 @@ static esp_err_t sim_display_flush(const hal_area_t *area, const uint8_t *data)
     return ESP_OK;
 }
 
-static esp_err_t sim_display_brightness(uint8_t pct)
-{
-    (void)pct;
-    return ESP_OK;
-}
-
-static esp_err_t sim_display_sleep(bool enter)
-{
-    (void)enter;
-    return ESP_OK;
-}
-
-static esp_err_t sim_display_refresh_mode(hal_display_refresh_mode_t mode)
-{
-    (void)mode;
-    return ESP_OK;
-}
-
-void sim_display_sdl_init(void)
-{
-    sim_display_init(NULL);
-}
+static esp_err_t sim_display_brightness(uint8_t pct) { (void)pct; return ESP_OK; }
+static esp_err_t sim_display_sleep(bool enter) { (void)enter; return ESP_OK; }
+static esp_err_t sim_display_refresh_mode(hal_display_refresh_mode_t mode) { (void)mode; return ESP_OK; }
 
 static const hal_display_driver_t sim_display_driver = {
     .init             = sim_display_init,
@@ -135,7 +127,7 @@ static const hal_display_driver_t sim_display_driver = {
     .set_refresh_mode = sim_display_refresh_mode,
     .width            = SIM_WIDTH,
     .height           = SIM_HEIGHT,
-    .type             = HAL_DISPLAY_TYPE_LCD,  /* Simulate as LCD (instant refresh) */
+    .type             = HAL_DISPLAY_TYPE_LCD,
     .name             = "SDL2 Simulator",
 };
 

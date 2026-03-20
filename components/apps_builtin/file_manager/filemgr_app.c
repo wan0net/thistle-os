@@ -12,7 +12,8 @@ static const char *TAG = "filemgr";
 static int filemgr_on_create(void)
 {
     ESP_LOGI(TAG, "on_create");
-    filemgr_ui_create(NULL);
+    extern lv_obj_t *ui_manager_get_app_area(void);
+    filemgr_ui_create(ui_manager_get_app_area());
     return 0;
 }
 

@@ -12,7 +12,8 @@ static const char *TAG = "settings";
 static int settings_on_create(void)
 {
     ESP_LOGI(TAG, "on_create");
-    settings_ui_create(NULL);
+    extern lv_obj_t *ui_manager_get_app_area(void);
+    settings_ui_create(ui_manager_get_app_area());
     return 0;
 }
 
