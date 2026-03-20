@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "rom/ets_sys.h"
+#include <stdatomic.h>
 #include <string.h>
 #include <math.h>
 
@@ -85,7 +86,7 @@ static struct {
     uint8_t             spreading_factor;
     uint32_t            bandwidth_hz;
     bool                initialized;
-    bool                receiving;
+    volatile _Atomic bool receiving;
     TaskHandle_t        irq_task;
 } s_radio;
 
@@ -116,12 +117,21 @@ static esp_err_t sx1262_wait_busy(uint32_t timeout_ms)
     return ESP_OK;
 }
 
+/* Maximum SPI payload: 256 bytes data + 3 bytes overhead (cmd + addr_hi + addr_lo).
+ * Using 260 gives a safe margin and avoids VLAs on the IRQ task's limited stack. */
+#define SX1262_SPI_BUF_MAX 260
+
 static esp_err_t sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 {
+    if (len >= SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_write_command: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
     /* Build tx buffer: [cmd] [data...] */
-    uint8_t tx[1 + len];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
     tx[0] = cmd;
     if (data && len) {
         memcpy(tx + 1, data, len);
@@ -137,12 +147,17 @@ static esp_err_t sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t l
 
 static esp_err_t sx1262_read_command(uint8_t cmd, uint8_t *out, size_t len)
 {
+    /* Protocol: send [cmd] [NOP], then read len bytes. Total = 2 + len. */
+    if (2 + len > SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_read_command: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
-    /* Protocol: send [cmd] [NOP], then read len bytes. */
     size_t total = 2 + len;
-    uint8_t tx[total];
-    uint8_t rx[total];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
+    uint8_t rx[SX1262_SPI_BUF_MAX];
     memset(tx, 0x00, total);
     tx[0] = cmd;
 
@@ -160,10 +175,16 @@ static esp_err_t sx1262_read_command(uint8_t cmd, uint8_t *out, size_t len)
 
 static esp_err_t sx1262_write_registers(uint16_t addr, const uint8_t *data, size_t len)
 {
+    /* [cmd] [addr_hi] [addr_lo] [data...] — total = 3 + len */
+    if (3 + len > SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_write_registers: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
     size_t total = 3 + len;
-    uint8_t tx[total];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
     tx[0] = CMD_WRITE_REGISTER;
     tx[1] = (addr >> 8) & 0xFF;
     tx[2] = addr & 0xFF;
@@ -179,12 +200,17 @@ static esp_err_t sx1262_write_registers(uint16_t addr, const uint8_t *data, size
 
 static esp_err_t sx1262_read_registers(uint16_t addr, uint8_t *out, size_t len)
 {
+    /* [cmd] [addr_hi] [addr_lo] [NOP] [data...] — total = 4 + len */
+    if (4 + len > SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_read_registers: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
-    /* [cmd] [addr_hi] [addr_lo] [NOP] [data...] */
     size_t total = 4 + len;
-    uint8_t tx[total];
-    uint8_t rx[total];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
+    uint8_t rx[SX1262_SPI_BUF_MAX];
     memset(tx, 0x00, total);
     tx[0] = CMD_READ_REGISTER;
     tx[1] = (addr >> 8) & 0xFF;
@@ -204,10 +230,16 @@ static esp_err_t sx1262_read_registers(uint16_t addr, uint8_t *out, size_t len)
 
 static esp_err_t sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 {
+    /* [cmd] [offset] [data...] — total = 2 + len */
+    if (2 + len > SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_write_buffer: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
     size_t total = 2 + len;
-    uint8_t tx[total];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
     tx[0] = CMD_WRITE_BUFFER;
     tx[1] = offset;
     memcpy(tx + 2, data, len);
@@ -222,12 +254,17 @@ static esp_err_t sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t
 
 static esp_err_t sx1262_read_buffer(uint8_t offset, uint8_t *out, size_t len)
 {
+    /* [cmd] [offset] [NOP] [data...] — total = 3 + len */
+    if (3 + len > SX1262_SPI_BUF_MAX) {
+        ESP_LOGE(TAG, "sx1262_read_buffer: payload too large (%u)", (unsigned)len);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     sx1262_wait_busy(100);
 
-    /* [cmd] [offset] [NOP] [data...] */
     size_t total = 3 + len;
-    uint8_t tx[total];
-    uint8_t rx[total];
+    uint8_t tx[SX1262_SPI_BUF_MAX];
+    uint8_t rx[SX1262_SPI_BUF_MAX];
     memset(tx, 0x00, total);
     tx[0] = CMD_READ_BUFFER;
     tx[1] = offset;
@@ -410,7 +447,7 @@ static void radio_irq_task(void *arg)
 
         if (irq & IRQ_TIMEOUT) {
             ESP_LOGD(TAG, "radio timeout (irq=0x%04x)", irq);
-            if (s_radio.receiving) {
+            if (atomic_load(&s_radio.receiving)) {
                 /* Re-arm continuous RX after a timeout */
                 sx1262_set_rx(0xFFFFFF);
             }
@@ -418,7 +455,7 @@ static void radio_irq_task(void *arg)
 
         if (irq & IRQ_CRC_ERR) {
             ESP_LOGW(TAG, "RX CRC error");
-            if (s_radio.receiving) {
+            if (atomic_load(&s_radio.receiving)) {
                 sx1262_set_rx(0xFFFFFF);
             }
         }
@@ -446,7 +483,7 @@ static void radio_irq_task(void *arg)
             }
 
             /* Re-arm continuous receive */
-            if (s_radio.receiving) {
+            if (atomic_load(&s_radio.receiving)) {
                 sx1262_set_rx(0xFFFFFF);
             }
         }
@@ -471,7 +508,7 @@ static esp_err_t sx1262_init(const void *config)
     s_radio.tx_power_dbm     = 22;
     s_radio.spreading_factor = 7;
     s_radio.bandwidth_hz     = 125000;
-    s_radio.receiving        = false;
+    atomic_store(&s_radio.receiving, false);
     s_radio.rx_cb            = NULL;
     s_radio.rx_cb_data       = NULL;
 
@@ -627,7 +664,7 @@ static void sx1262_deinit(void)
     spi_bus_remove_device(s_radio.spi);
     s_radio.spi         = NULL;
     s_radio.initialized = false;
-    s_radio.receiving   = false;
+    atomic_store(&s_radio.receiving, false);
     ESP_LOGI(TAG, "SX1262 deinitialized");
 }
 
@@ -671,7 +708,7 @@ static esp_err_t sx1262_send(const uint8_t *data, size_t len)
     if (!data || len == 0 || len > 255) return ESP_ERR_INVALID_ARG;
 
     /* Halt any ongoing receive */
-    s_radio.receiving = false;
+    atomic_store(&s_radio.receiving, false);
     esp_err_t err = sx1262_set_standby();
     if (err != ESP_OK) return err;
 
@@ -704,7 +741,7 @@ static esp_err_t sx1262_start_receive(hal_radio_rx_cb_t cb, void *user_data)
     err = sx1262_apply_packet_params(255);
     if (err != ESP_OK) return err;
 
-    s_radio.receiving = true;
+    atomic_store(&s_radio.receiving, true);
     sx1262_set_rx(0xFFFFFF); /* continuous RX — no timeout */
 
     ESP_LOGD(TAG, "continuous RX started");
@@ -714,7 +751,7 @@ static esp_err_t sx1262_start_receive(hal_radio_rx_cb_t cb, void *user_data)
 static esp_err_t sx1262_stop_receive(void)
 {
     if (!s_radio.initialized) return ESP_ERR_INVALID_STATE;
-    s_radio.receiving = false;
+    atomic_store(&s_radio.receiving, false);
     return sx1262_set_standby();
 }
 

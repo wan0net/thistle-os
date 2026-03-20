@@ -188,6 +188,8 @@ esp_err_t ui_manager_init(void)
  * Splash screen — full-screen overlay that auto-dismisses via esp_timer
  * ------------------------------------------------------------------------- */
 
+static esp_timer_handle_t s_splash_timer = NULL;
+
 static void splash_dismiss_cb(void *arg)
 {
     lv_obj_t *splash = (lv_obj_t *)arg;
@@ -195,6 +197,12 @@ static void splash_dismiss_cb(void *arg)
     ui_manager_lock();
     lv_obj_delete(splash);
     ui_manager_unlock();
+
+    /* Clean up the timer handle so it does not leak. */
+    if (s_splash_timer != NULL) {
+        esp_timer_delete(s_splash_timer);
+        s_splash_timer = NULL;
+    }
 }
 
 void ui_manager_show_splash(uint32_t duration_ms)
@@ -245,12 +253,12 @@ void ui_manager_show_splash(uint32_t duration_ms)
         .name            = "splash_dismiss",
         .dispatch_method = ESP_TIMER_TASK,
     };
-    esp_timer_handle_t splash_timer;
-    esp_err_t err = esp_timer_create(&splash_timer_args, &splash_timer);
+    esp_err_t err = esp_timer_create(&splash_timer_args, &s_splash_timer);
     if (err == ESP_OK) {
-        esp_timer_start_once(splash_timer, (uint64_t)duration_ms * 1000ULL);
+        esp_timer_start_once(s_splash_timer, (uint64_t)duration_ms * 1000ULL);
     } else {
         ESP_LOGE(TAG, "failed to create splash timer: %s", esp_err_to_name(err));
+        s_splash_timer = NULL;
     }
 
     ESP_LOGI(TAG, "splash screen shown for %" PRIu32 " ms", duration_ms);

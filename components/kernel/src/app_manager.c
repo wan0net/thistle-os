@@ -119,6 +119,9 @@ esp_err_t app_manager_launch(const char *app_id)
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Remember the current foreground so we can restore it if launch fails. */
+    app_slot_t *prev_fg = foreground_slot();
+
     /* Pause whatever is currently in the foreground */
     pause_foreground();
 
@@ -131,6 +134,16 @@ esp_err_t app_manager_launch(const char *app_id)
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "on_create failed for '%s': %s", app_id, esp_err_to_name(ret));
                 target->state = APP_STATE_UNLOADED;
+                /* Restore the previous foreground app so it isn't left stranded
+                 * in BACKGROUNDED state with no way to resume. */
+                if (prev_fg != NULL) {
+                    ESP_LOGI(TAG, "Restoring foreground app '%s' after launch failure",
+                             prev_fg->entry->manifest->id);
+                    prev_fg->state = APP_STATE_RUNNING;
+                    if (prev_fg->entry->on_resume) {
+                        prev_fg->entry->on_resume();
+                    }
+                }
                 return ret;
             }
         }

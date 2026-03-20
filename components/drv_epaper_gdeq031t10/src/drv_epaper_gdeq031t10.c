@@ -230,21 +230,21 @@ static esp_err_t gdeq031t10_init(const void *config)
     }
 
     /* ── Power-on sequence ── */
-    /* Power setting: VGH=20V, VGL=-20V, VDH=15V, VDL=-15V */
-    ret  = epaper_send_cmd(CMD_POWER_SETTING);
-    ret |= epaper_send_data_byte(0x03);  /* VDS_EN, VDG_EN */
-    ret |= epaper_send_data_byte(0x00);  /* VCOM_HV, VGHL_LV */
-    ret |= epaper_send_data_byte(0x2B);  /* VDH 15V */
-    ret |= epaper_send_data_byte(0x2B);  /* VDL -15V */
-    ret |= epaper_send_data_byte(0xFF);  /* VDHR */
-    if (ret != ESP_OK) goto fail;
+    /* Power setting: VGH=20V, VGL=-20V, VDH=15V, VDL=-15V
+     * Each step is checked individually — the power sequencing is sensitive
+     * and sending further data after a failed command can damage the display. */
+    ret = epaper_send_cmd(CMD_POWER_SETTING);          if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x03);  /* VDS_EN, VDG_EN */  if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x00);  /* VCOM_HV, VGHL_LV */ if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x2B);  /* VDH 15V */          if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x2B);  /* VDL -15V */         if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0xFF);  /* VDHR */             if (ret != ESP_OK) goto fail;
 
     /* Booster soft-start */
-    ret  = epaper_send_cmd(CMD_BOOSTER_SOFT_START);
-    ret |= epaper_send_data_byte(0x17);
-    ret |= epaper_send_data_byte(0x17);
-    ret |= epaper_send_data_byte(0x17);
-    if (ret != ESP_OK) goto fail;
+    ret = epaper_send_cmd(CMD_BOOSTER_SOFT_START);     if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x17);                 if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x17);                 if (ret != ESP_OK) goto fail;
+    ret = epaper_send_data_byte(0x17);                 if (ret != ESP_OK) goto fail;
 
     /* Power on */
     ret = epaper_send_cmd(CMD_POWER_ON);
