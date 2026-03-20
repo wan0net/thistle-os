@@ -117,8 +117,12 @@ static esp_err_t load_note(const char *path)
     }
 
     size_t read_bytes = fread(content, 1, (size_t)size, f);
-    content[read_bytes] = '\0';
     fclose(f);
+    if (read_bytes != (size_t)size) {
+        free(content);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    content[read_bytes] = '\0';
 
     lv_textarea_set_text(s_notes.textarea, content);
     free(content);
@@ -238,7 +242,10 @@ static void note_row_clicked_cb(lv_event_t *e)
     lv_obj_t   *row  = lv_event_get_target(e);
     const char *path = (const char *)lv_obj_get_user_data(row);
     if (path) {
-        open_note(path);
+        char path_copy[512];
+        strncpy(path_copy, path, sizeof(path_copy) - 1);
+        path_copy[sizeof(path_copy) - 1] = '\0';
+        open_note(path_copy);
     }
 }
 

@@ -109,7 +109,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             s_ble.conn_handle = event->connect.conn_handle;
             s_ble.state = BLE_STATE_CONNECTED;
             ESP_LOGI(TAG, "BLE connected (handle=%d)", s_ble.conn_handle);
-            event_publish_simple(EVENT_WIFI_CONNECTED); /* Reuse for now — TODO: add BLE events */
+            event_publish_simple(EVENT_BLE_CONNECTED);
         } else {
             ESP_LOGW(TAG, "BLE connection failed: %d", event->connect.status);
             ble_manager_start_advertising();
@@ -119,6 +119,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         s_ble.state = BLE_STATE_ADVERTISING;
         ESP_LOGI(TAG, "BLE disconnected, reason=%d", event->disconnect.reason);
+        event_publish_simple(EVENT_BLE_DISCONNECTED);
         ble_manager_start_advertising();
         break;
 

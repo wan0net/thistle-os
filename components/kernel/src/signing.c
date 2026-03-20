@@ -140,8 +140,12 @@ esp_err_t signing_verify_file(const char *elf_path)
         return ESP_ERR_NO_MEM;
     }
 
-    fread(elf_data, 1, (size_t)elf_size, elf_f);
+    size_t nread = fread(elf_data, 1, (size_t)elf_size, elf_f);
     fclose(elf_f);
+    if (nread != (size_t)elf_size) {
+        free(elf_data);
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     esp_err_t ret = signing_verify(elf_data, (size_t)elf_size, signature);
     free(elf_data);

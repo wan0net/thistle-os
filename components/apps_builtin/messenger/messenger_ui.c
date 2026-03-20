@@ -38,6 +38,9 @@
 
 static const char *TAG = "messenger_ui";
 
+static volatile int s_pending_rx = 0;
+#define MAX_PENDING_RX 10
+
 /* ------------------------------------------------------------------ */
 /* Constants                                                            */
 /* ------------------------------------------------------------------ */
@@ -150,6 +153,7 @@ static void rx_async_handler(void *arg)
 {
     rx_async_arg_t *rx = (rx_async_arg_t *)arg;
     if (!rx) return;
+    s_pending_rx--;
 
     /* Find the matching conversation by transport type */
     int ci = -1;
@@ -179,8 +183,13 @@ static void transport_rx_cb(msg_transport_t transport,
                             const char *sender,
                             const char *text)
 {
+    if (s_pending_rx >= MAX_PENDING_RX) {
+        ESP_LOGW(TAG, "RX queue full, dropping message");
+        return;
+    }
+    s_pending_rx++;
     rx_async_arg_t *arg = malloc(sizeof(rx_async_arg_t));
-    if (!arg) return;
+    if (!arg) { s_pending_rx--; return; }
 
     arg->transport = transport;
     strncpy(arg->sender, sender ? sender : "?", sizeof(arg->sender) - 1);

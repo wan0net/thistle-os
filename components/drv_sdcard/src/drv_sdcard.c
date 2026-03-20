@@ -1,4 +1,5 @@
 #include "drv_sdcard.h"
+#include "hal/sdcard_path.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -28,7 +29,7 @@ static esp_err_t sdcard_init(const void *config)
     memcpy(&s_sd.cfg, config, sizeof(sdcard_config_t));
 
     if (!s_sd.cfg.mount_point) {
-        s_sd.cfg.mount_point = "/sdcard";
+        s_sd.cfg.mount_point = THISTLE_SDCARD;
     }
     if (s_sd.cfg.max_files <= 0) {
         s_sd.cfg.max_files = 5;

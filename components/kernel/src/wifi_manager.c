@@ -56,13 +56,16 @@ esp_err_t wifi_manager_init(void)
     if (s_initialized) return ESP_OK;
 
     /* Initialize TCP/IP stack and default event loop */
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_err_t ret = esp_netif_init();
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "netif init: %s", esp_err_to_name(ret)); return ret; }
+    ret = esp_event_loop_create_default();
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "event loop: %s", esp_err_to_name(ret)); return ret; }
     s_netif = esp_netif_create_default_wifi_sta();
 
     /* Initialize WiFi with default config */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK) { ESP_LOGE(TAG, "wifi init: %s", esp_err_to_name(ret)); return ret; }
 
     /* Register event handlers */
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL);
@@ -105,6 +108,7 @@ esp_err_t wifi_manager_scan(wifi_scan_result_t *results, uint8_t max_results, ui
     for (uint16_t i = 0; i < fetch; i++) {
         memset(&results[i], 0, sizeof(wifi_scan_result_t));
         strncpy(results[i].ssid, (const char *)ap_records[i].ssid, WIFI_SSID_MAX_LEN);
+        results[i].ssid[WIFI_SSID_MAX_LEN] = '\0';
         results[i].rssi = ap_records[i].rssi;
         results[i].channel = ap_records[i].primary;
         results[i].is_open = (ap_records[i].authmode == WIFI_AUTH_OPEN);

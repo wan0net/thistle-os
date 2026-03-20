@@ -115,11 +115,18 @@ esp_err_t assistant_ui_save_conversation(void)
         return ESP_ERR_NOT_FOUND;
     }
 
-    int count = s_ai.msg_count < MAX_MESSAGES ? s_ai.msg_count : MAX_MESSAGES;
+    int count = (s_ai.msg_count < MAX_MESSAGES) ? s_ai.msg_count : MAX_MESSAGES;
+    int start = (s_ai.msg_count <= MAX_MESSAGES) ? 0 : (s_ai.msg_count % MAX_MESSAGES);
     for (int i = 0; i < count; i++) {
-        const ai_message_t *m = &s_ai.messages[i];
+        int idx = (start + i) % MAX_MESSAGES;
+        const ai_message_t *m = &s_ai.messages[idx];
         /* Escape newlines in text as \n literal so one line = one message */
-        fprintf(f, "%s|%s|%s\n", m->sender, m->time_str, m->text);
+        fputs(m->sender, f);
+        fputc('|', f);
+        fputs(m->time_str, f);
+        fputc('|', f);
+        fputs(m->text, f);
+        fputc('\n', f);
     }
 
     fclose(f);

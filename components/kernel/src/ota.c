@@ -1,5 +1,6 @@
 #include "thistle/ota.h"
 #include "thistle/kernel.h"
+#include "thistle/signing.h"
 #include "hal/sdcard_path.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -46,6 +47,13 @@ bool ota_sd_update_available(void)
 
 esp_err_t ota_apply_from_sd(ota_progress_cb_t progress_cb, void *user_data)
 {
+    esp_err_t sig_ret = signing_verify_file(OTA_SD_UPDATE_PATH);
+    if (sig_ret == ESP_ERR_INVALID_CRC) {
+        ESP_LOGE(TAG, "OTA update signature INVALID — refusing to apply");
+        return ESP_ERR_INVALID_CRC;
+    }
+    /* Missing signature allowed for dev builds */
+
     FILE *f = fopen(OTA_SD_UPDATE_PATH, "rb");
     if (!f) {
         ESP_LOGE(TAG, "Cannot open update file: %s", OTA_SD_UPDATE_PATH);
@@ -59,6 +67,11 @@ esp_err_t ota_apply_from_sd(ota_progress_cb_t progress_cb, void *user_data)
 
     if (file_size <= 0) {
         ESP_LOGE(TAG, "Invalid update file size: %ld", file_size);
+        fclose(f);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (file_size > 16 * 1024 * 1024) {
+        ESP_LOGE(TAG, "OTA file too large: %ld", file_size);
         fclose(f);
         return ESP_ERR_INVALID_SIZE;
     }

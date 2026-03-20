@@ -259,14 +259,14 @@ static char *entries_to_json(size_t *out_len)
     if (!buf) return NULL;
 
     size_t pos = 0;
-    buf[pos++] = '[';
+    if (pos + 1 < cap) buf[pos++] = '[';
 
     for (int i = 0; i < s_vault.entry_count; i++) {
         const vault_entry_t *e = &s_vault.entries[i];
         char esc[FIELD_MAX * 2 + 2];
 
-        if (i > 0) { buf[pos++] = ','; }
-        buf[pos++] = '{';
+        if (i > 0) { if (pos + 1 < cap) buf[pos++] = ','; }
+        if (pos + 1 < cap) buf[pos++] = '{';
 
 #define APPEND_FIELD(key, val) do { \
     json_escape((val), esc, sizeof(esc)); \
@@ -274,17 +274,17 @@ static char *entries_to_json(size_t *out_len)
                             "\"" key "\":\"%s\"", esc); \
 } while (0)
 
-        APPEND_FIELD("name",  e->name);     buf[pos++] = ',';
-        APPEND_FIELD("user",  e->username); buf[pos++] = ',';
-        APPEND_FIELD("pass",  e->password); buf[pos++] = ',';
+        APPEND_FIELD("name",  e->name);     if (pos + 1 < cap) buf[pos++] = ',';
+        APPEND_FIELD("user",  e->username); if (pos + 1 < cap) buf[pos++] = ',';
+        APPEND_FIELD("pass",  e->password); if (pos + 1 < cap) buf[pos++] = ',';
         APPEND_FIELD("notes", e->notes);
 
 #undef APPEND_FIELD
 
-        buf[pos++] = '}';
+        if (pos + 1 < cap) buf[pos++] = '}';
     }
 
-    buf[pos++] = ']';
+    if (pos + 1 < cap) buf[pos++] = ']';
     buf[pos]   = '\0';
     *out_len = pos;
     return buf;
@@ -458,9 +458,10 @@ static esp_err_t vault_load(const char *master_pw)
 
     char *json = (char *)malloc((size_t)fsz + 1);
     if (!json) { fclose(f); return ESP_ERR_NO_MEM; }
-    fread(json, 1, (size_t)fsz, f);
-    json[fsz] = '\0';
+    size_t nread = fread(json, 1, (size_t)fsz, f);
     fclose(f);
+    if (nread != (size_t)fsz) { free(json); return ESP_ERR_INVALID_SIZE; }
+    json[fsz] = '\0';
     s_vault.entry_count = json_to_entries(json);
     free(json);
     if (s_vault.entry_count < 0) s_vault.entry_count = 0;
@@ -485,8 +486,9 @@ static esp_err_t vault_load(const char *master_pw)
 
     uint8_t *filebuf = (uint8_t *)malloc((size_t)fsz);
     if (!filebuf) { fclose(f); return ESP_ERR_NO_MEM; }
-    fread(filebuf, 1, (size_t)fsz, f);
+    size_t nread_vault = fread(filebuf, 1, (size_t)fsz, f);
     fclose(f);
+    if (nread_vault != (size_t)fsz) { free(filebuf); return ESP_ERR_INVALID_SIZE; }
 
     /* Split file */
     uint8_t *file_salt = filebuf;                            /* [0..15]  */

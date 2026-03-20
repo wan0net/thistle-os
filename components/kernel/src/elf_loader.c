@@ -143,10 +143,10 @@ esp_err_t elf_app_load(const char *path, elf_app_handle_t *handle)
     esp_err_t sig_ret = signing_verify_file(path);
     if (sig_ret == ESP_OK) {
         ESP_LOGI(TAG, "ELF signature verified: %s", path);
-        /* Full permissions — signed app */
+        permissions_grant(app->manifest.id, PERM_ALL);
     } else if (sig_ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGW(TAG, "ELF unsigned: %s (running in restricted mode)", path);
-        /* Grant limited permissions — unsigned app continues in restricted mode */
+        permissions_grant(app->manifest.id, PERM_IPC);  /* minimal — no radio/gps/storage/network */
     } else {
         ESP_LOGE(TAG, "ELF signature INVALID: %s (refusing to load)", path);
         free(buf);
