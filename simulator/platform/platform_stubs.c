@@ -62,6 +62,13 @@ esp_err_t elf_loader_init(void) {
     return ESP_OK;
 }
 
+/* Driver loader stubs — SD card ELF loading not available in simulator */
+#include "thistle/driver_loader.h"
+esp_err_t driver_loader_init(void) { return ESP_OK; }
+int driver_loader_scan_and_load(void) { return 0; }
+esp_err_t driver_loader_load(const char *path) { (void)path; return ESP_ERR_NOT_SUPPORTED; }
+int driver_loader_get_count(void) { return 0; }
+
 /* Signing subsystem stubs (simulator build — no mbedtls) */
 #include "thistle/signing.h"
 static char s_sim_key_hex[THISTLE_SIGN_KEY_SIZE * 2 + 1] = "(simulator)";

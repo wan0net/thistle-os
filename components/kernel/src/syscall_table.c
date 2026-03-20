@@ -6,6 +6,11 @@
 #include "hal/board.h"
 
 #include "esp_log.h"
+#ifndef SIMULATOR_BUILD
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "driver/i2c_master.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -305,6 +310,31 @@ static syscall_entry_t s_table[] = {
     /* Power */
     { "thistle_power_get_battery_mv",   (void *)thistle_power_get_battery_mv  },
     { "thistle_power_get_battery_pct",  (void *)thistle_power_get_battery_pct },
+
+    /* HAL registration — exported for runtime driver loading */
+    { "hal_display_register",           (void *)hal_display_register          },
+    { "hal_input_register",             (void *)hal_input_register            },
+    { "hal_radio_register",             (void *)hal_radio_register            },
+    { "hal_gps_register",               (void *)hal_gps_register              },
+    { "hal_audio_register",             (void *)hal_audio_register            },
+    { "hal_power_register",             (void *)hal_power_register            },
+    { "hal_imu_register",               (void *)hal_imu_register              },
+    { "hal_storage_register",           (void *)hal_storage_register          },
+    { "hal_set_board_name",             (void *)hal_set_board_name            },
+    { "hal_get_registry",               (void *)hal_get_registry              },
+
+#ifndef SIMULATOR_BUILD
+    /* ESP-IDF functions drivers might need (not available in simulator) */
+    { "esp_log_write",                  (void *)esp_log_write                 },
+    { "gpio_config",                    (void *)gpio_config                   },
+    { "gpio_set_level",                 (void *)gpio_set_level                },
+    { "gpio_get_level",                 (void *)gpio_get_level                },
+    { "spi_bus_add_device",             (void *)spi_bus_add_device            },
+    { "spi_device_polling_transmit",    (void *)spi_device_polling_transmit   },
+    { "i2c_master_bus_add_device",      (void *)i2c_master_bus_add_device     },
+    { "i2c_master_transmit",            (void *)i2c_master_transmit           },
+    { "i2c_master_transmit_receive",    (void *)i2c_master_transmit_receive   },
+#endif
 };
 
 static const size_t s_table_count = sizeof(s_table) / sizeof(s_table[0]);

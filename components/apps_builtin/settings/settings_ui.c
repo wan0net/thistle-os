@@ -22,6 +22,7 @@
 #include "thistle/kernel.h"
 #include "thistle/signing.h"
 #include "thistle/ota.h"
+#include "thistle/driver_loader.h"
 #include "hal/board.h"
 #include "hal/sdcard_path.h"
 #include "ui/theme.h"
@@ -1281,6 +1282,16 @@ static void open_about_screen(void)
     char sign_buf[48];
     snprintf(sign_buf, sizeof(sign_buf), "Signing key: %.16s...", key_hex);
     create_info_row(content, sign_buf);
+
+    /* Runtime drivers loaded from SD card */
+    char drv_buf[64];
+    int rt_drv_count = driver_loader_get_count();
+    if (rt_drv_count > 0) {
+        snprintf(drv_buf, sizeof(drv_buf), "Runtime drivers: %d loaded from SD", rt_drv_count);
+    } else {
+        snprintf(drv_buf, sizeof(drv_buf), "Runtime drivers: none");
+    }
+    create_info_row(content, drv_buf);
 
     /* Check for SD card update */
     if (ota_sd_update_available()) {

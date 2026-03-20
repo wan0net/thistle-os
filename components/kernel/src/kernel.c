@@ -2,6 +2,7 @@
 #include "thistle/event.h"
 #include "thistle/ipc.h"
 #include "thistle/driver_manager.h"
+#include "thistle/driver_loader.h"
 #include "thistle/syscall.h"
 #include "thistle/app_manager.h"
 #include "thistle/elf_loader.h"
@@ -58,6 +59,13 @@ esp_err_t kernel_init(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "syscall_table_init failed: %s", esp_err_to_name(ret));
         return ret;
+    }
+
+    ESP_LOGI(TAG, "Scanning for runtime drivers on SD card");
+    driver_loader_init();
+    int loaded_drv_count = driver_loader_scan_and_load();
+    if (loaded_drv_count > 0) {
+        ESP_LOGI(TAG, "Loaded %d runtime driver(s) from SD card", loaded_drv_count);
     }
 
     ESP_LOGI(TAG, "Initializing app manager");
