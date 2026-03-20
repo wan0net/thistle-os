@@ -20,3 +20,4 @@ managed_components/
 
 # Claude Code
 .claude/
+simulator/build/
