@@ -48,9 +48,12 @@ set(THISTLE_SRCS
 set(SIM_SRCS
     main.c
     platform/platform_stubs.c
+    platform/sim_vfs.c
     drivers/sim_display.c
     drivers/sim_input.c
     drivers/sim_storage.c
+    drivers/sim_wifi.c
+    drivers/sim_ble.c
     board_simulator.c
 )
 
@@ -92,8 +95,10 @@ target_compile_definitions(thistle_sim PRIVATE
 target_link_directories(thistle_sim PRIVATE ${SDL2_LIBRARY_DIRS})
 target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} pthread m)
 
-# Suppress warnings from LVGL source
+# Force-include sim_vfs.h so all fopen/opendir/stat calls get rewritten
+# This MUST come after standard headers are resolved
 target_compile_options(thistle_sim PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/platform/sim_vfs.h"
     -Wno-unused-parameter
     -Wno-sign-compare
     -Wno-missing-field-initializers

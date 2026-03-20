@@ -1,0 +1,17 @@
+{
+    "name": "link42",
+    "description": "Inspired by link42.app — cyber without the theatre",
+    "colors": {
+        "primary": "#2563EB",
+        "secondary": "#3B82F6",
+        "bg": "#111110",
+        "surface": "#1C1C1B",
+        "text": "#EDEDED",
+        "text_secondary": "#A09F9B"
+    },
+    "components": {
+        "button": { "radius": 6, "padding": 8 },
+        "panel": { "radius": 6, "padding": 6 },
+        "list_item": { "padding": 8 }
+    }
+}

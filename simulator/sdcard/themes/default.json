@@ -1,0 +1,21 @@
+{
+    "name": "Default",
+    "description": "Default monochrome theme for e-paper",
+    "colors": {
+        "primary": "#000000",
+        "secondary": "#404040",
+        "bg": "#FFFFFF",
+        "surface": "#FFFFFF",
+        "text": "#000000",
+        "text_secondary": "#808080"
+    },
+    "fonts": {
+        "normal": "default_14",
+        "heading": "default_18"
+    },
+    "components": {
+        "button":    { "radius": 4, "padding": 8 },
+        "panel":     { "radius": 2, "padding": 4 },
+        "list_item": { "padding": 6 }
+    }
+}

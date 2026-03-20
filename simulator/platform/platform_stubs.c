@@ -1,9 +1,18 @@
+/*
+ * Simulator platform stubs — minimal ESP-IDF API stubs for host build.
+ * WiFi and BLE are now in dedicated sim_wifi.c and sim_ble.c.
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/* Undef VFS wrappers for this file — we don't call fopen/opendir here */
+#undef fopen
+#undef opendir
+#undef stat
+
 #include "esp_timer.h"
 #include "esp_err.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <time.h>
-#include <string.h>
 
 /* esp_timer stubs — LVGL tick is driven by main loop */
 struct esp_timer { int dummy; };
@@ -34,61 +43,17 @@ esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
     return ESP_OK;
 }
 
-/* Stubs for subsystems not available in simulator */
+/* Kernel subsystem stubs */
 esp_err_t ota_init(void) { return ESP_OK; }
 esp_err_t permissions_init(void) { return ESP_OK; }
-esp_err_t wifi_manager_init(void) { return ESP_OK; }
-
-/* wifi_manager stubs for statusbar/launcher/settings */
-int wifi_manager_get_state(void) { return 0; }
-int wifi_manager_get_rssi(void) { return 0; }
-const char *wifi_manager_get_ip(void) { return NULL; }
-esp_err_t wifi_manager_scan(void *results, uint8_t max_results, uint8_t *out_count) {
-    (void)results; (void)max_results;
-    if (out_count) *out_count = 0;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-esp_err_t wifi_manager_connect(const char *ssid, const char *password, uint32_t timeout_ms) {
-    (void)ssid; (void)password; (void)timeout_ms;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-esp_err_t wifi_manager_disconnect(void) { return ESP_OK; }
-esp_err_t wifi_manager_ntp_sync(void) { return ESP_ERR_NOT_SUPPORTED; }
-void wifi_manager_get_time_str(char *buf, unsigned long buf_len) {
-    time_t now;
-    struct tm tm_info;
-    time(&now);
-    localtime_r(&now, &tm_info);
-    snprintf(buf, buf_len, "%02d:%02d", tm_info.tm_hour, tm_info.tm_min);
-}
-void wifi_manager_get_date_str(char *buf, unsigned long buf_len) {
-    time_t now;
-    struct tm tm_info;
-    time(&now);
-    localtime_r(&now, &tm_info);
-    snprintf(buf, buf_len, "%04d-%02d-%02d",
-             tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday);
-}
-
-/* BLE manager stubs — BLE hardware not available in simulator */
-#include "thistle/ble_manager.h"
-esp_err_t ble_manager_init(const char *name) { (void)name; return ESP_OK; }
-ble_state_t ble_manager_get_state(void) { return BLE_STATE_OFF; }
-esp_err_t ble_manager_start_advertising(void) { return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t ble_manager_stop_advertising(void) { return ESP_OK; }
-esp_err_t ble_manager_disconnect(void) { return ESP_OK; }
-esp_err_t ble_manager_send(const uint8_t *data, size_t len) { (void)data; (void)len; return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t ble_manager_send_notification(const char *title, const char *body) { (void)title; (void)body; return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t ble_manager_register_rx_cb(ble_rx_cb_t cb, void *user_data) { (void)cb; (void)user_data; return ESP_OK; }
-const char *ble_manager_get_peer_name(void) { return NULL; }
 
 /* ELF loader stub */
 esp_err_t elf_loader_init(void) {
-    printf("I (elf_loader) ELF loader disabled in simulator\n");
+    printf("[sim] ELF loader disabled in simulator\n");
     return ESP_OK;
 }
 
-/* A7682E modem PPP stubs — no modem hardware in simulator */
+/* A7682E modem PPP stubs */
 esp_err_t drv_a7682e_start_ppp(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t drv_a7682e_stop_ppp(void) { return ESP_OK; }
-bool drv_a7682e_ppp_connected(void) { return false; }
+_Bool drv_a7682e_ppp_connected(void) { return 0; }

@@ -1,0 +1,5 @@
+Sample ebook content for testing the reader app.
+
+This is page one of a test book. The quick brown fox jumps over the lazy dog. ThistleOS is an operating system for ESP32 devices.
+
+Page two would start here after pagination calculates the line count.
