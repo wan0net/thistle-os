@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include "esp_log.h"
+#include "thistle/wifi_manager.h"
 
 static const char *TAG = "launcher_ui";
 
@@ -62,6 +63,18 @@ static lv_obj_t *create_dock_icon(lv_obj_t *parent, const char *label, const cha
 }
 
 /* ------------------------------------------------------------------ */
+/* Clock update timer callback                                          */
+/* ------------------------------------------------------------------ */
+
+static void launcher_clock_update(lv_timer_t *timer)
+{
+    lv_obj_t *clock_label = (lv_obj_t *)lv_timer_get_user_data(timer);
+    char time_buf[8];
+    wifi_manager_get_time_str(time_buf, sizeof(time_buf));
+    lv_label_set_text(clock_label, time_buf);
+}
+
+/* ------------------------------------------------------------------ */
 /* Public API                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -109,6 +122,9 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_label_set_text(lbl_clock, "12:00");
     lv_obj_set_style_text_font(lbl_clock, &lv_font_montserrat_22, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_clock, lv_color_black(), LV_PART_MAIN);
+
+    /* Update clock every 60 seconds from wifi_manager time */
+    lv_timer_create(launcher_clock_update, 60000, lbl_clock);
 
     /* Branding subtitle */
     lv_obj_t *lbl_brand = lv_label_create(wallpaper);

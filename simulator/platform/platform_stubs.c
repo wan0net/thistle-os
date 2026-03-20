@@ -22,7 +22,33 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t handle, uint64_t timeout_us) {
     return ESP_OK;
 }
 
-/* ELF loader stub — not available in simulator */
+esp_err_t esp_timer_delete(esp_timer_handle_t handle) {
+    free(handle);
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
+    (void)handle;
+    return ESP_OK;
+}
+
+/* Stubs for subsystems not available in simulator */
+esp_err_t ota_init(void) { return ESP_OK; }
+esp_err_t permissions_init(void) { return ESP_OK; }
+esp_err_t wifi_manager_init(void) { return ESP_OK; }
+
+/* wifi_manager stubs for statusbar/launcher */
+int wifi_manager_get_state(void) { return 0; }
+int wifi_manager_get_rssi(void) { return 0; }
+void wifi_manager_get_time_str(char *buf, unsigned long buf_len) {
+    /* Use real system time */
+    #include <time.h>
+    time_t now; struct tm tm;
+    time(&now); localtime_r(&now, &tm);
+    snprintf(buf, buf_len, "%02d:%02d", tm.tm_hour, tm.tm_min);
+}
+
+/* ELF loader stub */
 esp_err_t elf_loader_init(void) {
     printf("I (elf_loader) ELF loader disabled in simulator\n");
     return ESP_OK;

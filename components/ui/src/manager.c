@@ -3,6 +3,7 @@
 #include "ui/statusbar.h"
 #include "ui/epaper_refresh.h"
 #include "hal/board.h"
+#include "hal/input.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -28,6 +29,73 @@ static lv_obj_t       *s_screen   = NULL;
 static lv_obj_t       *s_statusbar_cont = NULL;
 static lv_obj_t       *s_app_area = NULL;
 static SemaphoreHandle_t s_lvgl_mutex = NULL;
+
+/* -------------------------------------------------------------------------
+ * Input device state — written by HAL callbacks, read by LVGL read callbacks.
+ * Both callbacks run from lvgl_task (poll loop → lv_timer_handler), so no
+ * additional locking is required.
+ * ------------------------------------------------------------------------- */
+static lv_indev_t *s_touch_indev = NULL;
+static struct {
+    int16_t x, y;
+    lv_indev_state_t state;
+} s_touch_state = { 0, 0, LV_INDEV_STATE_RELEASED };
+
+static lv_indev_t *s_kbd_indev = NULL;
+static struct {
+    uint32_t key;
+    lv_indev_state_t state;
+} s_kbd_state = { 0, LV_INDEV_STATE_RELEASED };
+
+/* HAL input callback — handles all event types from any registered driver.
+ * Touch events update s_touch_state; key events update s_kbd_state.
+ * A single callback is registered on every driver so that combined drivers
+ * (e.g. the SDL2 simulator driver) work correctly regardless of is_touch. */
+static void ui_input_hal_cb(const hal_input_event_t *event, void *user_data)
+{
+    (void)user_data;
+    switch (event->type) {
+        case HAL_INPUT_EVENT_TOUCH_DOWN:
+        case HAL_INPUT_EVENT_TOUCH_MOVE:
+            s_touch_state.x     = (int16_t)event->touch.x;
+            s_touch_state.y     = (int16_t)event->touch.y;
+            s_touch_state.state = LV_INDEV_STATE_PRESSED;
+            break;
+        case HAL_INPUT_EVENT_TOUCH_UP:
+            s_touch_state.state = LV_INDEV_STATE_RELEASED;
+            break;
+        case HAL_INPUT_EVENT_KEY_DOWN: {
+            uint32_t lv_key = event->key.keycode;
+            if      (lv_key == '\n')  lv_key = LV_KEY_ENTER;
+            else if (lv_key == '\b')  lv_key = LV_KEY_BACKSPACE;
+            else if (lv_key == 0x1B) lv_key = LV_KEY_ESC;
+            else if (lv_key == '\t')  lv_key = LV_KEY_NEXT;
+            s_kbd_state.key   = lv_key;
+            s_kbd_state.state = LV_INDEV_STATE_PRESSED;
+            break;
+        }
+        case HAL_INPUT_EVENT_KEY_UP:
+            s_kbd_state.state = LV_INDEV_STATE_RELEASED;
+            break;
+        default:
+            break;
+    }
+}
+
+static void ui_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    data->point.x = s_touch_state.x;
+    data->point.y = s_touch_state.y;
+    data->state   = s_touch_state.state;
+}
+
+static void ui_kbd_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    data->key   = s_kbd_state.key;
+    data->state = s_kbd_state.state;
+}
 
 /* -------------------------------------------------------------------------
  * LVGL flush callback — forwards pixel data to HAL display driver
@@ -71,7 +139,17 @@ static void lvgl_tick_cb(void *arg)
 static void lvgl_task(void *arg)
 {
     (void)arg;
+    const hal_registry_t *reg = hal_get_registry();
     while (1) {
+        /* Poll all registered input drivers so they fire HAL callbacks */
+        if (reg) {
+            for (int i = 0; i < reg->input_count; i++) {
+                if (reg->inputs[i] && reg->inputs[i]->poll) {
+                    reg->inputs[i]->poll();
+                }
+            }
+        }
+
         if (xSemaphoreTake(s_lvgl_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
             lv_timer_handler();
             xSemaphoreGive(s_lvgl_mutex);
@@ -106,6 +184,31 @@ esp_err_t ui_manager_init(void)
 
     /* 4. Set flush callback */
     lv_display_set_flush_cb(s_display, ui_flush_cb);
+
+    /* 4a. Register LVGL pointer input device (touch / mouse) */
+    s_touch_indev = lv_indev_create();
+    lv_indev_set_type(s_touch_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(s_touch_indev, ui_touch_read_cb);
+
+    /* 4b. Register LVGL keypad input device (hardware keyboard) */
+    s_kbd_indev = lv_indev_create();
+    lv_indev_set_type(s_kbd_indev, LV_INDEV_TYPE_KEYPAD);
+    lv_indev_set_read_cb(s_kbd_indev, ui_kbd_read_cb);
+
+    /* 4c. Wire HAL input callbacks to every registered input driver.
+     *     A single combined callback handles both touch and key events so
+     *     that drivers which emit both types (e.g. SDL2 simulator) work
+     *     correctly regardless of their is_touch flag. */
+    {
+        const hal_registry_t *reg = hal_get_registry();
+        if (reg) {
+            for (int i = 0; i < reg->input_count; i++) {
+                if (reg->inputs[i] && reg->inputs[i]->register_callback) {
+                    reg->inputs[i]->register_callback(ui_input_hal_cb, NULL);
+                }
+            }
+        }
+    }
 
     /* 5. Create mutex */
     s_lvgl_mutex = xSemaphoreCreateMutex();

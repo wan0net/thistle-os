@@ -1,5 +1,8 @@
 #include "ui/statusbar.h"
 #include "ui/theme.h"
+#include "thistle/wifi_manager.h"
+#include "hal/board.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <stdbool.h>
@@ -133,4 +136,59 @@ void statusbar_set_time(uint8_t hour, uint8_t minute)
 uint16_t statusbar_get_height(void)
 {
     return STATUSBAR_HEIGHT;
+}
+
+void statusbar_set_time_str(const char *time_str)
+{
+    if (s_time_label == NULL || time_str == NULL) {
+        return;
+    }
+    lv_label_set_text(s_time_label, time_str);
+}
+
+/* ------------------------------------------------------------------ */
+/* Periodic update timer (30 s, esp_timer)                             */
+/* ------------------------------------------------------------------ */
+
+static void statusbar_update_tick(void *arg)
+{
+    (void)arg;
+
+    /* Update time */
+    char time_buf[8];
+    wifi_manager_get_time_str(time_buf, sizeof(time_buf));
+    statusbar_set_time_str(time_buf);
+
+    /* Update battery from HAL */
+    const hal_registry_t *reg = hal_get_registry();
+    if (reg && reg->power) {
+        uint8_t pct = reg->power->get_battery_percent ? reg->power->get_battery_percent() : 0;
+        bool charging = reg->power->is_charging ? reg->power->is_charging() : false;
+        statusbar_set_battery(pct, charging);
+    }
+
+    /* Update WiFi */
+    wifi_state_t ws = wifi_manager_get_state();
+    int8_t rssi = wifi_manager_get_rssi();
+    statusbar_set_wifi(ws == WIFI_STATE_CONNECTED, rssi);
+}
+
+void statusbar_start_update_timer(void)
+{
+    const esp_timer_create_args_t timer_args = {
+        .callback = statusbar_update_tick,
+        .arg      = NULL,
+        .name     = "statusbar_tick",
+    };
+
+    esp_timer_handle_t timer;
+    esp_err_t ret = esp_timer_create(&timer_args, &timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create statusbar update timer: %d", ret);
+        return;
+    }
+
+    /* Fire immediately, then every 30 seconds */
+    esp_timer_start_periodic(timer, 30ULL * 1000 * 1000);
+    ESP_LOGI(TAG, "Status bar update timer started (30 s interval)");
 }

@@ -9,7 +9,8 @@ idf_component_register(
         "src/elf_loader.c"
         "src/ota.c"
         "src/permissions.c"
+        "src/wifi_manager.c"
     INCLUDE_DIRS "include"
-    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
+    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event
     PRIV_REQUIRES board_tdeck_pro
 )
