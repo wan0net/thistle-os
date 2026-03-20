@@ -20,6 +20,7 @@
 #include "thistle/wifi_manager.h"
 #include "thistle/ble_manager.h"
 #include "thistle/kernel.h"
+#include "thistle/signing.h"
 #include "hal/board.h"
 #include "ui/theme.h"
 #include "ui/toast.h"
@@ -1243,6 +1244,14 @@ static void open_about_screen(void)
     snprintf(uptime_buf, sizeof(uptime_buf), "Uptime: %02lu:%02lu:%02lu",
              (unsigned long)h, (unsigned long)m, (unsigned long)sc);
     create_info_row(content, uptime_buf);
+
+    create_separator(content);
+
+    /* Signing key (truncated) */
+    const char *key_hex = signing_get_public_key_hex();
+    char sign_buf[48];
+    snprintf(sign_buf, sizeof(sign_buf), "Signing key: %.16s...", key_hex);
+    create_info_row(content, sign_buf);
 }
 
 /* ------------------------------------------------------------------ */

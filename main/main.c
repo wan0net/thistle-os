@@ -18,6 +18,7 @@
 #include "messenger/messenger_app.h"
 #include "navigator/navigator_app.h"
 #include "notes/notes_app.h"
+#include "appstore/appstore_app.h"
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -85,6 +86,7 @@ void app_main(void)
     messenger_app_register();
     navigator_app_register();
     notes_app_register();
+    appstore_app_register();
 
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.launcher",   PERM_ALL);
@@ -94,6 +96,7 @@ void app_main(void)
     permissions_grant("com.thistle.messenger",  PERM_RADIO | PERM_IPC);
     permissions_grant("com.thistle.navigator",  PERM_GPS | PERM_STORAGE);
     permissions_grant("com.thistle.notes",      PERM_STORAGE);
+    permissions_grant("com.thistle.appstore",   PERM_STORAGE | PERM_NETWORK);
 
     app_manager_launch("com.thistle.launcher");
 

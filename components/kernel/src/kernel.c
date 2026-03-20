@@ -7,6 +7,7 @@
 #include "thistle/elf_loader.h"
 #include "thistle/ota.h"
 #include "thistle/permissions.h"
+#include "thistle/signing.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -70,6 +71,19 @@ esp_err_t kernel_init(void)
     ret = permissions_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "permissions_init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Initializing signing subsystem");
+    static const uint8_t dev_signing_key[32] = {
+        0x54, 0x48, 0x49, 0x53, 0x54, 0x4C, 0x45, 0x4F,  /* "THISTLEO" */
+        0x53, 0x5F, 0x44, 0x45, 0x56, 0x5F, 0x4B, 0x45,  /* "S_DEV_KE" */
+        0x59, 0x5F, 0x32, 0x30, 0x32, 0x36, 0x00, 0x00,  /* "Y_2026.." */
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    };
+    ret = signing_init(dev_signing_key);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "signing_init failed: %s", esp_err_to_name(ret));
         return ret;
     }
 

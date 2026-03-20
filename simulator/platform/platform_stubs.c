@@ -53,6 +53,30 @@ esp_err_t elf_loader_init(void) {
     return ESP_OK;
 }
 
+/* Signing subsystem stubs (simulator build — no mbedtls) */
+#include "thistle/signing.h"
+static char s_sim_key_hex[THISTLE_SIGN_KEY_SIZE * 2 + 1] = "(simulator)";
+esp_err_t signing_init(const uint8_t public_key[THISTLE_SIGN_KEY_SIZE]) {
+    (void)public_key;
+    return ESP_OK;
+}
+esp_err_t signing_verify(const uint8_t *data, size_t data_len,
+                          const uint8_t signature[THISTLE_SIGN_SIG_SIZE]) {
+    (void)data; (void)data_len; (void)signature;
+    return ESP_ERR_NOT_FOUND; /* unsigned in sim */
+}
+esp_err_t signing_verify_file(const char *elf_path) {
+    (void)elf_path;
+    return ESP_ERR_NOT_FOUND; /* unsigned in sim */
+}
+bool signing_has_signature(const char *elf_path) {
+    (void)elf_path;
+    return false;
+}
+const char *signing_get_public_key_hex(void) {
+    return s_sim_key_hex;
+}
+
 /* A7682E modem PPP stubs */
 esp_err_t drv_a7682e_start_ppp(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t drv_a7682e_stop_ppp(void) { return ESP_OK; }

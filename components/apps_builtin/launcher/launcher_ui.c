@@ -176,12 +176,13 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(dock, 8, LV_PART_MAIN);
 
-    /* Dock icons: Settings, Files, Reader, Messenger, Navigator */
+    /* Dock icons: Settings, Files, Reader, Messenger, Navigator, AppStore */
     create_dock_icon(dock, "S", "com.thistle.settings");
     create_dock_icon(dock, "F", "com.thistle.filemgr");
     create_dock_icon(dock, "R", "com.thistle.reader");
     create_dock_icon(dock, "M", "com.thistle.messenger");
     create_dock_icon(dock, "N", "com.thistle.navigator");
+    create_dock_icon(dock, "A", "com.thistle.appstore");
 
     return ESP_OK;
 }

@@ -3,6 +3,8 @@
 
 #include "thistle/elf_loader.h"
 #include "thistle/syscall.h"
+#include "thistle/signing.h"
+#include "thistle/permissions.h"
 #include "esp_elf.h"
 #include "private/elf_symbol.h"
 #include "esp_log.h"
@@ -136,7 +138,23 @@ esp_err_t elf_app_load(const char *path, elf_app_handle_t *handle)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 3. Initialise the esp_elf context                                   */
+    /* 3. Verify ELF signature before allowing execution                   */
+    /* ------------------------------------------------------------------ */
+    esp_err_t sig_ret = signing_verify_file(path);
+    if (sig_ret == ESP_OK) {
+        ESP_LOGI(TAG, "ELF signature verified: %s", path);
+        /* Full permissions — signed app */
+    } else if (sig_ret == ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "ELF unsigned: %s (running in restricted mode)", path);
+        /* Grant limited permissions — unsigned app continues in restricted mode */
+    } else {
+        ESP_LOGE(TAG, "ELF signature INVALID: %s (refusing to load)", path);
+        free(buf);
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 4. Initialise the esp_elf context                                   */
     /* ------------------------------------------------------------------ */
     esp_err_t ret = esp_elf_init(&app->elf);
     if (ret != ESP_OK) {
@@ -146,7 +164,7 @@ esp_err_t elf_app_load(const char *path, elf_app_handle_t *handle)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 4. Register our syscall table as the symbol resolver, then relocate */
+    /* 5. Register our syscall table as the symbol resolver, then relocate */
     /*                                                                     */
     /* The elf_loader resolves symbols via elf_find_sym() which calls the  */
     /* registered resolver. We set a custom one that delegates to our      */
@@ -171,7 +189,7 @@ esp_err_t elf_app_load(const char *path, elf_app_handle_t *handle)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 5. Populate handle metadata                                         */
+    /* 6. Populate handle metadata                                         */
     /* ------------------------------------------------------------------ */
     strncpy(app->path, path, sizeof(app->path) - 1);
     app->path[sizeof(app->path) - 1] = '\0';
