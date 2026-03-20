@@ -7,22 +7,21 @@
  * the correct SD card directories.
  *
  * All SD card paths use THISTLE_SDCARD from hal/sdcard_path.h.
- * In SIMULATOR_BUILD every network function returns ESP_ERR_NOT_SUPPORTED.
+ * In the simulator build, real HTTP is provided by sim_http via the
+ * esp_http_client.h shim, and SHA-256 via the mbedtls/sha256.h shim
+ * (CommonCrypto on macOS).
  */
 
 #include "thistle/appstore_client.h"
 #include "thistle/signing.h"
 #include "hal/sdcard_path.h"
 #include "esp_log.h"
+#include "esp_http_client.h"
+#include "mbedtls/sha256.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-
-#ifndef SIMULATOR_BUILD
-#include "esp_http_client.h"
-#include "mbedtls/sha256.h"
-#endif
 
 static const char *TAG = "appstore_client";
 
@@ -110,8 +109,6 @@ static bool json_int(const char *json, const char *key, int *out)
 
 /* ── HTTP response buffer ───────────────────────────────────── */
 
-#ifndef SIMULATOR_BUILD
-
 typedef struct {
     char  *buf;
     size_t len;
@@ -134,8 +131,6 @@ static esp_err_t http_buf_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-#endif /* !SIMULATOR_BUILD */
-
 /* ── Catalog fetch ──────────────────────────────────────────── */
 
 esp_err_t appstore_fetch_catalog(const char *catalog_url,
@@ -145,10 +140,6 @@ esp_err_t appstore_fetch_catalog(const char *catalog_url,
     if (!entries || !out_count) return ESP_ERR_INVALID_ARG;
     *out_count = 0;
 
-#ifdef SIMULATOR_BUILD
-    ESP_LOGW(TAG, "Simulator: appstore_fetch_catalog not available");
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     const char *url = (catalog_url && catalog_url[0]) ?
                       catalog_url : appstore_get_catalog_url();
     ESP_LOGI(TAG, "Fetching catalog: %s", url);
@@ -252,7 +243,6 @@ esp_err_t appstore_fetch_catalog(const char *catalog_url,
     *out_count = count;
     ESP_LOGI(TAG, "Parsed %d catalog entries", count);
     return ESP_OK;
-#endif /* SIMULATOR_BUILD */
 }
 
 /* ── File download with hash verification ───────────────────── */
@@ -264,10 +254,6 @@ esp_err_t appstore_download_file(const char *url, const char *dest_path,
 {
     if (!url || !dest_path) return ESP_ERR_INVALID_ARG;
 
-#ifdef SIMULATOR_BUILD
-    ESP_LOGW(TAG, "Simulator: appstore_download_file not available");
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     ESP_LOGI(TAG, "Downloading %s -> %s", url, dest_path);
 
     FILE *f = fopen(dest_path, "wb");
@@ -352,7 +338,6 @@ esp_err_t appstore_download_file(const char *url, const char *dest_path,
     ESP_LOGI(TAG, "Downloaded %lu bytes to %s",
              (unsigned long)downloaded, dest_path);
     return ESP_OK;
-#endif /* SIMULATOR_BUILD */
 }
 
 /* ── Install entry ──────────────────────────────────────────── */
@@ -363,10 +348,6 @@ esp_err_t appstore_install_entry(const catalog_entry_t *entry,
 {
     if (!entry || entry->url[0] == '\0') return ESP_ERR_INVALID_ARG;
 
-#ifdef SIMULATOR_BUILD
-    ESP_LOGW(TAG, "Simulator: appstore_install_entry not available");
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     /* Determine destination directory and file extension by type */
     const char *dir;
     const char *ext;
@@ -441,5 +422,4 @@ esp_err_t appstore_install_entry(const catalog_entry_t *entry,
 
     ESP_LOGI(TAG, "Installed '%s' -> %s", entry->name, dest_path);
     return ESP_OK;
-#endif /* SIMULATOR_BUILD */
 }

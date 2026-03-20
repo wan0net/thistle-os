@@ -260,7 +260,11 @@ static void parent_clicked_cb(lv_event_t *e)
     lv_obj_t   *row        = lv_event_get_target(e);
     const char *parent_path = (const char *)lv_obj_get_user_data(row);
     if (parent_path) {
-        navigate_to(parent_path);
+        /* Copy path before navigate_to (which frees user_data via lv_obj_clean) */
+        char path_copy[512];
+        strncpy(path_copy, parent_path, sizeof(path_copy) - 1);
+        path_copy[sizeof(path_copy) - 1] = '\0';
+        navigate_to(path_copy);
     }
 }
 

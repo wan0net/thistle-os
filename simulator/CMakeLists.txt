@@ -24,6 +24,7 @@ set(THISTLE_SRCS
     # Kernel (except elf_loader which needs ESP-IDF elf component)
     ${THISTLE_DIR}/components/kernel/src/kernel.c
     ${THISTLE_DIR}/components/kernel/src/app_manager.c
+    ${THISTLE_DIR}/components/kernel/src/appstore_client.c
     ${THISTLE_DIR}/components/kernel/src/driver_manager.c
     ${THISTLE_DIR}/components/kernel/src/syscall_table.c
     ${THISTLE_DIR}/components/kernel/src/ipc.c
@@ -73,6 +74,7 @@ set(SIM_SRCS
     main.c
     platform/platform_stubs.c
     platform/sim_vfs.c
+    platform/sim_http.c
     drivers/sim_display.c
     drivers/sim_input.c
     drivers/sim_storage.c
@@ -120,7 +122,7 @@ target_compile_definitions(thistle_sim PRIVATE
 )
 
 target_link_directories(thistle_sim PRIVATE ${SDL2_LIBRARY_DIRS})
-target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} pthread m)
+target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} pthread m curl)
 
 # Suppress warnings from LVGL and external code
 target_compile_options(thistle_sim PRIVATE
