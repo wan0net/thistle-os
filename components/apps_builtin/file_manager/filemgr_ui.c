@@ -77,6 +77,20 @@ static int entry_cmp(const void *a, const void *b)
 static void navigate_to(const char *path);
 
 /* ------------------------------------------------------------------ */
+/* Delete handler — frees malloc'd user_data on object deletion        */
+/* ------------------------------------------------------------------ */
+
+static void entry_delete_cb(lv_event_t *e)
+{
+    lv_obj_t *row      = lv_event_get_target(e);
+    void     *user_data = lv_obj_get_user_data(row);
+    if (user_data) {
+        free(user_data);
+        lv_obj_set_user_data(row, NULL);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Click handler — carries full path in user_data                      */
 /* ------------------------------------------------------------------ */
 
@@ -146,6 +160,7 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(row, full_path);
     lv_obj_add_event_cb(row, entry_clicked_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(row, entry_delete_cb,  LV_EVENT_DELETE,  NULL);
 
     /* Type indicator: "[D]" or "[F]" */
     lv_obj_t *lbl_type = lv_label_create(row);
@@ -224,6 +239,7 @@ static void create_parent_row(lv_obj_t *list, const char *parent_path)
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(row, stored_path);
     lv_obj_add_event_cb(row, parent_clicked_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(row, entry_delete_cb,   LV_EVENT_DELETE,  NULL);
 
     lv_obj_t *lbl_type = lv_label_create(row);
     lv_label_set_text(lbl_type, "[D]");

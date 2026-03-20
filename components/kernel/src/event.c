@@ -27,7 +27,7 @@ esp_err_t event_bus_init(void)
 
 esp_err_t event_subscribe(event_type_t type, event_handler_t handler, void *user_data)
 {
-    if (type >= EVENT_MAX) {
+    if (type < 0 || type >= EVENT_MAX) {
         ESP_LOGE(TAG, "event_subscribe: invalid event type %d", (int)type);
         return ESP_ERR_INVALID_ARG;
     }
@@ -51,7 +51,7 @@ esp_err_t event_subscribe(event_type_t type, event_handler_t handler, void *user
 
 esp_err_t event_unsubscribe(event_type_t type, event_handler_t handler)
 {
-    if (type >= EVENT_MAX) {
+    if (type < 0 || type >= EVENT_MAX) {
         ESP_LOGE(TAG, "event_unsubscribe: invalid event type %d", (int)type);
         return ESP_ERR_INVALID_ARG;
     }
@@ -76,7 +76,7 @@ esp_err_t event_publish(const event_t *event)
     if (event == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (event->type >= EVENT_MAX) {
+    if (event->type < 0 || event->type >= EVENT_MAX) {
         ESP_LOGE(TAG, "event_publish: invalid event type %d", (int)event->type);
         return ESP_ERR_INVALID_ARG;
     }

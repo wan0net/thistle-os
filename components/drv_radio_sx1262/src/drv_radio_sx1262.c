@@ -100,18 +100,20 @@ static esp_err_t sx1262_apply_rf_frequency(uint32_t freq_hz);
 // Low-level SPI helpers
 // ---------------------------------------------------------------------------
 
-static void sx1262_wait_busy(uint32_t timeout_ms)
+static esp_err_t sx1262_wait_busy(uint32_t timeout_ms)
 {
-    uint32_t deadline_ms = timeout_ms * 1000; /* convert to loops */
-    uint32_t elapsed     = 0;
+    /* Each loop iteration waits 100 µs; convert timeout to iteration count. */
+    uint32_t max_iters = (timeout_ms * 10);  /* timeout_ms * 1000 µs / 100 µs */
+    uint32_t elapsed   = 0;
     while (gpio_get_level(s_radio.cfg.pin_busy)) {
         ets_delay_us(100);
-        elapsed += 100;
-        if (elapsed >= deadline_ms * 1000) {
+        elapsed++;
+        if (elapsed >= max_iters) {
             ESP_LOGW(TAG, "BUSY timeout after %lu ms", (unsigned long)timeout_ms);
-            break;
+            return ESP_ERR_TIMEOUT;
         }
     }
+    return ESP_OK;
 }
 
 static esp_err_t sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
@@ -512,7 +514,11 @@ static esp_err_t sx1262_init(const void *config)
     vTaskDelay(pdMS_TO_TICKS(10));
 
     /* --- 4. Wait for BUSY to go low after reset --------------------------- */
-    sx1262_wait_busy(500);
+    err = sx1262_wait_busy(500);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "BUSY stuck high after reset");
+        return err;
+    }
 
     /* --- 5. SetStandby(STDBY_RC) ----------------------------------------- */
     err = sx1262_set_standby();
@@ -734,10 +740,13 @@ static esp_err_t sx1262_sleep(bool enter)
         vTaskDelay(pdMS_TO_TICKS(2));
         gpio_set_level(s_radio.cfg.pin_reset, 1);
         vTaskDelay(pdMS_TO_TICKS(10));
-        sx1262_wait_busy(500);
+        esp_err_t err = sx1262_wait_busy(500);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "BUSY stuck high after wake reset");
+            return err;
+        }
 
         /* Re-apply full configuration */
-        esp_err_t err;
         err = sx1262_set_standby();           if (err != ESP_OK) return err;
         err = sx1262_set_packet_type_lora();  if (err != ESP_OK) return err;
         err = sx1262_apply_rf_frequency(s_radio.frequency_hz);  if (err != ESP_OK) return err;

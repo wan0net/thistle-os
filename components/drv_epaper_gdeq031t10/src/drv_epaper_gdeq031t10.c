@@ -330,6 +330,13 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
     if (x2 >= EPD_WIDTH)  x2 = EPD_WIDTH  - 1;
     if (y2 >= EPD_HEIGHT) y2 = EPD_HEIGHT - 1;
 
+    /* Validate that the area is non-inverted after clamping */
+    if (x1 > x2 || y1 > y2) {
+        ESP_LOGE(TAG, "flush: invalid area (%u,%u)-(%u,%u) after clamping",
+                 x1, y1, x2, y2);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     /* Ensure byte-alignment on x axis (display works in full bytes per row) */
     uint16_t bx1 = x1 & ~7u;          /* round down to byte boundary */
     uint16_t bx2 = (x2 | 7u);         /* round up */
