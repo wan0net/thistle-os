@@ -1461,19 +1461,20 @@ static void open_detail_gps(lv_obj_t *content)
     create_separator(content);
 
     /* Enable / Disable button */
+    const theme_colors_t *tc_gps = theme_get_colors();
     lv_obj_t *btn = lv_obj_create(content);
     lv_obj_set_size(btn, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, tc_gps->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(btn, ITEM_PAD_LEFT, LV_PART_MAIN);
     lv_obj_set_style_pad_right(btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
     lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, tc_gps->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, tc_gps->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
@@ -1481,8 +1482,8 @@ static void open_detail_gps(lv_obj_t *content)
     lv_obj_t *bl = lv_label_create(btn);
     lv_label_set_text(bl, s_gps_enabled ? "Disable" : "Enable");
     lv_obj_set_style_text_font(bl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(bl, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(bl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(bl, tc_gps->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(bl, tc_gps->bg, LV_STATE_PRESSED);
     lv_obj_align(bl, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_event_cb(btn, gps_toggle_cb, LV_EVENT_CLICKED, bl);
 
@@ -1917,9 +1918,10 @@ static void item_clicked_cb(lv_event_t *e)
 
 static void create_list_item(lv_obj_t *list, const settings_item_t *item)
 {
+    const theme_colors_t *tc = theme_get_colors();
     lv_obj_t *row = lv_obj_create(list);
     lv_obj_set_size(row, LV_PCT(100), ITEM_H);
-    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
@@ -1927,9 +1929,9 @@ static void create_list_item(lv_obj_t *list, const settings_item_t *item)
     lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, tc->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(row, tc->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row,
@@ -1946,25 +1948,32 @@ static void create_list_item(lv_obj_t *list, const settings_item_t *item)
     lv_obj_t *lbl_name = lv_label_create(row);
     lv_label_set_text(lbl_name, item->name);
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_name, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, tc->bg, LV_STATE_PRESSED);
     lv_obj_set_flex_grow(lbl_name, 1);
 
-    /* Value label (optional) */
+    /* Value label (optional) — capture pointers for WiFi and BT */
     if (item->value != NULL) {
         lv_obj_t *lbl_val = lv_label_create(row);
         lv_label_set_text(lbl_val, item->value);
         lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_val, lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl_val, lv_color_white(), LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(lbl_val, tc->text, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl_val, tc->bg, LV_STATE_PRESSED);
+
+        /* Store references for live-update timer */
+        if (strcmp(item->name, "WiFi") == 0) {
+            s_wifi_value_label = lbl_val;
+        } else if (strcmp(item->name, "Bluetooth") == 0) {
+            s_bt_value_label = lbl_val;
+        }
     }
 
     /* Chevron */
     lv_obj_t *lbl_chevron = lv_label_create(row);
     lv_label_set_text(lbl_chevron, ">");
     lv_obj_set_style_text_font(lbl_chevron, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_chevron, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_chevron, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(lbl_chevron, tc->text, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_chevron, tc->bg, LV_STATE_PRESSED);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1997,10 +2006,12 @@ esp_err_t settings_ui_create(lv_obj_t *parent)
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
     style_title_bar(title_bar);
 
+    const theme_colors_t *tc_main = theme_get_colors();
+
     lv_obj_t *lbl_title = lv_label_create(title_bar);
     lv_label_set_text(lbl_title, "Settings");
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_title, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_title, tc_main->text, LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* ----------------------------------------------------------------
@@ -2009,7 +2020,7 @@ esp_err_t settings_ui_create(lv_obj_t *parent)
     s_main_list = lv_obj_create(s_root);
     lv_obj_set_pos(s_main_list, 0, TITLE_BAR_H);
     lv_obj_set_size(s_main_list, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
-    lv_obj_set_style_bg_color(s_main_list, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_main_list, tc_main->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_main_list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_main_list, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_main_list, 0, LV_PART_MAIN);
@@ -2022,10 +2033,14 @@ esp_err_t settings_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_START);
 
     lv_obj_set_scrollbar_mode(s_main_list, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_bg_color(s_main_list, lv_color_black(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(s_main_list, tc_main->text, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(s_main_list, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_width(s_main_list, 2, LV_PART_SCROLLBAR);
     lv_obj_set_style_radius(s_main_list, 0, LV_PART_SCROLLBAR);
+
+    /* Reset value label pointers before rebuilding */
+    s_wifi_value_label = NULL;
+    s_bt_value_label   = NULL;
 
     for (size_t i = 0; i < ITEMS_COUNT; i++) {
         create_list_item(s_main_list, &s_items[i]);
@@ -2034,6 +2049,12 @@ esp_err_t settings_ui_create(lv_obj_t *parent)
     s_current_screen = SETTINGS_MAIN;
     s_sub_screen     = NULL;
     s_detail_screen  = NULL;
+
+    /* Start the main list live-update timer (2 s interval) */
+    if (s_main_timer) {
+        lv_timer_delete(s_main_timer);
+    }
+    s_main_timer = lv_timer_create(settings_main_update_timer, 2000, NULL);
 
     return ESP_OK;
 }
@@ -2050,4 +2071,49 @@ void settings_ui_hide(void)
     if (s_root) {
         lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+void settings_ui_destroy(void)
+{
+    /* Stop all live-update timers */
+    if (s_main_timer) {
+        lv_timer_delete(s_main_timer);
+        s_main_timer = NULL;
+    }
+    if (s_power_timer) {
+        lv_timer_delete(s_power_timer);
+        s_power_timer     = NULL;
+        s_power_batt_lbl  = NULL;
+        s_power_pct_lbl   = NULL;
+        s_power_state_lbl = NULL;
+    }
+    if (s_gps_timer) {
+        lv_timer_delete(s_gps_timer);
+        s_gps_timer      = NULL;
+        s_gps_status_lbl = NULL;
+        s_gps_lat_lbl    = NULL;
+        s_gps_lon_lbl    = NULL;
+        s_gps_sat_lbl    = NULL;
+    }
+
+    /* Nullify label pointers — LVGL will clean up widgets when s_root is deleted */
+    s_wifi_value_label   = NULL;
+    s_bt_value_label     = NULL;
+    s_wifi_status_label  = NULL;
+    s_wifi_scan_list     = NULL;
+    s_ble_status_label   = NULL;
+    s_ble_name_label     = NULL;
+    s_ble_peer_label     = NULL;
+    s_ble_toggle_btn_lbl = NULL;
+
+    if (s_root) {
+        lv_obj_delete(s_root);
+        s_root          = NULL;
+        s_main_list     = NULL;
+        s_sub_screen    = NULL;
+        s_detail_screen = NULL;
+    }
+
+    s_current_screen       = SETTINGS_MAIN;
+    s_driver_row_pool_used = 0;
 }

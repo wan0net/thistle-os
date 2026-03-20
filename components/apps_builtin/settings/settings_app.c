@@ -41,6 +41,7 @@ static void settings_on_resume(void)
 static void settings_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
+    settings_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

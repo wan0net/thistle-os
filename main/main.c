@@ -14,6 +14,8 @@
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
+#include "reader/reader_app.h"
+#include "messenger/messenger_app.h"
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -77,11 +79,15 @@ void app_main(void)
     launcher_app_register();
     settings_app_register();
     filemgr_app_register();
+    reader_app_register();
+    messenger_app_register();
 
     /* Grant full permissions to built-in apps */
-    permissions_grant("com.thistle.launcher", PERM_ALL);
-    permissions_grant("com.thistle.settings", PERM_ALL);
-    permissions_grant("com.thistle.filemgr",  PERM_ALL);
+    permissions_grant("com.thistle.launcher",   PERM_ALL);
+    permissions_grant("com.thistle.settings",   PERM_ALL);
+    permissions_grant("com.thistle.filemgr",    PERM_ALL);
+    permissions_grant("com.thistle.reader",     PERM_ALL);
+    permissions_grant("com.thistle.messenger",  PERM_RADIO | PERM_IPC);
 
     app_manager_launch("com.thistle.launcher");
 

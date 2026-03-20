@@ -176,10 +176,11 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(dock, 12, LV_PART_MAIN);
 
-    /* Dock icons: Settings, Files, MeshCore */
+    /* Dock icons: Settings, Files, Reader, Messenger */
     create_dock_icon(dock, "S", "com.thistle.settings");
     create_dock_icon(dock, "F", "com.thistle.filemgr");
-    create_dock_icon(dock, "M", NULL); /* MeshCore not installed */
+    create_dock_icon(dock, "R", "com.thistle.reader");
+    create_dock_icon(dock, "M", "com.thistle.messenger");
 
     return ESP_OK;
 }

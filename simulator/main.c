@@ -18,6 +18,8 @@
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
+#include "reader/reader_app.h"
+#include "messenger/messenger_app.h"
 
 int main(int argc, char **argv)
 {
@@ -41,6 +43,8 @@ int main(int argc, char **argv)
     launcher_app_register();
     settings_app_register();
     filemgr_app_register();
+    reader_app_register();
+    messenger_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);

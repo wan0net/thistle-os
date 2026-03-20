@@ -42,6 +42,10 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/settings/settings_ui.c
     ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_app.c
     ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/reader/reader_app.c
+    ${THISTLE_DIR}/components/apps_builtin/reader/reader_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_app.c
+    ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_ui.c
 )
 
 # Simulator sources
