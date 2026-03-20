@@ -27,6 +27,8 @@ idf_component_register(
         "weather/weather_ui.c"
         "terminal/terminal_app.c"
         "terminal/terminal_ui.c"
+        "vault/vault_app.c"
+        "vault/vault_ui.c"
     INCLUDE_DIRS "."
-    REQUIRES kernel ui thistle_hal
+    REQUIRES kernel ui thistle_hal mbedtls
 )

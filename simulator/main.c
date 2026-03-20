@@ -29,6 +29,7 @@
 #include "flashlight/flashlight_app.h"
 #include "weather/weather_app.h"
 #include "terminal/terminal_app.h"
+#include "vault/vault_app.h"
 
 int main(int argc, char **argv)
 {
@@ -65,6 +66,7 @@ int main(int argc, char **argv)
     flashlight_app_register();
     weather_app_register();
     terminal_app_register();
+    vault_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);
