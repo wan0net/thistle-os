@@ -24,6 +24,7 @@
 #include "navigator/navigator_app.h"
 #include "notes/notes_app.h"
 #include "appstore/appstore_app.h"
+#include "assistant/assistant_app.h"
 
 int main(int argc, char **argv)
 {
@@ -55,6 +56,7 @@ int main(int argc, char **argv)
     navigator_app_register();
     notes_app_register();
     appstore_app_register();
+    assistant_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);

@@ -9,6 +9,7 @@ idf_component_register(
         "reader/reader_app.c"
         "reader/reader_ui.c"
         "messenger/messenger_app.c"
+        "messenger/messenger_transport.c"
         "messenger/messenger_ui.c"
         "navigator/navigator_app.c"
         "navigator/navigator_ui.c"
@@ -16,6 +17,8 @@ idf_component_register(
         "notes/notes_ui.c"
         "appstore/appstore_app.c"
         "appstore/appstore_ui.c"
+        "assistant/assistant_app.c"
+        "assistant/assistant_ui.c"
     INCLUDE_DIRS "."
     REQUIRES kernel ui thistle_hal
 )

@@ -8,6 +8,10 @@ idf_component_register(
         "test_epaper_refresh.c"
         "test_driver_vtable.c"
         "test_kernel_integration.c"
+        "test_permissions.c"
+        "test_signing.c"
+        "test_wifi_manager.c"
+        "test_ota.c"
     INCLUDE_DIRS "."
     REQUIRES unity thistle_hal kernel ui esp_timer freertos
     WHOLE_ARCHIVE

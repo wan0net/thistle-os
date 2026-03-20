@@ -1,0 +1,6 @@
+{
+    "api_url": "https://api.anthropic.com/v1/messages",
+    "api_key": "",
+    "model": "claude-haiku-4-5-20251001",
+    "system_prompt": "You are a helpful assistant running on ThistleOS, an embedded OS for the LilyGo T-Deck Pro. Keep responses concise — the screen is small (320x240)."
+}

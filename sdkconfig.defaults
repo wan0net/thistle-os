@@ -1,8 +1,11 @@
 # Target
 CONFIG_IDF_TARGET="esp32s3"
 
-# Flash
+# Flash (16MB)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Compiler optimization for size (critical — we have 10+ apps)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 

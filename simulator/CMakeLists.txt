@@ -52,6 +52,8 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/notes/notes_ui.c
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_app.c
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_app.c
+    ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_ui.c
 )
 
 # Simulator sources
