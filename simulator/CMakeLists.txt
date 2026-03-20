@@ -34,6 +34,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/ui/src/statusbar.c
     ${THISTLE_DIR}/components/ui/src/app_switcher.c
     ${THISTLE_DIR}/components/ui/src/epaper_refresh.c
+    ${THISTLE_DIR}/components/ui/src/toast.c
     # Built-in apps
     ${THISTLE_DIR}/components/apps_builtin/launcher/launcher_app.c
     ${THISTLE_DIR}/components/apps_builtin/launcher/launcher_ui.c

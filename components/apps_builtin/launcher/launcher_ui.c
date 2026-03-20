@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "thistle/app_manager.h"
 #include "thistle/wifi_manager.h"
+#include "ui/toast.h"
 
 static const char *TAG = "launcher_ui";
 
@@ -23,6 +24,7 @@ static void dock_icon_clicked_cb(lv_event_t *e)
     esp_err_t ret = app_manager_launch(app_id);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to launch %s: %s", app_id, esp_err_to_name(ret));
+        toast_warn("App not available");
     }
 }
 

@@ -5,6 +5,7 @@ idf_component_register(
         "src/statusbar.c"
         "src/app_switcher.c"
         "src/epaper_refresh.c"
+        "src/toast.c"
     INCLUDE_DIRS "include"
     REQUIRES thistle_hal kernel esp_timer lvgl__lvgl
 )

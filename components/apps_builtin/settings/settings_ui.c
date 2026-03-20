@@ -357,7 +357,7 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
 
         /* SSID label */
         lv_obj_t *lbl_ssid = lv_label_create(row);
-        char ssid_text[WIFI_SSID_MAX_LEN + 4];
+        char ssid_text[WIFI_SSID_MAX_LEN + 8];
         if (!net->is_open) {
             snprintf(ssid_text, sizeof(ssid_text), "%s [*]", net->ssid);
         } else {

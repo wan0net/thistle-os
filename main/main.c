@@ -8,7 +8,9 @@
 #include "thistle/kernel.h"
 #include "thistle/app_manager.h"
 #include "thistle/permissions.h"
+#include "thistle/event.h"
 #include "ui/manager.h"
+#include "ui/toast.h"
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
@@ -25,6 +27,30 @@ static void run_tests(void)
 
 static const char *TAG = "thistle";
 
+static void system_event_toast(const event_t *event, void *user_data)
+{
+    (void)user_data;
+    switch (event->type) {
+        case EVENT_WIFI_CONNECTED:
+            toast_show("WiFi connected", TOAST_SUCCESS, 3000);
+            break;
+        case EVENT_WIFI_DISCONNECTED:
+            toast_info("WiFi disconnected");
+            break;
+        case EVENT_SD_MOUNTED:
+            toast_info("SD card mounted");
+            break;
+        case EVENT_SD_UNMOUNTED:
+            toast_warn("SD card removed");
+            break;
+        case EVENT_BATTERY_LOW:
+            toast_warn("Battery low!");
+            break;
+        default:
+            break;
+    }
+}
+
 void app_main(void)
 {
 #ifdef CONFIG_THISTLE_RUN_TESTS
@@ -39,6 +65,13 @@ void app_main(void)
 
     /* Start LVGL and the ThistleOS window manager / UI */
     ESP_ERROR_CHECK(ui_manager_init());
+
+    /* Subscribe to system events that warrant user-visible toasts */
+    event_subscribe(EVENT_WIFI_CONNECTED,    system_event_toast, NULL);
+    event_subscribe(EVENT_WIFI_DISCONNECTED, system_event_toast, NULL);
+    event_subscribe(EVENT_SD_MOUNTED,        system_event_toast, NULL);
+    event_subscribe(EVENT_SD_UNMOUNTED,      system_event_toast, NULL);
+    event_subscribe(EVENT_BATTERY_LOW,       system_event_toast, NULL);
 
     /* Register and launch built-in apps */
     launcher_app_register();
