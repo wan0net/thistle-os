@@ -45,6 +45,15 @@ esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
 
 /* Kernel subsystem stubs */
 esp_err_t ota_init(void) { return ESP_OK; }
+bool ota_sd_update_available(void) { return false; }
+esp_err_t ota_apply_from_sd(void *progress_cb, void *user_data) {
+    (void)progress_cb; (void)user_data;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+const char *ota_get_current_version(void) { return "0.1.0"; }
+const char *ota_get_running_partition(void) { return "sim"; }
+esp_err_t ota_mark_valid(void) { return ESP_OK; }
+esp_err_t ota_rollback(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t permissions_init(void) { return ESP_OK; }
 
 /* ELF loader stub */

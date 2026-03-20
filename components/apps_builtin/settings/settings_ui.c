@@ -21,7 +21,9 @@
 #include "thistle/ble_manager.h"
 #include "thistle/kernel.h"
 #include "thistle/signing.h"
+#include "thistle/ota.h"
 #include "hal/board.h"
+#include "hal/sdcard_path.h"
 #include "ui/theme.h"
 #include "ui/toast.h"
 #include "ui/statusbar.h"
@@ -1148,6 +1150,33 @@ static void open_appearance_screen(void)
 /* About sub-screen                                                     */
 /* ------------------------------------------------------------------ */
 
+static void install_update_cb(lv_event_t *e)
+{
+    (void)e;
+
+    /* Show progress toast */
+    toast_show("Installing update... Do not power off!", TOAST_WARNING, 30000);
+
+    /* Verify signature first */
+    const char *update_path = THISTLE_SDCARD "/update/thistle_os.bin";
+    esp_err_t sig_ret = signing_verify_file(update_path);
+    if (sig_ret == ESP_ERR_INVALID_CRC) {
+        toast_warn("Update signature INVALID — rejected!");
+        return;
+    }
+    /* Missing signature is OK for dev builds */
+    if (sig_ret == ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "Update is unsigned — proceeding anyway");
+    }
+
+    /* Apply the update (this reboots on success) */
+    esp_err_t ret = ota_apply_from_sd(NULL, NULL);
+    if (ret != ESP_OK) {
+        toast_warn("Update failed!");
+    }
+    /* If we get here, the update failed — ota_apply_from_sd reboots on success */
+}
+
 static void open_about_screen(void)
 {
     lv_obj_t *content = create_sub_screen("About");
@@ -1252,6 +1281,41 @@ static void open_about_screen(void)
     char sign_buf[48];
     snprintf(sign_buf, sizeof(sign_buf), "Signing key: %.16s...", key_hex);
     create_info_row(content, sign_buf);
+
+    /* Check for SD card update */
+    if (ota_sd_update_available()) {
+        const theme_colors_t *colors = theme_get_colors();
+
+        /* Separator */
+        create_separator(content);
+
+        /* Update available banner */
+        lv_obj_t *update_row = lv_obj_create(content);
+        lv_obj_set_size(update_row, LV_PCT(100), 50);
+        lv_obj_set_style_bg_color(update_row, colors->primary, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(update_row, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(update_row, 6, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(update_row, 8, LV_PART_MAIN);
+        lv_obj_clear_flag(update_row, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *update_lbl = lv_label_create(update_row);
+        lv_label_set_text(update_lbl, "Update found on SD card");
+        lv_obj_set_style_text_color(update_lbl, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_text_font(update_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_align(update_lbl, LV_ALIGN_LEFT_MID, 0, -8);
+
+        lv_obj_t *install_btn = lv_button_create(update_row);
+        lv_obj_set_size(install_btn, 100, 28);
+        lv_obj_align(install_btn, LV_ALIGN_RIGHT_MID, 0, 8);
+        lv_obj_set_style_bg_color(install_btn, lv_color_white(), LV_PART_MAIN);
+
+        lv_obj_t *btn_lbl = lv_label_create(install_btn);
+        lv_label_set_text(btn_lbl, "Install");
+        lv_obj_set_style_text_color(btn_lbl, colors->primary, LV_PART_MAIN);
+        lv_obj_center(btn_lbl);
+
+        lv_obj_add_event_cb(install_btn, install_update_cb, LV_EVENT_CLICKED, NULL);
+    }
 }
 
 /* ------------------------------------------------------------------ */

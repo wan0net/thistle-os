@@ -9,6 +9,7 @@
 #include "thistle/app_manager.h"
 #include "thistle/permissions.h"
 #include "thistle/event.h"
+#include "thistle/ota.h"
 #include "ui/manager.h"
 #include "ui/toast.h"
 #include "launcher/launcher_app.h"
@@ -117,6 +118,12 @@ void app_main(void)
     permissions_grant("com.thistle.vault",       PERM_STORAGE | PERM_SYSTEM);
 
     app_manager_launch("com.thistle.launcher");
+
+    /* Check for SD card firmware update */
+    if (ota_sd_update_available()) {
+        ESP_LOGI(TAG, "Firmware update detected on SD card!");
+        toast_show("Update available! Settings > About to install", TOAST_INFO, 5000);
+    }
 
     ESP_LOGI(TAG, "ThistleOS ready");
 
