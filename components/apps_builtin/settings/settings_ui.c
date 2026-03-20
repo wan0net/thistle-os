@@ -978,15 +978,17 @@ static void theme_selected_cb(lv_event_t *e)
         /* Load the built-in default monochrome theme from SD if available,
          * otherwise reinitialise the default without a display argument.
          * theme_init(NULL) skips display wiring but re-applies styles. */
-        esp_err_t ret = theme_load("/sdcard/themes/default.json");
+        char def_path[128];
+        snprintf(def_path, sizeof(def_path), "%s/themes/default.json", THISTLE_SDCARD);
+        esp_err_t ret = theme_load(def_path);
         if (ret != ESP_OK) {
             theme_init(NULL);
             statusbar_refresh_theme();
         }
         toast_info("Default theme applied");
     } else {
-        char path[72];
-        snprintf(path, sizeof(path), "/sdcard/themes/%s", theme_name);
+        char path[128];
+        snprintf(path, sizeof(path), "%s/themes/%s", THISTLE_SDCARD, theme_name);
         esp_err_t ret = theme_load(path);
         if (ret == ESP_OK) {
             toast_info("Theme applied");
