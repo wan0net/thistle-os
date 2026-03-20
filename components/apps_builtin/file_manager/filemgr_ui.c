@@ -153,10 +153,16 @@ static void entry_clicked_cb(lv_event_t *e)
 
     if (!full_path) return;
 
+    ESP_LOGI(TAG, "Entry clicked: '%s'", full_path);
+
     /* Determine if it is a directory by stat */
     struct stat st;
     if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-        navigate_to(full_path);
+        /* Copy path before navigate_to (which deletes the row and frees user_data) */
+        char path_copy[512];
+        strncpy(path_copy, full_path, sizeof(path_copy) - 1);
+        path_copy[sizeof(path_copy) - 1] = '\0';
+        navigate_to(path_copy);
     } else {
         ESP_LOGI(TAG, "Selected: %s", full_path);
     }
