@@ -284,13 +284,13 @@ static void navigator_update_cb(lv_timer_t *timer)
     /* Valid fix — update all fields */
     char buf[48];
 
-    /* LAT — e.g. "55.8642°N" */
+    /* LAT — e.g. "55.8642degN" */
     snprintf(buf, sizeof(buf), "%.4f\xC2\xB0%c",
              fabs(pos.latitude),
              pos.latitude >= 0.0 ? 'N' : 'S');
     lv_label_set_text(s_ui.lbl_lat, buf);
 
-    /* LON — e.g. "-4.2518°W" */
+    /* LON — e.g. "-4.2518degW" */
     snprintf(buf, sizeof(buf), "%.4f\xC2\xB0%c",
              fabs(pos.longitude),
              pos.longitude >= 0.0 ? 'E' : 'W');

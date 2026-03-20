@@ -12,7 +12,7 @@
 
 static const char *TAG = "app_mgr";
 
-#define APP_SLOTS_MAX 8
+#define APP_SLOTS_MAX 20
 #define APP_MEMORY_THRESHOLD_BYTES (50 * 1024)  /* 50 KB minimum free heap */
 
 typedef struct {

@@ -790,27 +790,23 @@ static void build_catalog_list(void)
                  app->is_installed ? " [i]" : "",
                  app->version);
 
+        /* Use flex column layout so name and description stack vertically */
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(row, 2, LV_PART_MAIN);
+
         lv_obj_t *name_lbl = lv_label_create(row);
         lv_label_set_text(name_lbl, top_line);
-        lv_obj_set_width(name_lbl, APP_AREA_W - ITEM_PAD_LEFT - ITEM_PAD_RIGHT);
+        lv_obj_set_width(name_lbl, LV_PCT(100));
         lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(name_lbl, tc->text, LV_PART_MAIN);
-        lv_obj_set_style_text_color(name_lbl, lv_color_white(), LV_STATE_PRESSED);
-        lv_obj_align(name_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_set_style_text_opa(name_lbl, LV_OPA_COVER, LV_PART_MAIN);
-
-        /* Bottom line: description (truncated) */
-        char desc_buf[140];
-        snprintf(desc_buf, sizeof(desc_buf), "  %s", app->description);
+        lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
 
         lv_obj_t *desc_lbl = lv_label_create(row);
-        lv_label_set_text(desc_lbl, desc_buf);
-        lv_obj_set_width(desc_lbl, APP_AREA_W - ITEM_PAD_LEFT - ITEM_PAD_RIGHT);
+        lv_label_set_text(desc_lbl, app->description);
+        lv_obj_set_width(desc_lbl, LV_PCT(100));
         lv_obj_set_style_text_font(desc_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_obj_set_style_text_color(desc_lbl, tc->text_secondary, LV_PART_MAIN);
-        lv_obj_set_style_text_color(desc_lbl, lv_color_white(), LV_STATE_PRESSED);
         lv_label_set_long_mode(desc_lbl, LV_LABEL_LONG_DOT);
-        lv_obj_align(desc_lbl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
         create_separator(s_store.catalog_list);
     }
