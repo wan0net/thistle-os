@@ -20,10 +20,15 @@ static const char *TAG = "ui_mgr";
 #define STATUSBAR_H     24
 #define LVGL_TASK_PERIOD_MS 10
 
-/* Draw buffer — L8 (8-bit grayscale) format for e-paper compatibility.
+/* Draw buffer — placed in PSRAM to save ~76KB of internal DRAM.
  * Double-buffer: allocate two halves so LVGL can render while we flush. */
+#ifdef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+static EXT_RAM_BSS_ATTR uint8_t s_draw_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static EXT_RAM_BSS_ATTR uint8_t s_draw_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+#else
 static uint8_t s_draw_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT / 2];
 static uint8_t s_draw_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT / 2];
+#endif
 
 static lv_display_t   *s_display  = NULL;
 static lv_obj_t       *s_screen   = NULL;
