@@ -22,6 +22,7 @@
 #include "thistle/app_manager.h"
 #include "thistle/appstore_client.h"
 #include "thistle/wifi_manager.h"
+#include "thistle/net_manager.h"
 #include "thistle/ota.h"
 
 #include "lvgl.h"
@@ -535,8 +536,8 @@ static void install_btn_cb(lv_event_t *e)
 
     catalog_entry_t *entry = &s_store.entries[idx];
 
-    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
-        toast_warn("Connect to WiFi first");
+    if (!net_is_connected()) {
+        toast_warn("No network connection");
         return;
     }
 
@@ -574,8 +575,8 @@ static void ota_btn_cb(lv_event_t *e)
     catalog_entry_t *entry = &s_store.entries[idx];
     if (entry->type != CATALOG_TYPE_FIRMWARE) return;
 
-    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
-        toast_warn("Connect to WiFi first");
+    if (!net_is_connected()) {
+        toast_warn("No network connection");
         return;
     }
 
@@ -1016,10 +1017,10 @@ static void refresh_server_cb(lv_event_t *e)
 {
     (void)e;
 
-    if (wifi_manager_get_state() != WIFI_STATE_CONNECTED) {
-        toast_warn("Connect to WiFi first");
+    if (!net_is_connected()) {
+        toast_warn("No network connection");
         if (s_store.catalog_status_label) {
-            lv_label_set_text(s_store.catalog_status_label, "WiFi not connected");
+            lv_label_set_text(s_store.catalog_status_label, "Not connected");
         }
         return;
     }

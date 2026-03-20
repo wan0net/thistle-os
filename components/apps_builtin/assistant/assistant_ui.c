@@ -28,6 +28,7 @@
 
 #include "hal/sdcard_path.h"
 #include "thistle/wifi_manager.h"
+#include "thistle/net_manager.h"
 #include "thistle/app_manager.h"
 #include "ui/theme.h"
 
@@ -278,8 +279,7 @@ static void send_to_ai(const char *user_msg)
     add_message("You", user_msg, true);
 
     /* Check network connectivity */
-    wifi_state_t ws = wifi_manager_get_state();
-    if (ws != WIFI_STATE_CONNECTED) {
+    if (!net_is_connected()) {
         add_message("AI", "No network connection. Connect to WiFi first.", false);
         if (s_ai.status_label) {
             lv_label_set_text(s_ai.status_label, "Offline");
@@ -425,12 +425,11 @@ esp_err_t assistant_ui_create(lv_obj_t *parent)
     lv_obj_set_flex_grow(title_label, 1);
 
     s_ai.status_label = lv_label_create(header);
-    wifi_state_t ws = wifi_manager_get_state();
     lv_label_set_text(s_ai.status_label,
-                      ws == WIFI_STATE_CONNECTED ? "Connected" : "Offline");
+                      net_is_connected() ? "Connected" : "Offline");
     lv_obj_set_style_text_font(s_ai.status_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_ai.status_label,
-                                ws == WIFI_STATE_CONNECTED ? colors->primary : colors->text_secondary,
+                                net_is_connected() ? colors->primary : colors->text_secondary,
                                 LV_PART_MAIN);
 
     /* ----------------------------------------------------------------
@@ -529,14 +528,12 @@ void assistant_ui_show(void)
 
         /* Update status label to reflect current network state */
         if (s_ai.status_label) {
-            wifi_state_t ws = wifi_manager_get_state();
+            bool connected = net_is_connected();
             const theme_colors_t *colors = theme_get_colors();
             lv_label_set_text(s_ai.status_label,
-                              ws == WIFI_STATE_CONNECTED ? "Connected" : "Offline");
+                              connected ? "Connected" : "Offline");
             lv_obj_set_style_text_color(s_ai.status_label,
-                                        ws == WIFI_STATE_CONNECTED
-                                            ? colors->primary
-                                            : colors->text_secondary,
+                                        connected ? colors->primary : colors->text_secondary,
                                         LV_PART_MAIN);
         }
     }

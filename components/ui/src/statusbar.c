@@ -1,6 +1,7 @@
 #include "ui/statusbar.h"
 #include "ui/theme.h"
 #include "thistle/wifi_manager.h"
+#include "thistle/net_manager.h"
 #include "hal/board.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -184,10 +185,14 @@ static void statusbar_update_tick(void *arg)
         statusbar_set_battery(pct, charging);
     }
 
-    /* Update WiFi */
-    wifi_state_t ws = wifi_manager_get_state();
-    int8_t rssi = wifi_manager_get_rssi();
-    statusbar_set_wifi(ws == WIFI_STATE_CONNECTED, rssi);
+    /* Update network indicator — shows active transport name + RSSI */
+    if (net_is_connected()) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%s:%d", net_get_transport_name(), (int)net_get_rssi());
+        if (s_wifi_label) lv_label_set_text(s_wifi_label, buf);
+    } else {
+        if (s_wifi_label) lv_label_set_text(s_wifi_label, "--");
+    }
 }
 
 void statusbar_start_update_timer(void)

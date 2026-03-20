@@ -28,6 +28,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/kernel/src/syscall_table.c
     ${THISTLE_DIR}/components/kernel/src/ipc.c
     ${THISTLE_DIR}/components/kernel/src/event.c
+    ${THISTLE_DIR}/components/kernel/src/net_manager.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/theme.c
@@ -77,6 +78,7 @@ set(SIM_SRCS
     drivers/sim_storage.c
     drivers/sim_wifi.c
     drivers/sim_ble.c
+    drivers/sim_network.c
     board_simulator.c
 )
 

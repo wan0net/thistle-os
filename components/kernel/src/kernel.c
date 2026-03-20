@@ -9,6 +9,8 @@
 #include "thistle/ota.h"
 #include "thistle/permissions.h"
 #include "thistle/signing.h"
+#include "thistle/net_manager.h"
+#include "thistle/wifi_manager.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -37,6 +39,13 @@ esp_err_t kernel_init(void)
     ret = ipc_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ipc_init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Initializing network manager");
+    ret = net_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "net_manager_init failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -107,6 +116,17 @@ esp_err_t kernel_init(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ota_init failed: %s", esp_err_to_name(ret));
         return ret;
+    }
+
+    /* Initialize WiFi and register it as a network transport.
+     * Done after OTA init so the full subsystem is ready.
+     * Non-fatal if WiFi is unavailable (e.g. cellular-only board). */
+    ret = wifi_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "wifi_manager_init failed: %s — WiFi transport unavailable",
+                 esp_err_to_name(ret));
+    } else {
+        net_manager_register_wifi();
     }
 
     ESP_LOGI(TAG, "Publishing SYSTEM_BOOT event");
