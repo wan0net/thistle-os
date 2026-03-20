@@ -4,6 +4,7 @@
 #include "ui/epaper_refresh.h"
 #include "hal/board.h"
 #include "hal/input.h"
+#include "thistle/app_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -70,6 +71,13 @@ static void ui_input_hal_cb(const hal_input_event_t *event, void *user_data)
             else if (lv_key == '\b')  lv_key = LV_KEY_BACKSPACE;
             else if (lv_key == 0x1B) lv_key = LV_KEY_ESC;
             else if (lv_key == '\t')  lv_key = LV_KEY_NEXT;
+
+            /* Global ESC handler: if foreground app is not the launcher,
+             * switch back to the launcher regardless of focus. */
+            if (lv_key == LV_KEY_ESC) {
+                app_manager_launch("com.thistle.launcher");
+            }
+
             s_kbd_state.key   = lv_key;
             s_kbd_state.state = LV_INDEV_STATE_PRESSED;
             break;

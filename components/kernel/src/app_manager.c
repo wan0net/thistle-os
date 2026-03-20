@@ -122,11 +122,14 @@ esp_err_t app_manager_launch(const char *app_id)
     /* Remember the current foreground so we can restore it if launch fails. */
     app_slot_t *prev_fg = foreground_slot();
 
+    /* Track whether this is the very first launch (on_create will run) */
+    bool fresh_launch = (target->state == APP_STATE_UNLOADED);
+
     /* Pause whatever is currently in the foreground */
     pause_foreground();
 
     /* If the app hasn't been created yet, call on_create */
-    if (target->state == APP_STATE_UNLOADED) {
+    if (fresh_launch) {
         target->state = APP_STATE_LOADING;
         ESP_LOGI(TAG, "Creating app '%s'", app_id);
         if (target->entry->on_create) {
@@ -149,11 +152,20 @@ esp_err_t app_manager_launch(const char *app_id)
         }
     }
 
-    /* Bring to foreground */
-    ESP_LOGI(TAG, "Starting app '%s' (handle %d)", app_id, target->handle);
+    /* Bring to foreground.
+     * First time: call on_start.  Subsequent times (app was backgrounded):
+     * call on_resume so the app can show its UI without re-initialising. */
     target->state = APP_STATE_RUNNING;
-    if (target->entry->on_start) {
-        target->entry->on_start();
+    if (fresh_launch) {
+        ESP_LOGI(TAG, "Starting app '%s' (handle %d)", app_id, target->handle);
+        if (target->entry->on_start) {
+            target->entry->on_start();
+        }
+    } else {
+        ESP_LOGI(TAG, "Resuming app '%s' (handle %d)", app_id, target->handle);
+        if (target->entry->on_resume) {
+            target->entry->on_resume();
+        }
     }
 
     /* Publish event */

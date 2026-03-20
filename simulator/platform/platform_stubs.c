@@ -39,15 +39,35 @@ esp_err_t ota_init(void) { return ESP_OK; }
 esp_err_t permissions_init(void) { return ESP_OK; }
 esp_err_t wifi_manager_init(void) { return ESP_OK; }
 
-/* wifi_manager stubs for statusbar/launcher */
+/* wifi_manager stubs for statusbar/launcher/settings */
 int wifi_manager_get_state(void) { return 0; }
 int wifi_manager_get_rssi(void) { return 0; }
+const char *wifi_manager_get_ip(void) { return NULL; }
+esp_err_t wifi_manager_scan(void *results, uint8_t max_results, uint8_t *out_count) {
+    (void)results; (void)max_results;
+    if (out_count) *out_count = 0;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t wifi_manager_connect(const char *ssid, const char *password, uint32_t timeout_ms) {
+    (void)ssid; (void)password; (void)timeout_ms;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t wifi_manager_disconnect(void) { return ESP_OK; }
+esp_err_t wifi_manager_ntp_sync(void) { return ESP_ERR_NOT_SUPPORTED; }
 void wifi_manager_get_time_str(char *buf, unsigned long buf_len) {
     time_t now;
     struct tm tm_info;
     time(&now);
     localtime_r(&now, &tm_info);
     snprintf(buf, buf_len, "%02d:%02d", tm_info.tm_hour, tm_info.tm_min);
+}
+void wifi_manager_get_date_str(char *buf, unsigned long buf_len) {
+    time_t now;
+    struct tm tm_info;
+    time(&now);
+    localtime_r(&now, &tm_info);
+    snprintf(buf, buf_len, "%04d-%02d-%02d",
+             tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday);
 }
 
 /* ELF loader stub */

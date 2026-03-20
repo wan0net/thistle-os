@@ -1,6 +1,7 @@
 #include "settings/settings_app.h"
 
 #include "thistle/app_manager.h"
+#include "ui/statusbar.h"
 #include "esp_log.h"
 
 static const char *TAG = "settings";
@@ -20,6 +21,7 @@ static int settings_on_create(void)
 static void settings_on_start(void)
 {
     ESP_LOGI(TAG, "on_start");
+    statusbar_set_title("Settings");
     settings_ui_show();
 }
 
@@ -32,6 +34,7 @@ static void settings_on_pause(void)
 static void settings_on_resume(void)
 {
     ESP_LOGI(TAG, "on_resume");
+    statusbar_set_title("Settings");
     settings_ui_show();
 }
 

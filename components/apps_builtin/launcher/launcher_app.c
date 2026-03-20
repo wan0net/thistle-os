@@ -1,6 +1,7 @@
 #include "launcher/launcher_app.h"
 
 #include "thistle/app_manager.h"
+#include "ui/statusbar.h"
 #include "esp_log.h"
 
 static const char *TAG = "launcher";
@@ -24,6 +25,7 @@ static int launcher_on_create(void)
 static void launcher_on_start(void)
 {
     ESP_LOGI(TAG, "on_start");
+    statusbar_set_title("Launcher");
     launcher_ui_show();
 }
 
@@ -36,6 +38,7 @@ static void launcher_on_pause(void)
 static void launcher_on_resume(void)
 {
     ESP_LOGI(TAG, "on_resume");
+    statusbar_set_title("Launcher");
     launcher_ui_show();
 }
 

@@ -1,6 +1,7 @@
 #include "file_manager/filemgr_app.h"
 
 #include "thistle/app_manager.h"
+#include "ui/statusbar.h"
 #include "esp_log.h"
 
 static const char *TAG = "filemgr";
@@ -20,6 +21,7 @@ static int filemgr_on_create(void)
 static void filemgr_on_start(void)
 {
     ESP_LOGI(TAG, "on_start");
+    statusbar_set_title("Files");
     filemgr_ui_show();
 }
 
@@ -32,6 +34,7 @@ static void filemgr_on_pause(void)
 static void filemgr_on_resume(void)
 {
     ESP_LOGI(TAG, "on_resume");
+    statusbar_set_title("Files");
     filemgr_ui_show();
 }
 

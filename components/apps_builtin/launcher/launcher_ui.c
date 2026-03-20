@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include "esp_log.h"
+#include "thistle/app_manager.h"
 #include "thistle/wifi_manager.h"
 
 static const char *TAG = "launcher_ui";
@@ -12,8 +13,17 @@ static const char *TAG = "launcher_ui";
 
 static void dock_icon_clicked_cb(lv_event_t *e)
 {
-    const char *name = (const char *)lv_obj_get_user_data(lv_event_get_target(e));
-    ESP_LOGI(TAG, "dock icon pressed: %s", name ? name : "?");
+    const char *app_id = (const char *)lv_obj_get_user_data(lv_event_get_target(e));
+    if (!app_id) {
+        ESP_LOGW(TAG, "dock icon pressed: app not installed");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Launching app: %s", app_id);
+    esp_err_t ret = app_manager_launch(app_id);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to launch %s: %s", app_id, esp_err_to_name(ret));
+    }
 }
 
 /* App-area dimensions (full 320x216 after the 24px status bar) */
@@ -158,9 +168,9 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_obj_set_style_pad_column(dock, 12, LV_PART_MAIN);
 
     /* Dock icons: Settings, Files, MeshCore */
-    create_dock_icon(dock, "S", "Settings");
-    create_dock_icon(dock, "F", "Files");
-    create_dock_icon(dock, "M", "MeshCore");
+    create_dock_icon(dock, "S", "com.thistle.settings");
+    create_dock_icon(dock, "F", "com.thistle.filemgr");
+    create_dock_icon(dock, "M", NULL); /* MeshCore not installed */
 
     return ESP_OK;
 }
