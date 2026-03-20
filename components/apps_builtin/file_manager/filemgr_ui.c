@@ -1,6 +1,7 @@
 #include "file_manager/filemgr_app.h"
 
 #include "hal/board.h"
+#include "hal/sdcard_path.h"
 #include "ui/theme.h"
 
 #include "lvgl.h"
@@ -107,7 +108,7 @@ static const char *file_type_indicator(const char *name)
 static void title_clicked_cb(lv_event_t *e)
 {
     (void)e;
-    if (strcmp(s_fm.current_path, "/sdcard") == 0) return;
+    if (strcmp(s_fm.current_path, THISTLE_SDCARD) == 0) return;
 
     char parent[256];
     strncpy(parent, s_fm.current_path, sizeof(parent) - 1);
@@ -117,11 +118,11 @@ static void title_clicked_cb(lv_event_t *e)
     if (last_slash && last_slash != parent) {
         *last_slash = '\0';
     } else {
-        strncpy(parent, "/sdcard", sizeof(parent) - 1);
+        strncpy(parent, THISTLE_SDCARD, sizeof(parent) - 1);
     }
 
-    if (strncmp(parent, "/sdcard", 7) != 0) {
-        strncpy(parent, "/sdcard", sizeof(parent) - 1);
+    if (strncmp(parent, THISTLE_SDCARD, strlen(THISTLE_SDCARD)) != 0) {
+        strncpy(parent, THISTLE_SDCARD, sizeof(parent) - 1);
     }
 
     navigate_to(parent);
@@ -345,7 +346,7 @@ static void navigate_to(const char *path)
     }
 
     /* Add ".." row if not at root mount point */
-    if (strcmp(path, "/sdcard") != 0) {
+    if (strcmp(path, THISTLE_SDCARD) != 0) {
         /* Compute parent path */
         char parent[256];
         strncpy(parent, path, sizeof(parent) - 1);
@@ -356,12 +357,12 @@ static void navigate_to(const char *path)
             *last_slash = '\0';
         } else {
             /* Would go above root of VFS — clamp to /sdcard */
-            strncpy(parent, "/sdcard", sizeof(parent) - 1);
+            strncpy(parent, THISTLE_SDCARD, sizeof(parent) - 1);
         }
 
         /* Make sure we don't go above /sdcard */
-        if (strncmp(parent, "/sdcard", 7) != 0) {
-            strncpy(parent, "/sdcard", sizeof(parent) - 1);
+        if (strncmp(parent, THISTLE_SDCARD, strlen(THISTLE_SDCARD)) != 0) {
+            strncpy(parent, THISTLE_SDCARD, sizeof(parent) - 1);
         }
 
         create_parent_row(s_fm.list_container, parent);
@@ -500,7 +501,11 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_add_event_cb(title_bar, title_clicked_cb, LV_EVENT_CLICKED, NULL);
 
     s_fm.title_label = lv_label_create(title_bar);
-    lv_label_set_text(s_fm.title_label, "< Files: /sdcard");
+    {
+        char init_title[128];
+        snprintf(init_title, sizeof(init_title), "< Files: %s", THISTLE_SDCARD);
+        lv_label_set_text(s_fm.title_label, init_title);
+    }
     lv_label_set_long_mode(s_fm.title_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(s_fm.title_label, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_fm.title_label, clr->text, LV_PART_MAIN);
@@ -557,7 +562,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
     lv_obj_align(s_fm.storage_label, LV_ALIGN_LEFT_MID, 0, 0);
 
     /* Populate list starting at SD card root */
-    navigate_to("/sdcard");
+    navigate_to(THISTLE_SDCARD);
 
     return ESP_OK;
 }

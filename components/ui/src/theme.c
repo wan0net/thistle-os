@@ -1,3 +1,4 @@
+#include "hal/sdcard_path.h"
 #include "ui/theme.h"
 #include "ui/statusbar.h"
 #include "esp_log.h"
@@ -255,7 +256,7 @@ int theme_list_available(char names[][32], int max_count)
 {
     if (!names || max_count <= 0) return 0;
 
-    DIR *dir = opendir("/sdcard/themes");
+    DIR *dir = opendir(THISTLE_SDCARD "/themes");
     if (!dir) {
         ESP_LOGW(TAG, "Cannot open /sdcard/themes (SD card not mounted?)");
         return 0;

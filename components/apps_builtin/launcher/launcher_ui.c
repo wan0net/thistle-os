@@ -33,7 +33,7 @@ static void dock_icon_clicked_cb(lv_event_t *e)
 #define APP_AREA_W   320
 #define APP_AREA_H   216
 #define DOCK_H        60
-#define ICON_SIZE     48
+#define ICON_SIZE     38
 
 static lv_obj_t *s_root = NULL;
 
@@ -174,13 +174,14 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(dock, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(dock, 8, LV_PART_MAIN);
 
-    /* Dock icons: Settings, Files, Reader, Messenger */
+    /* Dock icons: Settings, Files, Reader, Messenger, Navigator */
     create_dock_icon(dock, "S", "com.thistle.settings");
     create_dock_icon(dock, "F", "com.thistle.filemgr");
     create_dock_icon(dock, "R", "com.thistle.reader");
     create_dock_icon(dock, "M", "com.thistle.messenger");
+    create_dock_icon(dock, "N", "com.thistle.navigator");
 
     return ESP_OK;
 }

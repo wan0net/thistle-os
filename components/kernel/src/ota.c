@@ -1,5 +1,6 @@
 #include "thistle/ota.h"
 #include "thistle/kernel.h"
+#include "hal/sdcard_path.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_app_format.h"
@@ -12,7 +13,7 @@
 static const char *TAG = "ota";
 
 #define OTA_BUF_SIZE       4096
-#define OTA_SD_UPDATE_PATH "/sdcard/update/thistle_os.bin"
+#define OTA_SD_UPDATE_PATH THISTLE_SDCARD "/update/thistle_os.bin"
 
 esp_err_t ota_init(void)
 {

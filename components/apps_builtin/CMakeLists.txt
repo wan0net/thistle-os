@@ -10,6 +10,10 @@ idf_component_register(
         "reader/reader_ui.c"
         "messenger/messenger_app.c"
         "messenger/messenger_ui.c"
+        "navigator/navigator_app.c"
+        "navigator/navigator_ui.c"
+        "notes/notes_app.c"
+        "notes/notes_ui.c"
     INCLUDE_DIRS "."
     REQUIRES kernel ui thistle_hal
 )

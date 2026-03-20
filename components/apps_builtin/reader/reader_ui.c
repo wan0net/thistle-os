@@ -1,3 +1,4 @@
+#include "hal/sdcard_path.h"
 /*
  * SPDX-License-Identifier: BSD-3-Clause
  * ThistleOS — Reader app UI
@@ -41,7 +42,7 @@ static const char *TAG = "reader_ui";
 #define LINES_PER_PAGE   10   /* ~184 / 18 px per line  */
 #define CHARS_PER_PAGE  (CHARS_PER_LINE * LINES_PER_PAGE)       /* 380   */
 
-#define BOOKS_PATH      "/sdcard/books"
+#define BOOKS_PATH      THISTLE_SDCARD "/books"
 #define MAX_BOOK_FILES   64
 #define ITEM_H           30
 

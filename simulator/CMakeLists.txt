@@ -46,6 +46,10 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/reader/reader_ui.c
     ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_app.c
     ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/navigator/navigator_app.c
+    ${THISTLE_DIR}/components/apps_builtin/navigator/navigator_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/notes/notes_app.c
+    ${THISTLE_DIR}/components/apps_builtin/notes/notes_ui.c
 )
 
 # Simulator sources
@@ -94,15 +98,15 @@ target_compile_definitions(thistle_sim PRIVATE
     # Disable ESP-IDF specific features
     SIMULATOR_BUILD=1
     CONFIG_LOG_DEFAULT_LEVEL=3
+    # SD card path for simulator — points to local sdcard directory
+    THISTLE_SDCARD_PATH="/tmp/thistle_sdcard"
 )
 
 target_link_directories(thistle_sim PRIVATE ${SDL2_LIBRARY_DIRS})
 target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} pthread m)
 
-# Force-include sim_vfs.h so all fopen/opendir/stat calls get rewritten
-# This MUST come after standard headers are resolved
+# Suppress warnings from LVGL and external code
 target_compile_options(thistle_sim PRIVATE
-    -include "${CMAKE_CURRENT_SOURCE_DIR}/platform/sim_vfs.h"
     -Wno-unused-parameter
     -Wno-sign-compare
     -Wno-missing-field-initializers

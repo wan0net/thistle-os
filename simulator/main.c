@@ -15,11 +15,14 @@
 #include "thistle/app_manager.h"
 #include "ui/manager.h"
 #include "sim_input.h"
+#include "sim_vfs.h"
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
 #include "reader/reader_app.h"
 #include "messenger/messenger_app.h"
+#include "navigator/navigator_app.h"
+#include "notes/notes_app.h"
 
 int main(int argc, char **argv)
 {
@@ -28,6 +31,9 @@ int main(int argc, char **argv)
 
     printf("ThistleOS Simulator starting...\n");
     fflush(stdout);
+
+    /* Set up simulated SD card filesystem (symlink to simulator/sdcard/) */
+    sim_vfs_init();
 
     /* Initialize kernel (board + drivers + event bus + IPC + syscalls + apps) */
     esp_err_t err = kernel_init();
@@ -45,6 +51,8 @@ int main(int argc, char **argv)
     filemgr_app_register();
     reader_app_register();
     messenger_app_register();
+    navigator_app_register();
+    notes_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);
