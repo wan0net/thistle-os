@@ -21,6 +21,9 @@
 #include "appstore/appstore_app.h"
 #include "assistant/assistant_app.h"
 #include "wifiscanner/wifiscanner_app.h"
+#include "flashlight/flashlight_app.h"
+#include "weather/weather_app.h"
+#include "terminal/terminal_app.h"
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -91,6 +94,9 @@ void app_main(void)
     appstore_app_register();
     assistant_app_register();
     wifiscanner_app_register();
+    flashlight_app_register();
+    weather_app_register();
+    terminal_app_register();
 
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.launcher",   PERM_ALL);
@@ -103,6 +109,9 @@ void app_main(void)
     permissions_grant("com.thistle.appstore",   PERM_STORAGE | PERM_NETWORK);
     permissions_grant("com.thistle.assistant",   PERM_NETWORK | PERM_STORAGE);
     permissions_grant("com.thistle.wifiscanner", PERM_NETWORK);
+    permissions_grant("com.thistle.flashlight",  PERM_SYSTEM);
+    permissions_grant("com.thistle.weather",     PERM_GPS);
+    permissions_grant("com.thistle.terminal",    PERM_ALL);
 
     app_manager_launch("com.thistle.launcher");
 

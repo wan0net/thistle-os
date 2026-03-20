@@ -57,6 +57,12 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_ui.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_app.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/flashlight/flashlight_app.c
+    ${THISTLE_DIR}/components/apps_builtin/flashlight/flashlight_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/weather/weather_app.c
+    ${THISTLE_DIR}/components/apps_builtin/weather/weather_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/terminal/terminal_app.c
+    ${THISTLE_DIR}/components/apps_builtin/terminal/terminal_ui.c
 )
 
 # Simulator sources

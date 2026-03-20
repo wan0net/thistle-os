@@ -26,6 +26,9 @@
 #include "appstore/appstore_app.h"
 #include "assistant/assistant_app.h"
 #include "wifiscanner/wifiscanner_app.h"
+#include "flashlight/flashlight_app.h"
+#include "weather/weather_app.h"
+#include "terminal/terminal_app.h"
 
 int main(int argc, char **argv)
 {
@@ -59,6 +62,9 @@ int main(int argc, char **argv)
     appstore_app_register();
     assistant_app_register();
     wifiscanner_app_register();
+    flashlight_app_register();
+    weather_app_register();
+    terminal_app_register();
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);

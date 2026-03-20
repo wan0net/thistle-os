@@ -21,6 +21,12 @@ idf_component_register(
         "assistant/assistant_ui.c"
         "wifiscanner/wifiscanner_app.c"
         "wifiscanner/wifiscanner_ui.c"
+        "flashlight/flashlight_app.c"
+        "flashlight/flashlight_ui.c"
+        "weather/weather_app.c"
+        "weather/weather_ui.c"
+        "terminal/terminal_app.c"
+        "terminal/terminal_ui.c"
     INCLUDE_DIRS "."
     REQUIRES kernel ui thistle_hal
 )
