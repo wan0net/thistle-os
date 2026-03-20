@@ -162,3 +162,42 @@ TEST_CASE("app_manager_kill calls on_destroy and sets state to UNLOADED", "[app]
     TEST_ASSERT_EQUAL_INT(1, s_on_destroy_calls);
     TEST_ASSERT_EQUAL_INT(APP_STATE_UNLOADED, app_manager_get_state(fg));
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_app_launch_nonexistent: launching unknown app ID returns error", "[app]")
+{
+    setup();
+
+    esp_err_t ret = app_manager_launch("com.no.such.app");
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_app_double_register: registering the same app twice returns error", "[app]")
+{
+    setup();
+
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+
+    /* Second registration of the same entry must be rejected */
+    esp_err_t ret = app_manager_register(&s_app_a);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_app_kill_calls_destroy: on_destroy invoked after kill", "[app]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_launch("com.test.app_a"));
+
+    app_handle_t fg = app_manager_get_foreground();
+    TEST_ASSERT_NOT_EQUAL(APP_HANDLE_INVALID, fg);
+
+    reset_mock_state();
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_kill(fg));
+
+    TEST_ASSERT_EQUAL_INT(1, s_on_destroy_calls);
+    TEST_ASSERT_EQUAL_INT(APP_STATE_UNLOADED, app_manager_get_state(fg));
+}

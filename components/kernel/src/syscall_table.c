@@ -15,6 +15,18 @@
 
 static const char *TAG = "syscall";
 
+/* TODO: Permission enforcement
+ * Each syscall that accesses a sensitive resource should check
+ * permissions_check(current_app_id, PERM_xxx) before proceeding.
+ * Requires: task-to-app mapping (get current app from FreeRTOS task handle).
+ * Syscalls needing permission checks:
+ *   - thistle_radio_send/recv -> PERM_RADIO
+ *   - thistle_gps_* -> PERM_GPS
+ *   - thistle_fs_* -> PERM_STORAGE
+ *   - thistle_wifi, thistle_http, thistle_ble -> PERM_NETWORK
+ *   - thistle_audio_* -> PERM_AUDIO
+ */
+
 /* --------------------------------------------------------------------------
  * System syscall implementations
  * -------------------------------------------------------------------------- */

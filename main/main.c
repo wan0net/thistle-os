@@ -7,6 +7,7 @@
 
 #include "thistle/kernel.h"
 #include "thistle/app_manager.h"
+#include "thistle/permissions.h"
 #include "ui/manager.h"
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
@@ -43,6 +44,12 @@ void app_main(void)
     launcher_app_register();
     settings_app_register();
     filemgr_app_register();
+
+    /* Grant full permissions to built-in apps */
+    permissions_grant("com.thistle.launcher", PERM_ALL);
+    permissions_grant("com.thistle.settings", PERM_ALL);
+    permissions_grant("com.thistle.filemgr",  PERM_ALL);
+
     app_manager_launch("com.thistle.launcher");
 
     ESP_LOGI(TAG, "ThistleOS ready");

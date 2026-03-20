@@ -5,6 +5,8 @@
 #include "thistle/syscall.h"
 #include "thistle/app_manager.h"
 #include "thistle/elf_loader.h"
+#include "thistle/ota.h"
+#include "thistle/permissions.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -64,10 +66,24 @@ esp_err_t kernel_init(void)
         return ret;
     }
 
+    ESP_LOGI(TAG, "Initializing permissions subsystem");
+    ret = permissions_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "permissions_init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     ESP_LOGI(TAG, "Initializing ELF loader");
     ret = elf_loader_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "elf_loader_init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Initializing OTA subsystem");
+    ret = ota_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ota_init failed: %s", esp_err_to_name(ret));
         return ret;
     }
 

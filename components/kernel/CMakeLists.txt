@@ -7,7 +7,9 @@ idf_component_register(
         "src/ipc.c"
         "src/event.c"
         "src/elf_loader.c"
+        "src/ota.c"
+        "src/permissions.c"
     INCLUDE_DIRS "include"
-    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs
+    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
     PRIV_REQUIRES board_tdeck_pro
 )

@@ -97,3 +97,43 @@ TEST_CASE("epaper_refresh_clear resets dirty flag and increments refresh counter
     TEST_ASSERT_FALSE(epaper_refresh_is_dirty());
     TEST_ASSERT_EQUAL_UINT32(count_before + 1, epaper_refresh_get_count());
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_epaper_dirty_bounds_union: two non-adjacent marks produce correct union", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    epaper_refresh_mark_dirty(10, 10, 50, 50);
+    epaper_refresh_mark_dirty(100, 100, 200, 150);
+
+    TEST_ASSERT_TRUE(epaper_refresh_is_dirty());
+
+    uint16_t x1, y1, x2, y2;
+    epaper_refresh_get_bounds(&x1, &y1, &x2, &y2);
+
+    TEST_ASSERT_EQUAL_UINT16(10,  x1);
+    TEST_ASSERT_EQUAL_UINT16(10,  y1);
+    TEST_ASSERT_EQUAL_UINT16(200, x2);
+    TEST_ASSERT_EQUAL_UINT16(150, y2);
+}
+
+TEST_CASE("test_epaper_clear_increments_counter: counter increases by exactly 1 per clear", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    uint32_t before = epaper_refresh_get_count();
+
+    epaper_refresh_mark_dirty(0, 0, 10, 10);
+    epaper_refresh_clear();
+
+    TEST_ASSERT_EQUAL_UINT32(before + 1, epaper_refresh_get_count());
+}
+
+TEST_CASE("test_epaper_init_invalid_dimensions: init with 0x0 returns error", "[epaper]")
+{
+    esp_err_t ret = epaper_refresh_init(0, 0);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
