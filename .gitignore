@@ -21,3 +21,4 @@ managed_components/
 # Claude Code
 .claude/
 simulator/build/
+.playwright-mcp/
