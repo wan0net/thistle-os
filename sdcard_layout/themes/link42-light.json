@@ -1,0 +1,17 @@
+{
+    "name": "link42 Light",
+    "description": "link42.app light mode — clean, airy, professional",
+    "colors": {
+        "primary": "#2563EB",
+        "secondary": "#3B82F6",
+        "bg": "#FFFFFF",
+        "surface": "#F8F8F7",
+        "text": "#1A1A1A",
+        "text_secondary": "#57534E"
+    },
+    "components": {
+        "button": { "radius": 6, "padding": 8 },
+        "panel": { "radius": 6, "padding": 6 },
+        "list_item": { "padding": 8 }
+    }
+}

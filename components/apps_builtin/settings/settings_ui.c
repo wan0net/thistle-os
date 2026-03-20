@@ -21,6 +21,9 @@
 #include "thistle/ble_manager.h"
 #include "thistle/kernel.h"
 #include "hal/board.h"
+#include "ui/theme.h"
+#include "ui/toast.h"
+#include "ui/statusbar.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -48,6 +51,7 @@ typedef enum {
     SETTINGS_MAIN,
     SETTINGS_WIFI,
     SETTINGS_BLUETOOTH,
+    SETTINGS_APPEARANCE,
     SETTINGS_ABOUT,
     SETTINGS_DRIVERS,
     SETTINGS_DRIVER_DETAIL,
@@ -125,10 +129,11 @@ typedef struct {
 } settings_item_t;
 
 static const settings_item_t s_items[] = {
-    { "WiFi",      "Off" },
-    { "Bluetooth", "Off" },
-    { "Drivers",   NULL  },
-    { "About",     NULL  },
+    { "WiFi",        "Off" },
+    { "Bluetooth",   "Off" },
+    { "Appearance",  NULL  },
+    { "Drivers",     NULL  },
+    { "About",       NULL  },
 };
 #define ITEMS_COUNT (sizeof(s_items) / sizeof(s_items[0]))
 
@@ -750,6 +755,197 @@ static void open_bluetooth_screen(void)
     lv_obj_align(lbl_disc, LV_ALIGN_CENTER, 0, 0);
 
     ble_update_labels();
+}
+
+/* ------------------------------------------------------------------ */
+/* Appearance sub-screen                                                */
+/* ------------------------------------------------------------------ */
+
+#define APPEARANCE_MAX_THEMES 8
+
+/* Payload type for theme selection rows */
+typedef struct {
+    char name[32]; /* theme filename, e.g. "dark.json" */
+} appearance_theme_payload_t;
+
+static appearance_theme_payload_t s_theme_payloads[APPEARANCE_MAX_THEMES + 1]; /* +1 for Default */
+
+static void theme_selected_cb(lv_event_t *e)
+{
+    const char *theme_name = (const char *)lv_event_get_user_data(e);
+    if (!theme_name) return;
+
+    if (strcmp(theme_name, "__default__") == 0) {
+        /* Load the built-in default monochrome theme from SD if available,
+         * otherwise reinitialise the default without a display argument.
+         * theme_init(NULL) skips display wiring but re-applies styles. */
+        esp_err_t ret = theme_load("/sdcard/themes/default.json");
+        if (ret != ESP_OK) {
+            theme_init(NULL);
+            statusbar_refresh_theme();
+        }
+        toast_info("Default theme applied");
+    } else {
+        char path[72];
+        snprintf(path, sizeof(path), "/sdcard/themes/%s", theme_name);
+        esp_err_t ret = theme_load(path);
+        if (ret == ESP_OK) {
+            toast_info("Theme applied");
+        } else {
+            toast_warn("Failed to load theme");
+        }
+    }
+}
+
+static void wallpaper_browse_cb(lv_event_t *e)
+{
+    (void)e;
+    /* File browser not yet implemented */
+    toast_info("File browser: coming soon");
+}
+
+static void wallpaper_clear_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Nothing to clear yet — placeholder */
+    toast_info("Wallpaper cleared");
+}
+
+/* Create a clickable theme-selection row showing [x] or [ ] indicator */
+static void create_theme_row(lv_obj_t *content, const char *display_name,
+                             const char *payload_name, bool is_active)
+{
+    lv_obj_t *row = lv_obj_create(content);
+    lv_obj_set_size(row, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT + 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, theme_selected_cb, LV_EVENT_CLICKED, (void *)payload_name);
+
+    lv_obj_t *lbl_name = lv_label_create(row);
+    lv_label_set_text(lbl_name, display_name);
+    lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_flex_grow(lbl_name, 1);
+
+    lv_obj_t *lbl_sel = lv_label_create(row);
+    lv_label_set_text(lbl_sel, is_active ? "[x]" : "[ ]");
+    lv_obj_set_style_text_font(lbl_sel, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_sel, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_sel, lv_color_white(), LV_STATE_PRESSED);
+}
+
+/* Create a clickable action button row (for Browse / Clear wallpaper) */
+static void create_action_row(lv_obj_t *content, const char *label,
+                               lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_obj_create(content);
+    lv_obj_set_size(btn, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(btn, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, label);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void open_appearance_screen(void)
+{
+    lv_obj_t *content = create_sub_screen("Appearance");
+    s_current_screen = SETTINGS_APPEARANCE;
+
+    /* ---- Theme section header ---- */
+    create_info_row(content, "Theme");
+    create_separator(content);
+
+    /* Default (built-in monochrome) — always first, no SD required.
+     * We treat it as active when no SD theme is loaded (i.e. theme_get_colors()
+     * returns the default white bg).  A simple heuristic: bg == white. */
+    const theme_colors_t *cur = theme_get_colors();
+    bool default_active = (cur->bg.red == 0xFF && cur->bg.green == 0xFF && cur->bg.blue == 0xFF);
+
+    /* Store "__default__" in the first payload slot */
+    strncpy(s_theme_payloads[0].name, "__default__", sizeof(s_theme_payloads[0].name) - 1);
+    create_theme_row(content, "Default", s_theme_payloads[0].name, default_active);
+
+    /* Enumerate themes from /sdcard/themes */
+    char theme_names[APPEARANCE_MAX_THEMES][32];
+    int theme_count = theme_list_available(theme_names, APPEARANCE_MAX_THEMES);
+
+    for (int i = 0; i < theme_count; i++) {
+        /* Build display name: strip ".json" suffix */
+        char display[32];
+        strncpy(display, theme_names[i], sizeof(display) - 1);
+        display[sizeof(display) - 1] = '\0';
+        size_t dlen = strlen(display);
+        if (dlen > 5 && strcmp(display + dlen - 5, ".json") == 0) {
+            display[dlen - 5] = '\0';
+        }
+
+        /* Copy filename into persistent payload storage */
+        int slot = i + 1; /* slot 0 is Default */
+        if (slot >= APPEARANCE_MAX_THEMES + 1) break;
+        strncpy(s_theme_payloads[slot].name, theme_names[i],
+                sizeof(s_theme_payloads[slot].name) - 1);
+        s_theme_payloads[slot].name[sizeof(s_theme_payloads[slot].name) - 1] = '\0';
+
+        /* Mark active if this theme's filename matches the last loaded path
+         * (heuristic: default_active is false, so any SD theme can show [x]) */
+        bool active = false; /* TODO: track last-loaded theme name */
+
+        create_theme_row(content, display, s_theme_payloads[slot].name, active);
+    }
+
+    if (theme_count == 0) {
+        create_info_row(content, "  (no themes on SD card)");
+    }
+
+    create_separator(content);
+
+    /* ---- Wallpaper section header ---- */
+    create_info_row(content, "Wallpaper");
+    create_separator(content);
+
+    create_info_row(content, "  (current: none)");
+    create_separator(content);
+
+    create_action_row(content, "Browse SD Card", wallpaper_browse_cb);
+    create_separator(content);
+    create_action_row(content, "Clear Wallpaper", wallpaper_clear_cb);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1506,6 +1702,9 @@ static void item_clicked_cb(lv_event_t *e)
     } else if (strcmp(name, "Bluetooth") == 0) {
         lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
         open_bluetooth_screen();
+    } else if (strcmp(name, "Appearance") == 0) {
+        lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
+        open_appearance_screen();
     } else if (strcmp(name, "Drivers") == 0) {
         lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
         open_drivers_screen();

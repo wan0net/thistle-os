@@ -150,6 +150,19 @@ void statusbar_set_time_str(const char *time_str)
     lv_label_set_text(s_time_label, time_str);
 }
 
+void statusbar_refresh_theme(void)
+{
+    const theme_colors_t *colors = theme_get_colors();
+    if (s_container) {
+        lv_obj_set_style_bg_color(s_container, colors->bg, LV_PART_MAIN);
+        lv_obj_set_style_border_color(s_container, colors->text, LV_PART_MAIN);
+    }
+    if (s_title_label)   lv_obj_set_style_text_color(s_title_label,   colors->text, LV_PART_MAIN);
+    if (s_time_label)    lv_obj_set_style_text_color(s_time_label,    colors->text, LV_PART_MAIN);
+    if (s_battery_label) lv_obj_set_style_text_color(s_battery_label, colors->text, LV_PART_MAIN);
+    if (s_wifi_label)    lv_obj_set_style_text_color(s_wifi_label,    colors->text, LV_PART_MAIN);
+}
+
 /* ------------------------------------------------------------------ */
 /* Periodic update timer (30 s, esp_timer)                             */
 /* ------------------------------------------------------------------ */

@@ -18,3 +18,6 @@ void statusbar_start_update_timer(void);
 
 /* Get status bar height in pixels */
 uint16_t statusbar_get_height(void);
+
+/* Refresh status bar colors after a theme change */
+void statusbar_refresh_theme(void);

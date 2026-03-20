@@ -5,6 +5,7 @@
 #include "thistle/app_manager.h"
 #include "thistle/wifi_manager.h"
 #include "ui/toast.h"
+#include "ui/theme.h"
 
 static const char *TAG = "launcher_ui";
 
@@ -42,27 +43,29 @@ static lv_obj_t *s_root = NULL;
 
 static lv_obj_t *create_dock_icon(lv_obj_t *parent, const char *label, const char *app_name)
 {
+    const theme_colors_t *colors = theme_get_colors();
+
     lv_obj_t *btn = lv_button_create(parent);
     lv_obj_set_size(btn, ICON_SIZE, ICON_SIZE);
 
-    /* E-paper: white fill, black 1px border, no radius, no shadow */
-    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    /* Theme-aware: surface fill, text-colored border, no radius, no shadow */
+    lv_obj_set_style_bg_color(btn, colors->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, colors->text, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(btn, 0, LV_PART_MAIN);
 
-    /* Pressed state: invert colours */
-    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    /* Pressed state: primary accent fill, white text */
+    lv_obj_set_style_bg_color(btn, colors->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
 
     /* Single-character label centred inside the button */
     lv_obj_t *lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, colors->text, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
     lv_obj_center(lbl);
 
@@ -98,6 +101,8 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
         parent = lv_scr_act();
     }
 
+    const theme_colors_t *colors = theme_get_colors();
+
     /* Root container — fills the entire app area */
     s_root = lv_obj_create(parent);
     lv_obj_set_size(s_root, LV_PCT(100), LV_PCT(100));
@@ -109,12 +114,14 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
     /* ----------------------------------------------------------------
-     * Wallpaper area — sits above the dock
+     * Wallpaper area — sits above the dock, uses theme background color.
+     * If /sdcard/config/wallpaper.bin exists it can be loaded as an LVGL
+     * image source via lv_image_set_src(); for now we use the theme bg.
      * ---------------------------------------------------------------- */
     lv_obj_t *wallpaper = lv_obj_create(s_root);
     lv_obj_set_pos(wallpaper, 0, 0);
     lv_obj_set_size(wallpaper, APP_AREA_W, APP_AREA_H - DOCK_H);
-    lv_obj_set_style_bg_color(wallpaper, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(wallpaper, colors->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(wallpaper, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(wallpaper, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(wallpaper, 0, LV_PART_MAIN);
@@ -135,7 +142,7 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     wifi_manager_get_time_str(time_init, sizeof(time_init));
     lv_label_set_text(lbl_clock, time_init);
     lv_obj_set_style_text_font(lbl_clock, &lv_font_montserrat_22, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_clock, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_clock, colors->text, LV_PART_MAIN);
 
     /* Update clock every 10 seconds */
     lv_timer_create(launcher_clock_update, 10000, lbl_clock);
@@ -144,18 +151,18 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_obj_t *lbl_brand = lv_label_create(wallpaper);
     lv_label_set_text(lbl_brand, "ThistleOS");
     lv_obj_set_style_text_font(lbl_brand, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_brand, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_brand, colors->text_secondary, LV_PART_MAIN);
 
     /* ----------------------------------------------------------------
-     * App dock — bottom 60 px, 1px top border
+     * App dock — bottom 60 px, 1px top border, theme surface color
      * ---------------------------------------------------------------- */
     lv_obj_t *dock = lv_obj_create(s_root);
     lv_obj_set_pos(dock, 0, APP_AREA_H - DOCK_H);
     lv_obj_set_size(dock, APP_AREA_W, DOCK_H);
-    lv_obj_set_style_bg_color(dock, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(dock, colors->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dock, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_side(dock, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
-    lv_obj_set_style_border_color(dock, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_color(dock, colors->text_secondary, LV_PART_MAIN);
     lv_obj_set_style_border_width(dock, 1, LV_PART_MAIN);
     lv_obj_set_style_pad_all(dock, 6, LV_PART_MAIN);
     lv_obj_set_style_radius(dock, 0, LV_PART_MAIN);

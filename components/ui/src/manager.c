@@ -273,6 +273,15 @@ esp_err_t ui_manager_init(void)
         return err;
     }
 
+    /* 8a. Apply theme bg color to screen and app area */
+    {
+        const theme_colors_t *colors = theme_get_colors();
+        lv_obj_set_style_bg_color(s_screen,   colors->bg, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_screen,     LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_app_area, colors->bg, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_app_area,   LV_OPA_COVER, LV_PART_MAIN);
+    }
+
     /* 9. Create status bar widgets (uses theme colors) */
     err = statusbar_create(s_statusbar_cont);
     if (err != ESP_OK) {

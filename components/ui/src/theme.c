@@ -1,4 +1,5 @@
 #include "ui/theme.h"
+#include "ui/statusbar.h"
 #include "esp_log.h"
 #include <dirent.h>
 #include <stdio.h>
@@ -209,6 +210,9 @@ esp_err_t theme_load(const char *json_path)
 
     /* Force LVGL to re-render everything with new styles */
     lv_obj_report_style_change(NULL);
+
+    /* Refresh status bar colors immediately */
+    statusbar_refresh_theme();
 
     ESP_LOGI(TAG, "Theme loaded: %s", json_path);
     return ESP_OK;
