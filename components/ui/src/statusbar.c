@@ -58,7 +58,11 @@ esp_err_t statusbar_create(lv_obj_t *parent)
 
     /* Time label — center */
     s_time_label = lv_label_create(s_container);
-    lv_label_set_text(s_time_label, "--:--");
+    {
+        char init_time[8];
+        wifi_manager_get_time_str(init_time, sizeof(init_time));
+        lv_label_set_text(s_time_label, init_time);
+    }
     lv_obj_set_style_text_color(s_time_label, colors->text, LV_PART_MAIN);
     lv_obj_set_flex_grow(s_time_label, 1);
     lv_obj_set_style_text_align(s_time_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);

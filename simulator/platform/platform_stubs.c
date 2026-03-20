@@ -2,6 +2,8 @@
 #include "esp_err.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
+#include <string.h>
 
 /* esp_timer stubs — LVGL tick is driven by main loop */
 struct esp_timer { int dummy; };
@@ -41,11 +43,11 @@ esp_err_t wifi_manager_init(void) { return ESP_OK; }
 int wifi_manager_get_state(void) { return 0; }
 int wifi_manager_get_rssi(void) { return 0; }
 void wifi_manager_get_time_str(char *buf, unsigned long buf_len) {
-    /* Use real system time */
-    #include <time.h>
-    time_t now; struct tm tm;
-    time(&now); localtime_r(&now, &tm);
-    snprintf(buf, buf_len, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    time_t now;
+    struct tm tm_info;
+    time(&now);
+    localtime_r(&now, &tm_info);
+    snprintf(buf, buf_len, "%02d:%02d", tm_info.tm_hour, tm_info.tm_min);
 }
 
 /* ELF loader stub */

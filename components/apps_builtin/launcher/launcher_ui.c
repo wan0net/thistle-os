@@ -117,14 +117,16 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(wallpaper, 6, LV_PART_MAIN);
 
-    /* Large clock placeholder */
+    /* Large clock — set to real time immediately, then update every 10s */
     lv_obj_t *lbl_clock = lv_label_create(wallpaper);
-    lv_label_set_text(lbl_clock, "12:00");
+    char time_init[8];
+    wifi_manager_get_time_str(time_init, sizeof(time_init));
+    lv_label_set_text(lbl_clock, time_init);
     lv_obj_set_style_text_font(lbl_clock, &lv_font_montserrat_22, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_clock, lv_color_black(), LV_PART_MAIN);
 
-    /* Update clock every 60 seconds from wifi_manager time */
-    lv_timer_create(launcher_clock_update, 60000, lbl_clock);
+    /* Update clock every 10 seconds */
+    lv_timer_create(launcher_clock_update, 10000, lbl_clock);
 
     /* Branding subtitle */
     lv_obj_t *lbl_brand = lv_label_create(wallpaper);
