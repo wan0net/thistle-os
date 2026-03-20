@@ -1,0 +1,24 @@
+{
+    "thistle_os": {
+        "version": "0.1.0",
+        "theme": "default",
+        "display": {
+            "refresh_mode": "partial",
+            "brightness": 100
+        },
+        "wifi": {
+            "enabled": false,
+            "ssid": "",
+            "password": ""
+        },
+        "bluetooth": {
+            "enabled": false
+        },
+        "radio": {
+            "frequency_mhz": 915.0,
+            "tx_power_dbm": 22,
+            "spreading_factor": 7,
+            "bandwidth_khz": 125
+        }
+    }
+}

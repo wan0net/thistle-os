@@ -1,0 +1,22 @@
+# ESP-IDF build artifacts
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Managed components (downloaded by idf.py)
+managed_components/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.cache/
+
+# Claude Code
+.claude/

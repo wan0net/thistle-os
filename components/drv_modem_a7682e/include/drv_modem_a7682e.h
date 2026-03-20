@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// ThistleOS — Simcom A7682E 4G LTE modem driver header
+#pragma once
+
+#include "esp_err.h"
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief A7682E hardware and UART configuration.
+ *
+ * Pass this to drv_a7682e_init().  baud_rate defaults to 115200 if set to 0.
+ */
+typedef struct {
+    uart_port_t uart_num;
+    gpio_num_t  pin_tx;
+    gpio_num_t  pin_rx;
+    gpio_num_t  pin_pwrkey;  ///< Power key — pulse low to toggle power state
+    gpio_num_t  pin_reset;   ///< Hardware reset — active-low
+    uint32_t    baud_rate;   ///< UART baud rate; 0 → use default (115200)
+} a7682e_config_t;
+
+/**
+ * @brief Network registration status values returned by
+ *        drv_a7682e_get_network_reg().
+ */
+typedef enum {
+    A7682E_NET_NOT_REGISTERED   = 0, ///< Not registered, not searching
+    A7682E_NET_REGISTERED_HOME  = 1, ///< Registered, home network
+    A7682E_NET_SEARCHING        = 2, ///< Not registered, searching
+    A7682E_NET_DENIED           = 3, ///< Registration denied
+    A7682E_NET_UNKNOWN          = 4, ///< Unknown
+    A7682E_NET_REGISTERED_ROAM  = 5, ///< Registered, roaming
+} a7682e_net_reg_t;
+
+/* -------------------------------------------------------------------------
+ * Lifecycle
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Initialise the modem driver.
+ *
+ * Installs the UART driver, configures PWRKEY and RESET GPIOs as outputs
+ * (both initially high / de-asserted).  Does NOT power the modem on.
+ *
+ * @param config  Hardware configuration.  Must not be NULL.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG, or an ESP-IDF driver error.
+ */
+esp_err_t drv_a7682e_init(const a7682e_config_t *config);
+
+/**
+ * @brief De-initialise the driver.
+ *
+ * Powers off the modem if it is on, then uninstalls the UART driver and
+ * releases GPIO resources.
+ */
+void drv_a7682e_deinit(void);
+
+/* -------------------------------------------------------------------------
+ * Power control
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Power the modem on or off via PWRKEY pulse.
+ *
+ * Power-on: pulls PWRKEY low for 1500 ms, then waits up to 10 s for the
+ * modem to emit "RDY", followed by ATE0 (echo off) and an AT ping.
+ *
+ * Power-off: sends AT+CPOF, then pulses PWRKEY low for 3 s as fallback.
+ *
+ * @param on  true → power on, false → power off.
+ * @return ESP_OK, ESP_ERR_TIMEOUT, or an ESP-IDF error.
+ */
+esp_err_t drv_a7682e_power(bool on);
+
+/* -------------------------------------------------------------------------
+ * AT command interface
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Send a raw AT command and capture the response.
+ *
+ * Flushes the RX FIFO, writes "cmd\r\n" to the UART, then reads bytes until
+ * "OK\r\n" or "ERROR\r\n" is found in the accumulator, or until timeout_ms
+ * elapses.  The full response (including the echo-off prefix, if any, the
+ * result code, and everything in between) is written to buf as a
+ * null-terminated string.
+ *
+ * @param cmd         AT command string (without trailing CR/LF).
+ * @param buf         Caller-supplied buffer for the response.  May be NULL.
+ * @param buf_len     Size of buf in bytes.
+ * @param timeout_ms  Read timeout in milliseconds; 0 → use default (5000 ms).
+ * @return ESP_OK if "OK" was received, ESP_FAIL if "ERROR" was received,
+ *         ESP_ERR_TIMEOUT on timeout, ESP_ERR_INVALID_STATE if not init'd.
+ */
+esp_err_t drv_a7682e_send_at(const char *cmd, char *buf, size_t buf_len,
+                              uint32_t timeout_ms);
+
+/**
+ * @brief Return true if the modem responds to "AT" within 1 second.
+ */
+bool drv_a7682e_is_ready(void);
+
+/* -------------------------------------------------------------------------
+ * Network helpers
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Query received signal strength.
+ *
+ * Sends AT+CSQ and parses the "+CSQ: rssi,ber" response.
+ *
+ * @return Signal strength in dBm (range −113 to −51), or −999 if the
+ *         module reports 99 (unknown) or does not respond.
+ */
+int drv_a7682e_get_signal_rssi(void);
+
+/**
+ * @brief Query network registration status.
+ *
+ * Sends AT+CREG? and parses the "+CREG: n,stat" response.
+ *
+ * @return One of the a7682e_net_reg_t values, or A7682E_NET_UNKNOWN on error.
+ */
+a7682e_net_reg_t drv_a7682e_get_network_reg(void);
+
+/* -------------------------------------------------------------------------
+ * Data / connectivity stubs (future use)
+ * ---------------------------------------------------------------------- */
+
+/** @brief Open a TCP connection to host:port. */
+esp_err_t drv_a7682e_connect_tcp(const char *host, uint16_t port);
+
+/** @brief Send raw bytes over an open socket. */
+esp_err_t drv_a7682e_send_data(const uint8_t *data, size_t len);
+
+/** @brief Perform an HTTP GET request and store the body in buf. */
+esp_err_t drv_a7682e_http_get(const char *url, char *buf, size_t buf_len);
+
+#ifdef __cplusplus
+}
+#endif

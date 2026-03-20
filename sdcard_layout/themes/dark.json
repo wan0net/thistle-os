@@ -1,0 +1,21 @@
+{
+    "name": "Dark",
+    "description": "Dark theme (for LCD displays)",
+    "colors": {
+        "primary": "#2196F3",
+        "secondary": "#FF5722",
+        "bg": "#121212",
+        "surface": "#1E1E1E",
+        "text": "#FFFFFF",
+        "text_secondary": "#B0B0B0"
+    },
+    "fonts": {
+        "normal": "default_14",
+        "heading": "default_18"
+    },
+    "components": {
+        "button":    { "radius": 8,  "padding": 12 },
+        "panel":     { "radius": 4,  "padding": 8  },
+        "list_item": { "padding": 8 }
+    }
+}

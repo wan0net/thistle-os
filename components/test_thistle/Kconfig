@@ -1,0 +1,8 @@
+menu "ThistleOS Tests"
+    config THISTLE_RUN_TESTS
+        bool "Run ThistleOS unit tests on boot"
+        default n
+        help
+            When enabled, the firmware runs the ThistleOS test suite
+            instead of the normal boot sequence.
+endmenu
