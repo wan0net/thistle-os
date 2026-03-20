@@ -1,9 +1,10 @@
 /*
  * settings_ui.c — ThistleOS Settings application UI
  *
- * Navigation: main category list -> WiFi sub-screen
- *                                -> About sub-screen
- *                                <- Back button returns to list
+ * Navigation: main list -> WiFi
+ *                       -> Drivers -> per-driver detail
+ *                       -> About
+ *             Back button returns up one level.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -17,6 +18,7 @@
 #include "esp_heap_caps.h"
 
 #include "thistle/wifi_manager.h"
+#include "thistle/ble_manager.h"
 #include "thistle/kernel.h"
 #include "hal/board.h"
 
@@ -45,20 +47,73 @@ static const char *TAG = "settings_ui";
 typedef enum {
     SETTINGS_MAIN,
     SETTINGS_WIFI,
+    SETTINGS_BLUETOOTH,
     SETTINGS_ABOUT,
+    SETTINGS_DRIVERS,
+    SETTINGS_DRIVER_DETAIL,
 } settings_screen_t;
 
 static settings_screen_t  s_current_screen = SETTINGS_MAIN;
 static lv_obj_t          *s_root           = NULL;
-static lv_obj_t          *s_main_list      = NULL; /* scrollable category list */
-static lv_obj_t          *s_sub_screen     = NULL; /* current sub-screen container */
+static lv_obj_t          *s_main_list      = NULL;
+static lv_obj_t          *s_sub_screen     = NULL; /* level-1 sub-screen */
+static lv_obj_t          *s_detail_screen  = NULL; /* level-2 driver detail */
 
 /* WiFi init guard — only call wifi_manager_init() once */
 static bool s_wifi_inited = false;
 
 /* WiFi sub-screen state */
-static lv_obj_t *s_wifi_status_label  = NULL;
-static lv_obj_t *s_wifi_scan_list     = NULL;
+static lv_obj_t *s_wifi_status_label = NULL;
+static lv_obj_t *s_wifi_scan_list    = NULL;
+
+/* BLE init guard — only call ble_manager_init() once */
+static bool s_ble_inited = false;
+
+/* BLE sub-screen state */
+static lv_obj_t *s_ble_status_label   = NULL;
+static lv_obj_t *s_ble_name_label     = NULL;
+static lv_obj_t *s_ble_peer_label     = NULL;
+static lv_obj_t *s_ble_toggle_btn_lbl = NULL;
+
+/* Power detail live-update timer */
+static lv_timer_t *s_power_timer    = NULL;
+static lv_obj_t   *s_power_batt_lbl = NULL;
+static lv_obj_t   *s_power_pct_lbl  = NULL;
+static lv_obj_t   *s_power_state_lbl= NULL;
+
+/* GPS detail live-update timer */
+static lv_timer_t *s_gps_timer      = NULL;
+static lv_obj_t   *s_gps_status_lbl = NULL;
+static lv_obj_t   *s_gps_lat_lbl    = NULL;
+static lv_obj_t   *s_gps_lon_lbl    = NULL;
+static lv_obj_t   *s_gps_sat_lbl    = NULL;
+
+/* GPS enabled state */
+static bool s_gps_enabled = false;
+
+/* ------------------------------------------------------------------ */
+/* Driver type enum                                                     */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+    DRIVER_TYPE_DISPLAY,
+    DRIVER_TYPE_INPUT,
+    DRIVER_TYPE_RADIO,
+    DRIVER_TYPE_GPS,
+    DRIVER_TYPE_AUDIO,
+    DRIVER_TYPE_POWER,
+    DRIVER_TYPE_IMU,
+    DRIVER_TYPE_STORAGE,
+} driver_type_t;
+
+typedef struct {
+    driver_type_t type;
+    int           index;
+} driver_row_data_t;
+
+#define MAX_DRIVER_ROWS 16
+static driver_row_data_t s_driver_row_pool[MAX_DRIVER_ROWS];
+static int               s_driver_row_pool_used = 0;
 
 /* ------------------------------------------------------------------ */
 /* Settings category definitions                                        */
@@ -70,12 +125,10 @@ typedef struct {
 } settings_item_t;
 
 static const settings_item_t s_items[] = {
-    { "Display",   NULL      },
-    { "WiFi",      "Off"     },
-    { "Bluetooth", "Off"     },
-    { "Radio",     "915 MHz" },
-    { "Storage",   NULL      },
-    { "About",     NULL      },
+    { "WiFi",      "Off" },
+    { "Bluetooth", "Off" },
+    { "Drivers",   NULL  },
+    { "About",     NULL  },
 };
 #define ITEMS_COUNT (sizeof(s_items) / sizeof(s_items[0]))
 
@@ -143,10 +196,67 @@ static lv_obj_t *create_info_row(lv_obj_t *parent, const char *text)
     return row;
 }
 
+/* Create a plain label row and return the label for live updates. */
+static lv_obj_t *create_live_row(lv_obj_t *parent, const char *initial_text)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, initial_text ? initial_text : "");
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+    return lbl; /* caller saves for lv_label_set_text later */
+}
+
 /* ------------------------------------------------------------------ */
 /* Back navigation                                                      */
 /* ------------------------------------------------------------------ */
 
+/* Detail -> Drivers */
+static void back_to_drivers(lv_event_t *e)
+{
+    (void)e;
+
+    /* Destroy live-update timers */
+    if (s_power_timer) {
+        lv_timer_delete(s_power_timer);
+        s_power_timer     = NULL;
+        s_power_batt_lbl  = NULL;
+        s_power_pct_lbl   = NULL;
+        s_power_state_lbl = NULL;
+    }
+    if (s_gps_timer) {
+        lv_timer_delete(s_gps_timer);
+        s_gps_timer      = NULL;
+        s_gps_status_lbl = NULL;
+        s_gps_lat_lbl    = NULL;
+        s_gps_lon_lbl    = NULL;
+        s_gps_sat_lbl    = NULL;
+    }
+
+    if (s_detail_screen) {
+        lv_obj_delete(s_detail_screen);
+        s_detail_screen = NULL;
+    }
+    if (s_sub_screen) {
+        lv_obj_remove_flag(s_sub_screen, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_current_screen = SETTINGS_DRIVERS;
+}
+
+/* Drivers / WiFi / Bluetooth / About -> Main */
 static void back_to_main(lv_event_t *e)
 {
     (void)e;
@@ -154,8 +264,13 @@ static void back_to_main(lv_event_t *e)
         lv_obj_delete(s_sub_screen);
         s_sub_screen = NULL;
     }
-    s_wifi_status_label = NULL;
-    s_wifi_scan_list    = NULL;
+    s_wifi_status_label    = NULL;
+    s_wifi_scan_list       = NULL;
+    s_ble_status_label     = NULL;
+    s_ble_name_label       = NULL;
+    s_ble_peer_label       = NULL;
+    s_ble_toggle_btn_lbl   = NULL;
+    s_driver_row_pool_used = 0;
     lv_obj_remove_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
     s_current_screen = SETTINGS_MAIN;
 }
@@ -165,25 +280,32 @@ static void back_to_main(lv_event_t *e)
 /* Returns the scrollable content area below the title bar.            */
 /* ------------------------------------------------------------------ */
 
-static lv_obj_t *create_sub_screen(const char *title)
+/*
+ * alloc_sub_screen: generic helper — allocates a full-area container with a
+ * title/back bar, parented to container_parent.  Stores the outer container
+ * in *out_screen (if non-NULL).  Returns the scrollable content area.
+ */
+static lv_obj_t *alloc_sub_screen(lv_obj_t *container_parent,
+                                  const char *title,
+                                  lv_event_cb_t back_cb,
+                                  void *back_udata,
+                                  lv_obj_t **out_screen)
 {
-    /* Outer container — same size as the app area */
-    s_sub_screen = lv_obj_create(s_root);
-    lv_obj_set_pos(s_sub_screen, 0, 0);
-    lv_obj_set_size(s_sub_screen, APP_AREA_W, APP_AREA_H);
-    style_panel(s_sub_screen);
+    lv_obj_t *screen = lv_obj_create(container_parent);
+    lv_obj_set_pos(screen, 0, 0);
+    lv_obj_set_size(screen, APP_AREA_W, APP_AREA_H);
+    style_panel(screen);
 
-    /* Title bar row: "< Title" */
-    lv_obj_t *title_bar = lv_obj_create(s_sub_screen);
+    if (out_screen) *out_screen = screen;
+
+    lv_obj_t *title_bar = lv_obj_create(screen);
     lv_obj_set_pos(title_bar, 0, 0);
     lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
     style_title_bar(title_bar);
-
-    /* Back button label "< Title" — the whole bar is the back button */
     lv_obj_add_flag(title_bar, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(title_bar, lv_color_black(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(title_bar, back_to_main, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(title_bar, back_cb, LV_EVENT_CLICKED, back_udata);
 
     char back_text[48];
     snprintf(back_text, sizeof(back_text), "< %s", title);
@@ -194,8 +316,7 @@ static lv_obj_t *create_sub_screen(const char *title)
     lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-    /* Scrollable content area below the title bar */
-    lv_obj_t *content = lv_obj_create(s_sub_screen);
+    lv_obj_t *content = lv_obj_create(screen);
     lv_obj_set_pos(content, 0, TITLE_BAR_H);
     lv_obj_set_size(content, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
     lv_obj_set_style_bg_color(content, lv_color_white(), LV_PART_MAIN);
@@ -203,15 +324,11 @@ static lv_obj_t *create_sub_screen(const char *title)
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 0, LV_PART_MAIN);
-
-    /* Vertical flex column */
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content,
                           LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
-
-    /* Scrollbar style */
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_set_style_bg_color(content, lv_color_black(), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_SCROLLBAR);
@@ -219,6 +336,12 @@ static lv_obj_t *create_sub_screen(const char *title)
     lv_obj_set_style_radius(content, 0, LV_PART_SCROLLBAR);
 
     return content;
+}
+
+/* Convenience: level-1 sub-screen (back goes to main, stored in s_sub_screen) */
+static lv_obj_t *create_sub_screen(const char *title)
+{
+    return alloc_sub_screen(s_root, title, back_to_main, NULL, &s_sub_screen);
 }
 
 /* ------------------------------------------------------------------ */
@@ -463,6 +586,173 @@ static void open_wifi_screen(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Bluetooth sub-screen                                                 */
+/* ------------------------------------------------------------------ */
+
+static void ble_update_labels(void)
+{
+    if (!s_ble_status_label) return;
+
+    ble_state_t state = ble_manager_get_state();
+    const char *state_str;
+    switch (state) {
+    case BLE_STATE_ADVERTISING: state_str = "Status: Advertising"; break;
+    case BLE_STATE_CONNECTED:   state_str = "Status: Connected";   break;
+    default:                    state_str = "Status: Off";         break;
+    }
+    lv_label_set_text(s_ble_status_label, state_str);
+
+    if (s_ble_name_label) {
+        lv_label_set_text(s_ble_name_label, "Name: ThistleOS");
+    }
+
+    if (s_ble_peer_label) {
+        const char *peer = ble_manager_get_peer_name();
+        char peer_buf[64];
+        snprintf(peer_buf, sizeof(peer_buf), "Peer: %s", peer ? peer : "None");
+        lv_label_set_text(s_ble_peer_label, peer_buf);
+        lv_obj_set_style_opa(s_ble_peer_label,
+                             (state == BLE_STATE_CONNECTED) ? LV_OPA_COVER : LV_OPA_40,
+                             LV_PART_MAIN);
+    }
+
+    if (s_ble_toggle_btn_lbl) {
+        lv_label_set_text(s_ble_toggle_btn_lbl,
+                          (state == BLE_STATE_OFF) ? "Enable" : "Disable");
+    }
+}
+
+static void ble_toggle_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    ble_state_t state = ble_manager_get_state();
+    if (state == BLE_STATE_OFF) {
+        if (!s_ble_inited) {
+            esp_err_t err = ble_manager_init("ThistleOS");
+            if (err == ESP_OK) {
+                s_ble_inited = true;
+            } else {
+                ESP_LOGW(TAG, "ble_manager_init failed: 0x%x", err);
+                return;
+            }
+        }
+        ble_manager_start_advertising();
+    } else if (state == BLE_STATE_CONNECTED) {
+        ble_manager_disconnect();
+    } else {
+        ble_manager_stop_advertising();
+    }
+    ble_update_labels();
+}
+
+static void ble_disconnect_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    ble_manager_disconnect();
+    ble_update_labels();
+}
+
+static void open_bluetooth_screen(void)
+{
+    lv_obj_t *content = create_sub_screen("Bluetooth");
+    s_current_screen = SETTINGS_BLUETOOTH;
+
+    /* Status row */
+    lv_obj_t *status_row = lv_obj_create(content);
+    lv_obj_set_size(status_row, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(status_row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(status_row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(status_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(status_row, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(status_row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(status_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(status_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(status_row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(status_row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    s_ble_status_label = lv_label_create(status_row);
+    lv_label_set_text(s_ble_status_label, "Status: Off");
+    lv_obj_set_style_text_font(s_ble_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ble_status_label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_align(s_ble_status_label, LV_ALIGN_LEFT_MID, 0, 0);
+
+    create_separator(content);
+
+    /* Device name row */
+    lv_obj_t *name_row = create_info_row(content, "Name: ThistleOS");
+    s_ble_name_label = lv_obj_get_child(name_row, 0);
+
+    create_separator(content);
+
+    /* Peer name row (shown dim when not connected) */
+    lv_obj_t *peer_row = create_info_row(content, "Peer: None");
+    s_ble_peer_label = lv_obj_get_child(peer_row, 0);
+    lv_obj_set_style_opa(s_ble_peer_label, LV_OPA_40, LV_PART_MAIN);
+
+    create_separator(content);
+
+    /* Enable / Disable toggle button */
+    lv_obj_t *toggle_btn = lv_obj_create(content);
+    lv_obj_set_size(toggle_btn, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(toggle_btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(toggle_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(toggle_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(toggle_btn, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(toggle_btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(toggle_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(toggle_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_color(toggle_btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(toggle_btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_side(toggle_btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(toggle_btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(toggle_btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(toggle_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(toggle_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(toggle_btn, ble_toggle_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+    s_ble_toggle_btn_lbl = lv_label_create(toggle_btn);
+    lv_label_set_text(s_ble_toggle_btn_lbl, "Enable");
+    lv_obj_set_style_text_font(s_ble_toggle_btn_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ble_toggle_btn_lbl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_align(s_ble_toggle_btn_lbl, LV_ALIGN_CENTER, 0, 0);
+
+    create_separator(content);
+
+    /* Disconnect button (dimmed when not connected) */
+    lv_obj_t *disc_btn = lv_obj_create(content);
+    lv_obj_set_size(disc_btn, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(disc_btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(disc_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(disc_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(disc_btn, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(disc_btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(disc_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(disc_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_color(disc_btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(disc_btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_side(disc_btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(disc_btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(disc_btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_opa(disc_btn,
+                         (ble_manager_get_state() == BLE_STATE_CONNECTED)
+                             ? LV_OPA_COVER : LV_OPA_40,
+                         LV_PART_MAIN);
+    lv_obj_add_flag(disc_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(disc_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(disc_btn, ble_disconnect_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lbl_disc = lv_label_create(disc_btn);
+    lv_label_set_text(lbl_disc, "Disconnect");
+    lv_obj_set_style_text_font(lbl_disc, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_disc, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_disc, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_align(lbl_disc, LV_ALIGN_CENTER, 0, 0);
+
+    ble_update_labels();
+}
+
+/* ------------------------------------------------------------------ */
 /* About sub-screen                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -563,6 +853,645 @@ static void open_about_screen(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Driver detail screens                                                */
+/* ------------------------------------------------------------------ */
+
+/* --- Display --- */
+
+static void display_refresh_mode_cb(lv_event_t *e)
+{
+    hal_display_refresh_mode_t mode =
+        (hal_display_refresh_mode_t)(uintptr_t)lv_event_get_user_data(e);
+    const hal_registry_t *reg = hal_get_registry();
+    if (reg && reg->display && reg->display->set_refresh_mode) {
+        reg->display->set_refresh_mode(mode);
+        ESP_LOGI(TAG, "Display: refresh mode -> %d", (int)mode);
+    }
+}
+
+static void open_detail_display(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->display) {
+        create_info_row(content, "No display registered");
+        return;
+    }
+    const hal_display_driver_t *d = reg->display;
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "Name: %s", d->name ? d->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    snprintf(buf, sizeof(buf), "Type: %s",
+             d->type == HAL_DISPLAY_TYPE_EPAPER ? "E-Paper" : "LCD");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    snprintf(buf, sizeof(buf), "Resolution: %u x %u", d->width, d->height);
+    create_info_row(content, buf);
+    create_separator(content);
+
+    if (d->set_refresh_mode) {
+        create_info_row(content, "Refresh mode:");
+        create_separator(content);
+
+        lv_obj_t *btn_row = lv_obj_create(content);
+        lv_obj_set_size(btn_row, LV_PCT(100), ITEM_H + 4);
+        lv_obj_set_style_bg_color(btn_row, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(btn_row, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(btn_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(btn_row, ITEM_PAD_LEFT, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(btn_row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(btn_row, 2, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(btn_row, 2, LV_PART_MAIN);
+        lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(btn_row,
+                              LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(btn_row, 6, LV_PART_MAIN);
+
+        static const struct {
+            const char *label;
+            hal_display_refresh_mode_t mode;
+        } modes[3] = {
+            { "Full",    HAL_DISPLAY_REFRESH_FULL    },
+            { "Partial", HAL_DISPLAY_REFRESH_PARTIAL },
+            { "Fast",    HAL_DISPLAY_REFRESH_FAST    },
+        };
+
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t *b = lv_obj_create(btn_row);
+            lv_obj_set_size(b, LV_SIZE_CONTENT, ITEM_H - 4);
+            lv_obj_set_style_bg_color(b, lv_color_white(), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_border_color(b, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_border_width(b, 1, LV_PART_MAIN);
+            lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+            lv_obj_set_style_radius(b, 0, LV_PART_MAIN);
+            lv_obj_set_style_pad_left(b, 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_right(b, 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_top(b, 0, LV_PART_MAIN);
+            lv_obj_set_style_pad_bottom(b, 0, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(b, lv_color_black(), LV_STATE_PRESSED);
+            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
+            lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_event_cb(b, display_refresh_mode_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)modes[i].mode);
+
+            lv_obj_t *bl = lv_label_create(b);
+            lv_label_set_text(bl, modes[i].label);
+            lv_obj_set_style_text_font(bl, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_set_style_text_color(bl, lv_color_black(), LV_PART_MAIN);
+            lv_obj_set_style_text_color(bl, lv_color_white(), LV_STATE_PRESSED);
+            lv_obj_align(bl, LV_ALIGN_CENTER, 0, 0);
+        }
+        create_separator(content);
+    }
+
+    if (d->set_brightness) {
+        create_info_row(content, "Brightness: use brightness keys");
+        create_separator(content);
+    }
+}
+
+/* --- Radio --- */
+
+static void open_detail_radio(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->radio) {
+        create_info_row(content, "No radio registered");
+        return;
+    }
+    const hal_radio_driver_t *r = reg->radio;
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "Name: %s", r->name ? r->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    create_info_row(content, "Protocol: LoRa");
+    create_separator(content);
+
+    if (r->get_rssi) {
+        int rssi = r->get_rssi();
+        snprintf(buf, sizeof(buf), "RSSI: %d dBm", rssi);
+        create_info_row(content, buf);
+        create_separator(content);
+    }
+
+    create_info_row(content, "Parameters set at board init.");
+    create_separator(content);
+    create_info_row(content, "(Editing: future work)");
+}
+
+/* --- GPS (with live timer) --- */
+
+static void gps_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->gps || !s_gps_status_lbl) return;
+
+    hal_gps_position_t pos;
+    esp_err_t err = reg->gps->get_position(&pos);
+    char buf[48];
+
+    if (err != ESP_OK) {
+        lv_label_set_text(s_gps_status_lbl, "Status: Error");
+        lv_label_set_text(s_gps_lat_lbl,    "Lat: --");
+        lv_label_set_text(s_gps_lon_lbl,    "Lon: --");
+        lv_label_set_text(s_gps_sat_lbl,    "Satellites: --");
+        return;
+    }
+
+    if (pos.fix_valid) {
+        lv_label_set_text(s_gps_status_lbl, "Status: Fix");
+        snprintf(buf, sizeof(buf), "Lat: %.6f", pos.latitude);
+        lv_label_set_text(s_gps_lat_lbl, buf);
+        snprintf(buf, sizeof(buf), "Lon: %.6f", pos.longitude);
+        lv_label_set_text(s_gps_lon_lbl, buf);
+    } else {
+        lv_label_set_text(s_gps_status_lbl, "Status: No fix");
+        lv_label_set_text(s_gps_lat_lbl,    "Lat: --");
+        lv_label_set_text(s_gps_lon_lbl,    "Lon: --");
+    }
+    snprintf(buf, sizeof(buf), "Satellites: %u", pos.satellites);
+    lv_label_set_text(s_gps_sat_lbl, buf);
+}
+
+static void gps_toggle_cb(lv_event_t *e)
+{
+    lv_obj_t *btn_lbl = (lv_obj_t *)lv_event_get_user_data(e);
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->gps) return;
+
+    if (s_gps_enabled) {
+        if (reg->gps->disable) reg->gps->disable();
+        s_gps_enabled = false;
+        if (btn_lbl) lv_label_set_text(btn_lbl, "Enable");
+        ESP_LOGI(TAG, "GPS disabled");
+    } else {
+        if (reg->gps->enable) reg->gps->enable();
+        s_gps_enabled = true;
+        if (btn_lbl) lv_label_set_text(btn_lbl, "Disable");
+        ESP_LOGI(TAG, "GPS enabled");
+    }
+}
+
+static void open_detail_gps(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->gps) {
+        create_info_row(content, "No GPS registered");
+        return;
+    }
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Name: %s",
+             reg->gps->name ? reg->gps->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    s_gps_status_lbl = create_live_row(content, "Status: ...");
+    create_separator(content);
+    s_gps_lat_lbl    = create_live_row(content, "Lat: --");
+    create_separator(content);
+    s_gps_lon_lbl    = create_live_row(content, "Lon: --");
+    create_separator(content);
+    s_gps_sat_lbl    = create_live_row(content, "Satellites: --");
+    create_separator(content);
+
+    /* Enable / Disable button */
+    lv_obj_t *btn = lv_obj_create(content);
+    lv_obj_set_size(btn, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(btn, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(btn, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(btn, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *bl = lv_label_create(btn);
+    lv_label_set_text(bl, s_gps_enabled ? "Disable" : "Enable");
+    lv_obj_set_style_text_font(bl, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(bl, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(bl, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_align(bl, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_event_cb(btn, gps_toggle_cb, LV_EVENT_CLICKED, bl);
+
+    /* Live update every 2 s */
+    s_gps_timer = lv_timer_create(gps_timer_cb, 2000, NULL);
+    lv_timer_ready(s_gps_timer);
+}
+
+/* --- Power (live timer, 5 s) --- */
+
+static void power_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->power || !s_power_batt_lbl) return;
+
+    hal_power_info_t info = {0};
+    char buf[48];
+
+    if (reg->power->get_info) {
+        if (reg->power->get_info(&info) != ESP_OK) {
+            lv_label_set_text(s_power_batt_lbl,  "Battery: Error");
+            lv_label_set_text(s_power_pct_lbl,   "Charge: --");
+            lv_label_set_text(s_power_state_lbl, "State: Error");
+            return;
+        }
+    } else {
+        if (reg->power->get_battery_mv)      info.voltage_mv = reg->power->get_battery_mv();
+        if (reg->power->get_battery_percent) info.percent    = reg->power->get_battery_percent();
+        if (reg->power->is_charging) {
+            info.state = reg->power->is_charging()
+                         ? HAL_POWER_STATE_CHARGING
+                         : HAL_POWER_STATE_DISCHARGING;
+        }
+    }
+
+    snprintf(buf, sizeof(buf), "Battery: %u mV", info.voltage_mv);
+    lv_label_set_text(s_power_batt_lbl, buf);
+
+    snprintf(buf, sizeof(buf), "Charge: %u%%", info.percent);
+    lv_label_set_text(s_power_pct_lbl, buf);
+
+    const char *state_str;
+    switch (info.state) {
+    case HAL_POWER_STATE_CHARGING:   state_str = "Charging";    break;
+    case HAL_POWER_STATE_CHARGED:    state_str = "Charged";     break;
+    case HAL_POWER_STATE_NO_BATTERY: state_str = "No Battery";  break;
+    default:                         state_str = "Discharging"; break;
+    }
+    snprintf(buf, sizeof(buf), "State: %s", state_str);
+    lv_label_set_text(s_power_state_lbl, buf);
+}
+
+static void open_detail_power(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->power) {
+        create_info_row(content, "No power driver registered");
+        return;
+    }
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Name: %s",
+             reg->power->name ? reg->power->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    s_power_batt_lbl  = create_live_row(content, "Battery: ...");
+    create_separator(content);
+    s_power_pct_lbl   = create_live_row(content, "Charge: ...");
+    create_separator(content);
+    s_power_state_lbl = create_live_row(content, "State: ...");
+
+    /* Live update every 5 s, fire immediately */
+    s_power_timer = lv_timer_create(power_timer_cb, 5000, NULL);
+    lv_timer_ready(s_power_timer);
+}
+
+/* --- Audio --- */
+
+static void open_detail_audio(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->audio) {
+        create_info_row(content, "No audio driver registered");
+        return;
+    }
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Name: %s",
+             reg->audio->name ? reg->audio->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    create_info_row(content, "Volume: 100%");
+    create_separator(content);
+    create_info_row(content, "(Volume control: future work)");
+}
+
+/* --- Storage --- */
+
+static void open_detail_storage(lv_obj_t *content, int index)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || index < 0 || index >= (int)reg->storage_count
+            || !reg->storage[index]) {
+        create_info_row(content, "No storage driver registered");
+        return;
+    }
+    const hal_storage_driver_t *st = reg->storage[index];
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "Name: %s", st->name ? st->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    snprintf(buf, sizeof(buf), "Type: %s",
+             st->type == HAL_STORAGE_TYPE_SD ? "SD Card" : "Internal");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    bool mounted = st->is_mounted ? st->is_mounted() : false;
+    snprintf(buf, sizeof(buf), "Mounted: %s", mounted ? "Yes" : "No");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    if (mounted && st->get_total_bytes && st->get_free_bytes) {
+        uint64_t total  = st->get_total_bytes();
+        uint64_t free_b = st->get_free_bytes();
+        uint64_t used   = (total > free_b) ? (total - free_b) : 0;
+
+#define FMT_BYTES(v, out_buf) \
+    do { \
+        if ((v) >= (1024ULL * 1024 * 1024)) { \
+            snprintf((out_buf), sizeof(out_buf), "%.1f GB", \
+                     (double)(v) / (1024.0 * 1024.0 * 1024.0)); \
+        } else { \
+            snprintf((out_buf), sizeof(out_buf), "%.1f MB", \
+                     (double)(v) / (1024.0 * 1024.0)); \
+        } \
+    } while (0)
+
+        char sz[24];
+        FMT_BYTES(total, sz);
+        snprintf(buf, sizeof(buf), "Total: %s", sz);
+        create_info_row(content, buf);
+        create_separator(content);
+
+        FMT_BYTES(free_b, sz);
+        snprintf(buf, sizeof(buf), "Free: %s", sz);
+        create_info_row(content, buf);
+        create_separator(content);
+
+        uint8_t used_pct = (total > 0) ? (uint8_t)((used * 100ULL) / total) : 0;
+        FMT_BYTES(used, sz);
+        snprintf(buf, sizeof(buf), "Used: %s (%u%%)", sz, used_pct);
+        create_info_row(content, buf);
+
+#undef FMT_BYTES
+    } else if (!mounted) {
+        create_info_row(content, "(Not mounted)");
+    }
+}
+
+/* --- Input --- */
+
+static void open_detail_input(lv_obj_t *content, int index)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || index < 0 || index >= (int)reg->input_count
+            || !reg->inputs[index]) {
+        create_info_row(content, "No input driver registered");
+        return;
+    }
+    const hal_input_driver_t *inp = reg->inputs[index];
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "Name: %s", inp->name ? inp->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    snprintf(buf, sizeof(buf), "Type: %s", inp->is_touch ? "Touch" : "Keyboard");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    create_info_row(content, "(Info only — no settings)");
+}
+
+/* --- IMU --- */
+
+static void open_detail_imu(lv_obj_t *content)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg || !reg->imu) {
+        create_info_row(content, "No IMU registered");
+        return;
+    }
+    const hal_imu_driver_t *imu = reg->imu;
+    char buf[64];
+
+    snprintf(buf, sizeof(buf), "Name: %s", imu->name ? imu->name : "Unknown");
+    create_info_row(content, buf);
+    create_separator(content);
+
+    if (imu->get_data) {
+        hal_imu_data_t data = {0};
+        if (imu->get_data(&data) == ESP_OK) {
+            snprintf(buf, sizeof(buf), "Accel X: %.2f m/s2", (double)data.accel_x);
+            create_info_row(content, buf);
+            create_separator(content);
+            snprintf(buf, sizeof(buf), "Accel Y: %.2f m/s2", (double)data.accel_y);
+            create_info_row(content, buf);
+            create_separator(content);
+            snprintf(buf, sizeof(buf), "Accel Z: %.2f m/s2", (double)data.accel_z);
+            create_info_row(content, buf);
+            create_separator(content);
+            snprintf(buf, sizeof(buf), "Gyro X: %.2f deg/s", (double)data.gyro_x);
+            create_info_row(content, buf);
+            create_separator(content);
+            snprintf(buf, sizeof(buf), "Gyro Y: %.2f deg/s", (double)data.gyro_y);
+            create_info_row(content, buf);
+            create_separator(content);
+            snprintf(buf, sizeof(buf), "Gyro Z: %.2f deg/s", (double)data.gyro_z);
+            create_info_row(content, buf);
+        } else {
+            create_info_row(content, "(Read error)");
+        }
+    } else {
+        create_info_row(content, "(Info only — no settings)");
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Driver detail dispatcher                                             */
+/* ------------------------------------------------------------------ */
+
+static void open_driver_detail(driver_type_t type, int index)
+{
+    static const char *type_names[] = {
+        "Display", "Input", "Radio", "GPS", "Audio", "Power", "IMU", "Storage",
+    };
+    const char *title = ((unsigned)type < (sizeof(type_names)/sizeof(type_names[0])))
+                        ? type_names[type] : "Driver";
+
+    /* Hide drivers list; build detail on s_root */
+    if (s_sub_screen) {
+        lv_obj_add_flag(s_sub_screen, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_obj_t *outer = NULL;
+    lv_obj_t *content = alloc_sub_screen(s_root, title,
+                                          back_to_drivers, NULL, &outer);
+    s_detail_screen  = outer;
+    s_current_screen = SETTINGS_DRIVER_DETAIL;
+
+    switch (type) {
+    case DRIVER_TYPE_DISPLAY:  open_detail_display(content);        break;
+    case DRIVER_TYPE_INPUT:    open_detail_input(content, index);   break;
+    case DRIVER_TYPE_RADIO:    open_detail_radio(content);          break;
+    case DRIVER_TYPE_GPS:      open_detail_gps(content);            break;
+    case DRIVER_TYPE_AUDIO:    open_detail_audio(content);          break;
+    case DRIVER_TYPE_POWER:    open_detail_power(content);          break;
+    case DRIVER_TYPE_IMU:      open_detail_imu(content);            break;
+    case DRIVER_TYPE_STORAGE:  open_detail_storage(content, index); break;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Drivers list screen                                                  */
+/* ------------------------------------------------------------------ */
+
+static void driver_row_clicked_cb(lv_event_t *e)
+{
+    driver_row_data_t *d = (driver_row_data_t *)lv_event_get_user_data(e);
+    if (!d) return;
+    open_driver_detail(d->type, d->index);
+}
+
+static void add_driver_row(lv_obj_t *list,
+                            const char *name,
+                            const char *type_label,
+                            driver_type_t dtype,
+                            int index)
+{
+    if (s_driver_row_pool_used >= MAX_DRIVER_ROWS) {
+        ESP_LOGW(TAG, "driver row pool exhausted");
+        return;
+    }
+
+    driver_row_data_t *payload = &s_driver_row_pool[s_driver_row_pool_used++];
+    payload->type  = dtype;
+    payload->index = index;
+
+    lv_obj_t *row = lv_obj_create(list);
+    lv_obj_set_size(row, LV_PCT(100), ITEM_H);
+    lv_obj_set_style_bg_color(row, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(row, ITEM_PAD_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(row, ITEM_PAD_RIGHT, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(row, lv_color_black(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, driver_row_clicked_cb, LV_EVENT_CLICKED, payload);
+
+    /* Driver name (grows) */
+    lv_obj_t *lbl_name = lv_label_create(row);
+    lv_label_set_text(lbl_name, name ? name : "(unknown)");
+    lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_flex_grow(lbl_name, 1);
+
+    /* Type label */
+    lv_obj_t *lbl_type = lv_label_create(row);
+    lv_label_set_text(lbl_type, type_label ? type_label : "");
+    lv_obj_set_style_text_font(lbl_type, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_type, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_type, lv_color_white(), LV_STATE_PRESSED);
+
+    /* Chevron */
+    lv_obj_t *lbl_chev = lv_label_create(row);
+    lv_label_set_text(lbl_chev, ">");
+    lv_obj_set_style_text_font(lbl_chev, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_chev, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_chev, lv_color_white(), LV_STATE_PRESSED);
+}
+
+static void open_drivers_screen(void)
+{
+    s_driver_row_pool_used = 0;
+
+    lv_obj_t *content = create_sub_screen("Drivers");
+    s_current_screen = SETTINGS_DRIVERS;
+
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg) {
+        create_info_row(content, "HAL registry not available");
+        return;
+    }
+
+    bool any = false;
+
+    if (reg->display) {
+        add_driver_row(content, reg->display->name, "Display", DRIVER_TYPE_DISPLAY, 0);
+        any = true;
+    }
+
+    for (int i = 0; i < (int)reg->input_count; i++) {
+        if (!reg->inputs[i]) continue;
+        const char *tlbl = reg->inputs[i]->is_touch ? "Touch" : "Keyboard";
+        add_driver_row(content, reg->inputs[i]->name, tlbl, DRIVER_TYPE_INPUT, i);
+        any = true;
+    }
+
+    if (reg->radio) {
+        add_driver_row(content, reg->radio->name, "Radio", DRIVER_TYPE_RADIO, 0);
+        any = true;
+    }
+
+    if (reg->gps) {
+        add_driver_row(content, reg->gps->name, "GPS", DRIVER_TYPE_GPS, 0);
+        any = true;
+    }
+
+    if (reg->audio) {
+        add_driver_row(content, reg->audio->name, "Audio", DRIVER_TYPE_AUDIO, 0);
+        any = true;
+    }
+
+    if (reg->power) {
+        add_driver_row(content, reg->power->name, "Power", DRIVER_TYPE_POWER, 0);
+        any = true;
+    }
+
+    if (reg->imu) {
+        add_driver_row(content, reg->imu->name, "IMU", DRIVER_TYPE_IMU, 0);
+        any = true;
+    }
+
+    for (int i = 0; i < (int)reg->storage_count; i++) {
+        if (!reg->storage[i]) continue;
+        add_driver_row(content, reg->storage[i]->name, "Storage", DRIVER_TYPE_STORAGE, i);
+        any = true;
+    }
+
+    if (!any) {
+        create_info_row(content, "No drivers registered");
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Main list — category row creation                                   */
 /* ------------------------------------------------------------------ */
 
@@ -574,6 +1503,12 @@ static void item_clicked_cb(lv_event_t *e)
     if (strcmp(name, "WiFi") == 0) {
         lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
         open_wifi_screen();
+    } else if (strcmp(name, "Bluetooth") == 0) {
+        lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
+        open_bluetooth_screen();
+    } else if (strcmp(name, "Drivers") == 0) {
+        lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
+        open_drivers_screen();
     } else if (strcmp(name, "About") == 0) {
         lv_obj_add_flag(s_main_list, LV_OBJ_FLAG_HIDDEN);
         open_about_screen();
@@ -700,6 +1635,7 @@ esp_err_t settings_ui_create(lv_obj_t *parent)
 
     s_current_screen = SETTINGS_MAIN;
     s_sub_screen     = NULL;
+    s_detail_screen  = NULL;
 
     return ESP_OK;
 }

@@ -70,6 +70,18 @@ void wifi_manager_get_date_str(char *buf, unsigned long buf_len) {
              tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday);
 }
 
+/* BLE manager stubs — BLE hardware not available in simulator */
+#include "thistle/ble_manager.h"
+esp_err_t ble_manager_init(const char *name) { (void)name; return ESP_OK; }
+ble_state_t ble_manager_get_state(void) { return BLE_STATE_OFF; }
+esp_err_t ble_manager_start_advertising(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ble_manager_stop_advertising(void) { return ESP_OK; }
+esp_err_t ble_manager_disconnect(void) { return ESP_OK; }
+esp_err_t ble_manager_send(const uint8_t *data, size_t len) { (void)data; (void)len; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ble_manager_send_notification(const char *title, const char *body) { (void)title; (void)body; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t ble_manager_register_rx_cb(ble_rx_cb_t cb, void *user_data) { (void)cb; (void)user_data; return ESP_OK; }
+const char *ble_manager_get_peer_name(void) { return NULL; }
+
 /* ELF loader stub */
 esp_err_t elf_loader_init(void) {
     printf("I (elf_loader) ELF loader disabled in simulator\n");

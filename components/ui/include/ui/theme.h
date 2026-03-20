@@ -26,3 +26,8 @@ const theme_colors_t *theme_get_colors(void);
 
 /* Apply current theme to an LVGL display */
 esp_err_t theme_apply(lv_display_t *disp);
+
+/* List available theme files on SD card.
+ * Writes up to max_count filenames (without path) into names[].
+ * Returns actual count found. */
+int theme_list_available(char names[][32], int max_count);
