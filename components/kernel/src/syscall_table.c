@@ -369,12 +369,12 @@ static syscall_entry_t s_table[] = {
     { "esp_timer_stop",                 (void *)esp_timer_stop                },
     { "esp_timer_delete",               (void *)esp_timer_delete              },
 
-    /* ESP-IDF — FreeRTOS */
+    /* ESP-IDF — FreeRTOS (underlying functions, not macros) */
     { "vTaskDelay",                     (void *)vTaskDelay                    },
-    { "xTaskCreate",                    (void *)xTaskCreate                   },
+    { "xTaskCreatePinnedToCore",        (void *)xTaskCreatePinnedToCore       },
     { "vTaskDelete",                    (void *)vTaskDelete                   },
-    { "xQueueCreate",                   (void *)xQueueCreate                  },
-    { "xQueueSend",                     (void *)xQueueSend                    },
+    { "xQueueGenericCreate",            (void *)xQueueGenericCreate           },
+    { "xQueueGenericSend",              (void *)xQueueGenericSend             },
     { "xQueueReceive",                  (void *)xQueueReceive                 },
 
     /* HAL bus handles — for runtime drivers to access shared buses */

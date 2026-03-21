@@ -18,6 +18,6 @@ idf_component_register(
         "src/manifest.c"
         "src/board_config.c"
     INCLUDE_DIRS "include"
-    REQUIRES thistle_hal crypto_ed25519 esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event bt mbedtls esp_http_client driver esp_spiffs
+    REQUIRES thistle_hal crypto_ed25519 esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event bt mbedtls esp_http_client driver spiffs
     PRIV_REQUIRES board_tdeck_pro
 )
