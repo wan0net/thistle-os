@@ -4,6 +4,9 @@
 // This crate implements kernel subsystems in Rust, exposing a C-compatible FFI
 // for integration with the existing C codebase. Modules are migrated incrementally.
 
+pub mod event;
+pub mod ipc;
 pub mod manifest;
+pub mod permissions;
 pub mod version;
 mod ffi;

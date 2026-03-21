@@ -9,7 +9,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::path::Path;
 
-use crate::manifest::{Manifest, ManifestType};
+use crate::manifest::Manifest;
 
 /// C-compatible manifest struct — matches thistle_manifest_t exactly.
 /// Field sizes must match the C header (manifest.h).
