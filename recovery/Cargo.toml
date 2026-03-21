@@ -1,0 +1,21 @@
+[package]
+name = "thistle-recovery"
+version = "0.1.0"
+authors = ["ThistleOS Contributors"]
+edition = "2021"
+license = "BSD-3-Clause"
+
+[dependencies]
+esp-idf-hal = "0.45"
+esp-idf-svc = { version = "0.50", features = ["experimental"] }
+esp-idf-sys = { version = "0.36", features = ["binstart"] }
+log = "0.4"
+embedded-svc = "0.28"
+anyhow = "1"
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+lto = true
