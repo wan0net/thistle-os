@@ -250,7 +250,7 @@ pub fn to_string(perms: u32) -> String {
 /// # Safety
 /// May be called from C at any time. Thread-safe.
 #[no_mangle]
-pub extern "C" fn rs_permissions_init() -> i32 {
+pub extern "C" fn permissions_init() -> i32 {
     init()
 }
 
@@ -259,7 +259,7 @@ pub extern "C" fn rs_permissions_init() -> i32 {
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn rs_permissions_grant(
+pub unsafe extern "C" fn permissions_grant(
     app_id: *const c_char,
     perms: u32,
 ) -> i32 {
@@ -277,7 +277,7 @@ pub unsafe extern "C" fn rs_permissions_grant(
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn rs_permissions_revoke(
+pub unsafe extern "C" fn permissions_revoke(
     app_id: *const c_char,
     perms: u32,
 ) -> i32 {
@@ -297,7 +297,7 @@ pub unsafe extern "C" fn rs_permissions_revoke(
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn rs_permissions_check(
+pub unsafe extern "C" fn permissions_check(
     app_id: *const c_char,
     perm: u32,
 ) -> i32 {
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn rs_permissions_check(
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn rs_permissions_get(app_id: *const c_char) -> u32 {
+pub unsafe extern "C" fn permissions_get(app_id: *const c_char) -> u32 {
     if app_id.is_null() {
         return 0;
     }

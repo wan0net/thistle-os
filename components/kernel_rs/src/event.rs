@@ -202,7 +202,7 @@ static EVENT_BUS: Mutex<EventBus> = Mutex::new(EventBus::new());
 
 /// Initialise the event bus. Idempotent; safe to call multiple times.
 #[no_mangle]
-pub extern "C" fn rs_event_bus_init() -> i32 {
+pub extern "C" fn event_bus_init() -> i32 {
     // The bus is zero-initialised at static construction time.
     // Nothing to do; exposed for symmetry with the C API.
     ESP_OK
@@ -213,7 +213,7 @@ pub extern "C" fn rs_event_bus_init() -> i32 {
 /// Returns `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if the event type is out
 /// of range, or `ESP_ERR_NO_MEM` if all subscriber slots are full.
 #[no_mangle]
-pub extern "C" fn rs_event_subscribe(
+pub extern "C" fn event_subscribe(
     event_type: u32,
     handler: extern "C" fn(*const CEvent, *mut c_void),
     user_data: *mut c_void,
@@ -233,7 +233,7 @@ pub extern "C" fn rs_event_subscribe(
 /// Returns `ESP_OK` on success, `ESP_ERR_INVALID_ARG` if the event type is out
 /// of range, or `ESP_ERR_NOT_FOUND` if `handler` was never registered.
 #[no_mangle]
-pub extern "C" fn rs_event_unsubscribe(
+pub extern "C" fn event_unsubscribe(
     event_type: u32,
     handler: extern "C" fn(*const CEvent, *mut c_void),
 ) -> i32 {
@@ -253,7 +253,7 @@ pub extern "C" fn rs_event_unsubscribe(
 /// on success, `ESP_ERR_INVALID_ARG` if `event` is null or the type is out of
 /// range.
 #[no_mangle]
-pub extern "C" fn rs_event_publish(event: *const CEvent) -> i32 {
+pub extern "C" fn event_publish(event: *const CEvent) -> i32 {
     if event.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -300,7 +300,7 @@ mod tests {
     fn test_subscribe_and_publish() {
         COUNTER_SP.store(0, Ordering::SeqCst);
 
-        let rc = rs_event_subscribe(
+        let rc = event_subscribe(
             EventType::SystemBoot as u32,
             handler_sp,
             std::ptr::null_mut(),
@@ -308,12 +308,12 @@ mod tests {
         assert_eq!(rc, ESP_OK);
 
         let ev = make_event(EventType::SystemBoot);
-        let rc = rs_event_publish(&ev as *const CEvent);
+        let rc = event_publish(&ev as *const CEvent);
         assert_eq!(rc, ESP_OK);
         assert_eq!(COUNTER_SP.load(Ordering::SeqCst), 1);
 
         // Clean up
-        rs_event_unsubscribe(EventType::SystemBoot as u32, handler_sp);
+        event_unsubscribe(EventType::SystemBoot as u32, handler_sp);
     }
 
     // -----------------------------------------------------------------------
@@ -330,18 +330,18 @@ mod tests {
     fn test_unsubscribe() {
         COUNTER_US.store(0, Ordering::SeqCst);
 
-        let rc = rs_event_subscribe(
+        let rc = event_subscribe(
             EventType::SystemShutdown as u32,
             handler_us,
             std::ptr::null_mut(),
         );
         assert_eq!(rc, ESP_OK);
 
-        let rc = rs_event_unsubscribe(EventType::SystemShutdown as u32, handler_us);
+        let rc = event_unsubscribe(EventType::SystemShutdown as u32, handler_us);
         assert_eq!(rc, ESP_OK);
 
         let ev = make_event(EventType::SystemShutdown);
-        rs_event_publish(&ev as *const CEvent);
+        event_publish(&ev as *const CEvent);
 
         assert_eq!(
             COUNTER_US.load(Ordering::SeqCst),
@@ -375,12 +375,12 @@ mod tests {
         COUNTER_C.store(0, Ordering::SeqCst);
 
         let etype = EventType::RadioRx as u32;
-        assert_eq!(rs_event_subscribe(etype, handler_a, std::ptr::null_mut()), ESP_OK);
-        assert_eq!(rs_event_subscribe(etype, handler_b, std::ptr::null_mut()), ESP_OK);
-        assert_eq!(rs_event_subscribe(etype, handler_c, std::ptr::null_mut()), ESP_OK);
+        assert_eq!(event_subscribe(etype, handler_a, std::ptr::null_mut()), ESP_OK);
+        assert_eq!(event_subscribe(etype, handler_b, std::ptr::null_mut()), ESP_OK);
+        assert_eq!(event_subscribe(etype, handler_c, std::ptr::null_mut()), ESP_OK);
 
         let ev = make_event(EventType::RadioRx);
-        let rc = rs_event_publish(&ev as *const CEvent);
+        let rc = event_publish(&ev as *const CEvent);
         assert_eq!(rc, ESP_OK);
 
         assert_eq!(COUNTER_A.load(Ordering::SeqCst), 1, "handler_a not called");
@@ -388,9 +388,9 @@ mod tests {
         assert_eq!(COUNTER_C.load(Ordering::SeqCst), 1, "handler_c not called");
 
         // Clean up
-        rs_event_unsubscribe(etype, handler_a);
-        rs_event_unsubscribe(etype, handler_b);
-        rs_event_unsubscribe(etype, handler_c);
+        event_unsubscribe(etype, handler_a);
+        event_unsubscribe(etype, handler_b);
+        event_unsubscribe(etype, handler_c);
     }
 
     // -----------------------------------------------------------------------
@@ -403,10 +403,10 @@ mod tests {
     fn test_invalid_event_type() {
         let out_of_range = EVENT_MAX as u32; // == 17 == EVENT_MAX
 
-        let rc = rs_event_subscribe(out_of_range, handler_dummy, std::ptr::null_mut());
+        let rc = event_subscribe(out_of_range, handler_dummy, std::ptr::null_mut());
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "subscribe with invalid type must fail");
 
-        let rc = rs_event_unsubscribe(out_of_range, handler_dummy);
+        let rc = event_unsubscribe(out_of_range, handler_dummy);
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "unsubscribe with invalid type must fail");
 
         // publish: build an event with an out-of-range type directly
@@ -416,7 +416,7 @@ mod tests {
             data:       std::ptr::null_mut(),
             data_len:   0,
         };
-        let rc = rs_event_publish(&ev as *const CEvent);
+        let rc = event_publish(&ev as *const CEvent);
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "publish with invalid type must fail");
     }
 }

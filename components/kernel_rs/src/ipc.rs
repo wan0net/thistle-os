@@ -102,7 +102,7 @@ fn ipc_global() -> &'static IpcGlobal {
 // ── Public Rust API ───────────────────────────────────────────────────────────
 
 /// Initialise the IPC subsystem. Idempotent — safe to call more than once.
-pub fn ipc_init() -> i32 {
+pub fn ipc_init_impl() -> i32 {
     let g = ipc_global();
     let mut st = g.state.lock().unwrap();
     if !st.initialized {
@@ -116,7 +116,7 @@ pub fn ipc_init() -> i32 {
 /// Dispatch `msg` to all matching handlers, then enqueue it.
 ///
 /// Returns `ESP_ERR_NO_MEM` when the queue is already at `IPC_QUEUE_DEPTH`.
-pub fn ipc_send(msg: CIpcMessage) -> i32 {
+pub fn ipc_send_impl(msg: CIpcMessage) -> i32 {
     let g = ipc_global();
     let mut st = g.state.lock().unwrap();
 
@@ -144,7 +144,7 @@ pub fn ipc_send(msg: CIpcMessage) -> i32 {
 ///
 /// Returns `ESP_ERR_TIMEOUT` if no message arrives within the deadline, or
 /// `ESP_ERR_INVALID_STATE` if the subsystem is not initialised.
-pub fn ipc_recv(timeout_ms: u32) -> Result<CIpcMessage, i32> {
+pub fn ipc_recv_impl(timeout_ms: u32) -> Result<CIpcMessage, i32> {
     let g = ipc_global();
     let st = g.state.lock().unwrap();
 
@@ -175,7 +175,7 @@ pub fn ipc_recv(timeout_ms: u32) -> Result<CIpcMessage, i32> {
 ///
 /// Returns `ESP_ERR_NO_MEM` when `IPC_HANDLER_MAX` registrations are already
 /// active, or `ESP_ERR_INVALID_STATE` if the subsystem is not initialised.
-pub fn ipc_register_handler(
+pub fn ipc_register_handler_impl(
     msg_type: u32,
     handler: extern "C" fn(*const CIpcMessage, *mut c_void),
     user_data: *mut c_void,
@@ -208,8 +208,8 @@ pub fn ipc_register_handler(
 /// # Safety
 /// Safe to call from C at any time; idempotent.
 #[no_mangle]
-pub extern "C" fn rs_ipc_init() -> i32 {
-    ipc_init()
+pub extern "C" fn ipc_init() -> i32 {
+    ipc_init_impl()
 }
 
 /// Send a message.
@@ -217,11 +217,11 @@ pub extern "C" fn rs_ipc_init() -> i32 {
 /// # Safety
 /// `msg` must point to a valid, initialised `CIpcMessage`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_ipc_send(msg: *const CIpcMessage) -> i32 {
+pub unsafe extern "C" fn ipc_send(msg: *const CIpcMessage) -> i32 {
     if msg.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    ipc_send(*msg)
+    ipc_send_impl(*msg)
 }
 
 /// Receive the oldest queued message, blocking up to `timeout_ms`.
@@ -231,11 +231,11 @@ pub unsafe extern "C" fn rs_ipc_send(msg: *const CIpcMessage) -> i32 {
 /// # Safety
 /// `msg` must point to a writable `CIpcMessage`-sized buffer.
 #[no_mangle]
-pub unsafe extern "C" fn rs_ipc_recv(msg: *mut CIpcMessage, timeout_ms: u32) -> i32 {
+pub unsafe extern "C" fn ipc_recv(msg: *mut CIpcMessage, timeout_ms: u32) -> i32 {
     if msg.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    match ipc_recv(timeout_ms) {
+    match ipc_recv_impl(timeout_ms) {
         Ok(m) => {
             *msg = m;
             ESP_OK
@@ -250,12 +250,12 @@ pub unsafe extern "C" fn rs_ipc_recv(msg: *mut CIpcMessage, timeout_ms: u32) -> 
 /// `handler` must be a valid function pointer for the lifetime of the IPC
 /// subsystem. `user_data` lifetime is the caller's responsibility.
 #[no_mangle]
-pub unsafe extern "C" fn rs_ipc_register_handler(
+pub unsafe extern "C" fn ipc_register_handler(
     msg_type: u32,
     handler: extern "C" fn(*const CIpcMessage, *mut c_void),
     user_data: *mut c_void,
 ) -> i32 {
-    ipc_register_handler(msg_type, handler, user_data)
+    ipc_register_handler_impl(msg_type, handler, user_data)
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

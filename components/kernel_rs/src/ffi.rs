@@ -91,7 +91,7 @@ const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 /// `json_path` must be a valid null-terminated C string.
 /// `out` must point to a valid CManifest-sized buffer.
 #[no_mangle]
-pub unsafe extern "C" fn rs_manifest_parse_file(
+pub unsafe extern "C" fn manifest_parse_file_rs(
     json_path: *const c_char,
     out: *mut CManifest,
 ) -> i32 {
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn rs_manifest_parse_file(
 /// `manifest` must point to a valid CManifest.
 /// `current_arch` must be a valid null-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn rs_manifest_is_compatible(
+pub unsafe extern "C" fn manifest_is_compatible_rs(
     manifest: *const CManifest,
     current_arch: *const c_char,
 ) -> bool {
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn rs_manifest_is_compatible(
 /// `elf_path` must be a valid null-terminated C string.
 /// `out_path` must point to a buffer of at least `out_size` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn rs_manifest_path_from_elf(
+pub unsafe extern "C" fn manifest_path_from_elf_rs(
     elf_path: *const c_char,
     out_path: *mut c_char,
     out_size: usize,
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn rs_manifest_path_from_elf(
 /// # Safety
 /// Returns a pointer to a static string. Do not free.
 #[no_mangle]
-pub extern "C" fn rs_kernel_version() -> *const c_char {
+pub extern "C" fn kernel_version_rs() -> *const c_char {
     // Include the null terminator
     b"0.1.0\0".as_ptr() as *const c_char
 }
