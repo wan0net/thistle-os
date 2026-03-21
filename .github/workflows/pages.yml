@@ -1,0 +1,78 @@
+name: Deploy Pages (Docs + WASM Simulator)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Docs + WASM Simulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.51
+
+      - name: Install Rust + WASM target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target add wasm32-unknown-emscripten
+
+      - name: Build Rust kernel for WASM
+        working-directory: components/kernel_rs
+        run: cargo build --release --target wasm32-unknown-emscripten
+
+      - name: Build WASM simulator
+        run: |
+          cd wasm
+          mkdir -p build && cd build
+          emcmake cmake ..
+          make -j"$(nproc)"
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p _site
+
+          # Homepage
+          cp site/index.html _site/
+
+          # Documentation
+          mkdir -p _site/docs
+          cp -r docs/* _site/docs/
+
+          # WASM simulator
+          mkdir -p _site/simulator
+          cp wasm/build/thistle_wasm.html _site/simulator/index.html
+          cp wasm/build/thistle_wasm.js _site/simulator/
+          cp wasm/build/thistle_wasm.wasm _site/simulator/
+          cp wasm/build/thistle_wasm.data _site/simulator/ 2>/dev/null || true
+
+          # App store catalog
+          mkdir -p _site/apps
+          cp simulator/sdcard/appstore/catalog.json _site/apps/ 2>/dev/null || true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy
+        uses: actions/deploy-pages@v4

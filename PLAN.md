@@ -105,19 +105,28 @@
 
 ## Phase 4: Window Manager Ecosystem
 
-### 4.1 LVGL WM as loadable .wm.elf
-- Extract current ui/ component into a standalone WM binary
+### 4.1 Settings as part of the WM (not a standalone app)
+- Settings manages theme, WiFi, BLE, display, about — all WM concerns
+- Launcher is also a WM concern (it's the WM's home screen)
+- Move Settings + Launcher into the WM module
+- Standalone apps remain: Messenger, Reader, Notes, Vault, Navigator,
+  Terminal, Assistant, WiFi Scanner, Flashlight, Weather, App Store
+- **Deliverable**: WM owns system UI, apps own user features
+
+### 4.2 LVGL WM as loadable .wm.elf
+- Extract current ui/ + settings + launcher into a standalone WM binary
 - Load from SPIFFS, register via display_server_register_wm()
 - **Deliverable**: WM is an updateable module, not baked in
 
-### 4.2 Rust window manager
+### 4.3 Rust window manager
 - Implement display_server_wm_t using embedded-graphics (MIT)
-- Minimal: status bar + app list + text rendering
+- Includes its own settings panel and launcher
 - Optimized for e-paper (1-bit, dirty regions)
 - **Deliverable**: Alternative lightweight WM
 
-### 4.3 Terminal WM
+### 4.4 Terminal WM
 - Text-mode WM for headless/serial use
+- Settings accessible via terminal commands
 - No display hardware needed
 - **Deliverable**: ThistleOS on any ESP32 with a serial port
 
