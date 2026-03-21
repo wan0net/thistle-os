@@ -4,6 +4,7 @@
 #include "thistle/driver_loader.h"
 #include "thistle/syscall.h"
 #include "thistle/signing.h"
+#include "thistle/manifest.h"
 #include "hal/sdcard_path.h"
 #include "esp_log.h"
 #include "esp_elf.h"
@@ -23,9 +24,11 @@ static const char *TAG = "drv_loader";
 
 /* Loaded driver state */
 typedef struct {
-    esp_elf_t elf;
-    char      path[128];
-    bool      loaded;
+    esp_elf_t          elf;
+    char               path[128];
+    bool               loaded;
+    thistle_manifest_t manifest;   /* Parsed from manifest.json if available */
+    bool               has_manifest;
 } loaded_driver_t;
 
 static loaded_driver_t s_drivers[MAX_LOADED_DRVS];
@@ -88,7 +91,30 @@ esp_err_t driver_loader_load(const char *path)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 2. Read ELF file into PSRAM                                         */
+    /* 2. Try to load manifest.json                                        */
+    /* ------------------------------------------------------------------ */
+    loaded_driver_t *drv_slot = &s_drivers[s_driver_count];
+    char manifest_path[280];
+    manifest_path_from_elf(path, manifest_path, sizeof(manifest_path));
+
+    if (manifest_parse_file(manifest_path, &drv_slot->manifest) == ESP_OK) {
+        drv_slot->has_manifest = true;
+        ESP_LOGI(TAG, "Driver manifest: %s v%s (HAL: %s)",
+                 drv_slot->manifest.name, drv_slot->manifest.version,
+                 drv_slot->manifest.hal_interface);
+
+        if (!manifest_is_compatible(&drv_slot->manifest)) {
+            ESP_LOGE(TAG, "Driver '%s' incompatible (requires OS %s, arch %s)",
+                     drv_slot->manifest.id, drv_slot->manifest.min_os, drv_slot->manifest.arch);
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+    } else {
+        drv_slot->has_manifest = false;
+        ESP_LOGD(TAG, "No manifest for driver: %s", path);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 3. Read ELF file into PSRAM                                         */
     /* ------------------------------------------------------------------ */
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -123,9 +149,9 @@ esp_err_t driver_loader_load(const char *path)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 3. Initialise the esp_elf context                                   */
+    /* 4. Initialise the esp_elf context                                   */
     /* ------------------------------------------------------------------ */
-    loaded_driver_t *drv = &s_drivers[s_driver_count];
+    loaded_driver_t *drv = drv_slot;
 
     esp_err_t ret = esp_elf_init(&drv->elf);
     if (ret != ESP_OK) {
@@ -135,7 +161,7 @@ esp_err_t driver_loader_load(const char *path)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 4. Set symbol resolver and relocate                                 */
+    /* 5. Set symbol resolver and relocate                                 */
     /* ------------------------------------------------------------------ */
     elf_set_symbol_resolver(driver_symbol_resolver);
 
@@ -151,7 +177,7 @@ esp_err_t driver_loader_load(const char *path)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 5. Call the driver entry point (index 0 = driver_init)             */
+    /* 6. Call the driver entry point (index 0 = driver_init)             */
     /*    The driver calls hal_*_register() to wire itself into the HAL.  */
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Calling driver_init() for: %s", path);
@@ -163,7 +189,7 @@ esp_err_t driver_loader_load(const char *path)
     }
 
     /* ------------------------------------------------------------------ */
-    /* 6. Record the loaded driver                                         */
+    /* 7. Record the loaded driver                                         */
     /* ------------------------------------------------------------------ */
     strncpy(drv->path, path, sizeof(drv->path) - 1);
     drv->path[sizeof(drv->path) - 1] = '\0';

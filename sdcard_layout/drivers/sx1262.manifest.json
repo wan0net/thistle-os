@@ -1,0 +1,12 @@
+{
+    "type": "driver",
+    "id": "com.thistle.drv.sx1262",
+    "name": "SX1262 LoRa Radio",
+    "version": "1.0.0",
+    "author": "ThistleOS",
+    "description": "SX1262 868/915 MHz LoRa radio driver",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "sx1262.drv.elf",
+    "hal_interface": "radio"
+}

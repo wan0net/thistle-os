@@ -5,6 +5,7 @@
 #include "thistle/syscall.h"
 #include "thistle/signing.h"
 #include "thistle/permissions.h"
+#include "thistle/manifest.h"
 #include "esp_elf.h"
 #include "private/elf_symbol.h"
 #include "esp_log.h"
@@ -197,17 +198,58 @@ esp_err_t elf_app_load(const char *path, elf_app_handle_t *handle)
     app->running = false;
     app->task    = NULL;
 
-    /* Default manifest — overridden once .thistle_app section parsing is
-     * implemented.  The filename (minus extension) is used as a fallback id. */
-    const char *basename = strrchr(path, '/');
-    basename = basename ? basename + 1 : path;
-    app->manifest = (app_manifest_t){
-        .id               = app->path,   /* points into stable storage */
-        .name             = basename,
-        .version          = "0.0.0",
-        .allow_background = false,
-        .min_memory_kb    = 0,
-    };
+    /* Try to load manifest.json alongside the ELF file */
+    char manifest_path[280];
+    thistle_manifest_t full_manifest;
+    manifest_path_from_elf(path, manifest_path, sizeof(manifest_path));
+
+    if (manifest_parse_file(manifest_path, &full_manifest) == ESP_OK) {
+        ESP_LOGI(TAG, "Loaded manifest for '%s': %s v%s", path, full_manifest.name, full_manifest.version);
+
+        /* Check compatibility before proceeding */
+        if (!manifest_is_compatible(&full_manifest)) {
+            ESP_LOGE(TAG, "App '%s' incompatible (requires OS %s, arch %s)",
+                     full_manifest.id, full_manifest.min_os, full_manifest.arch);
+            esp_elf_deinit(&app->elf);
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
+        /* Populate app_manifest_t from the parsed manifest.
+         * Pointers reference the elf_app_handle's path (stable storage). */
+        app->manifest = (app_manifest_t){
+            .id               = app->path,   /* overwritten below if id present */
+            .name             = app->path,   /* overwritten below */
+            .version          = "0.0.0",
+            .allow_background = full_manifest.background,
+            .min_memory_kb    = full_manifest.min_memory_kb,
+        };
+
+        /* Store name/version in the path buffer area for stable pointers.
+         * The full_manifest struct is stack-local, so we copy key strings
+         * into static storage within the handle. */
+        static char s_manifest_names[MAX_LOADED_APPS][32];
+        static char s_manifest_versions[MAX_LOADED_APPS][16];
+        static char s_manifest_ids[MAX_LOADED_APPS][64];
+        int idx = (int)(app - s_apps);
+        strncpy(s_manifest_ids[idx], full_manifest.id, sizeof(s_manifest_ids[idx]) - 1);
+        strncpy(s_manifest_names[idx], full_manifest.name, sizeof(s_manifest_names[idx]) - 1);
+        strncpy(s_manifest_versions[idx], full_manifest.version, sizeof(s_manifest_versions[idx]) - 1);
+        app->manifest.id      = s_manifest_ids[idx];
+        app->manifest.name    = s_manifest_names[idx];
+        app->manifest.version = s_manifest_versions[idx];
+    } else {
+        /* Fallback: derive from filename */
+        const char *basename = strrchr(path, '/');
+        basename = basename ? basename + 1 : path;
+        app->manifest = (app_manifest_t){
+            .id               = app->path,
+            .name             = basename,
+            .version          = "0.0.0",
+            .allow_background = false,
+            .min_memory_kb    = 0,
+        };
+        ESP_LOGD(TAG, "No manifest for '%s', using filename defaults", path);
+    }
 
     *handle = app;
     ESP_LOGI(TAG, "ELF loaded: %s", path);
