@@ -10,8 +10,7 @@
  * Encryption: AES-256-CBC + PBKDF2-HMAC-SHA256 + HMAC-SHA256 integrity.
  * File layout: [16-byte salt][16-byte IV][encrypted JSON][32-byte HMAC]
  *
- * In SIMULATOR_BUILD mode mbedtls is unavailable; encryption is skipped
- * and a plaintext JSON file is written instead so the UI can be tested.
+ * Works on all platforms (ESP32, simulator, WASM) via the kernel crypto module.
  */
 #include "vault/vault_app.h"
 
@@ -28,13 +27,14 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
-#ifndef SIMULATOR_BUILD
-#include "mbedtls/aes.h"
-#include "mbedtls/sha256.h"
-#include "mbedtls/pkcs5.h"
-#include "mbedtls/md.h"
-#include "esp_random.h"
-#endif
+/* Kernel crypto — works on all platforms (ESP32, simulator, WASM) */
+extern int thistle_crypto_sha256(const unsigned char *data, unsigned int len, unsigned char *hash_out);
+extern int thistle_crypto_hmac_sha256(const unsigned char *key, unsigned int key_len, const unsigned char *data, unsigned int data_len, unsigned char *mac_out);
+extern int thistle_crypto_hmac_verify(const unsigned char *key, unsigned int key_len, const unsigned char *data, unsigned int data_len, const unsigned char *expected_mac);
+extern int thistle_crypto_aes256_cbc_encrypt(const unsigned char *key, const unsigned char *iv, const unsigned char *plaintext, unsigned int len, unsigned char *ciphertext_out);
+extern int thistle_crypto_aes256_cbc_decrypt(const unsigned char *key, const unsigned char *iv, const unsigned char *ciphertext, unsigned int len, unsigned char *plaintext_out);
+extern int thistle_crypto_pbkdf2_sha256(const char *password, const unsigned char *salt, unsigned int salt_len, unsigned int iterations, unsigned char *key_out, unsigned int key_len);
+extern int thistle_crypto_random(unsigned char *buf, unsigned int len);
 
 static const char *TAG = "vault_ui";
 
@@ -124,22 +124,15 @@ static esp_err_t vault_load(const char *master_pw);
 static esp_err_t vault_save(void);
 
 /* ------------------------------------------------------------------ */
-/* Crypto helpers (real build only)                                     */
+/* Crypto helpers — unified, backed by the kernel crypto module        */
 /* ------------------------------------------------------------------ */
-
-#ifndef SIMULATOR_BUILD
 
 static esp_err_t derive_key(const char *password,
                              const uint8_t salt[SALT_LEN],
                              uint8_t key[32])
 {
-    int rc = mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256,
-                                    (const uint8_t *)password,
-                                    strlen(password),
-                                    salt, SALT_LEN,
-                                    PBKDF2_ITER,
-                                    32, key);
-    return (rc == 0) ? ESP_OK : ESP_FAIL;
+    return (thistle_crypto_pbkdf2_sha256(password, salt, SALT_LEN, PBKDF2_ITER, key, 32) == 0)
+           ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t vault_encrypt(const uint8_t *plaintext, size_t len,
@@ -147,16 +140,8 @@ static esp_err_t vault_encrypt(const uint8_t *plaintext, size_t len,
                                 const uint8_t iv[IV_LEN],
                                 uint8_t *ciphertext)
 {
-    mbedtls_aes_context aes;
-    mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_enc(&aes, key, 256);
-    uint8_t iv_copy[IV_LEN];
-    memcpy(iv_copy, iv, IV_LEN);
-    int rc = mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT,
-                                    len, iv_copy,
-                                    plaintext, ciphertext);
-    mbedtls_aes_free(&aes);
-    return (rc == 0) ? ESP_OK : ESP_FAIL;
+    return (thistle_crypto_aes256_cbc_encrypt(key, iv, plaintext, len, ciphertext) == 0)
+           ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t vault_decrypt(const uint8_t *ciphertext, size_t len,
@@ -164,51 +149,21 @@ static esp_err_t vault_decrypt(const uint8_t *ciphertext, size_t len,
                                 const uint8_t iv[IV_LEN],
                                 uint8_t *plaintext)
 {
-    mbedtls_aes_context aes;
-    mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_dec(&aes, key, 256);
-    uint8_t iv_copy[IV_LEN];
-    memcpy(iv_copy, iv, IV_LEN);
-    int rc = mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT,
-                                    len, iv_copy,
-                                    ciphertext, plaintext);
-    mbedtls_aes_free(&aes);
-    return (rc == 0) ? ESP_OK : ESP_FAIL;
+    return (thistle_crypto_aes256_cbc_decrypt(key, iv, ciphertext, len, plaintext) == 0)
+           ? ESP_OK : ESP_FAIL;
 }
 
 static void compute_hmac(const uint8_t *data, size_t data_len,
                           const uint8_t key[32],
                           uint8_t hmac_out[HMAC_LEN])
 {
-    mbedtls_md_context_t ctx;
-    mbedtls_md_init(&ctx);
-    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
-    mbedtls_md_hmac_starts(&ctx, key, 32);
-    mbedtls_md_hmac_update(&ctx, data, data_len);
-    mbedtls_md_hmac_finish(&ctx, hmac_out);
-    mbedtls_md_free(&ctx);
+    thistle_crypto_hmac_sha256(key, 32, data, data_len, hmac_out);
 }
 
 static void fill_random(uint8_t *buf, size_t len)
 {
-    for (size_t i = 0; i < len; i += 4) {
-        uint32_t r = esp_random();
-        size_t copy = (len - i < 4) ? (len - i) : 4;
-        memcpy(buf + i, &r, copy);
-    }
+    thistle_crypto_random(buf, len);
 }
-
-#else /* SIMULATOR_BUILD — no mbedtls */
-
-static void fill_random(uint8_t *buf, size_t len)
-{
-    /* Use stdlib rand as entropy source — simulator only, not security-critical */
-    for (size_t i = 0; i < len; i++) {
-        buf[i] = (uint8_t)(rand() & 0xFF);
-    }
-}
-
-#endif /* SIMULATOR_BUILD */
 
 /* ------------------------------------------------------------------ */
 /* Simple JSON serialiser / parser for vault entries                   */
@@ -425,17 +380,11 @@ static esp_err_t vault_load(const char *master_pw)
         fill_random(s_vault.salt, SALT_LEN);
         s_vault.entry_count = 0;
 
-#ifndef SIMULATOR_BUILD
         esp_err_t rc = derive_key(master_pw, s_vault.salt, s_vault.derived_key);
         if (rc != ESP_OK) {
             ESP_LOGE(TAG, "Key derivation failed on first use");
             return rc;
         }
-#else
-        (void)master_pw;
-        ESP_LOGW(TAG, "[SIM] Skipping key derivation");
-        memset(s_vault.derived_key, 0xAB, 32);
-#endif
 
         /* Save the (empty) vault immediately */
         esp_err_t save_rc = vault_save();
@@ -445,30 +394,6 @@ static esp_err_t vault_load(const char *master_pw)
         }
         return ESP_OK;
     }
-
-#ifdef SIMULATOR_BUILD
-    /* Simulator: read plaintext JSON directly */
-    (void)master_pw;
-    FILE *f = fopen(VAULT_PATH, "r");
-    if (!f) return ESP_ERR_NOT_FOUND;
-    fseek(f, 0, SEEK_END);
-    long fsz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fsz <= 0) { fclose(f); s_vault.entry_count = 0; return ESP_OK; }
-
-    char *json = (char *)malloc((size_t)fsz + 1);
-    if (!json) { fclose(f); return ESP_ERR_NO_MEM; }
-    size_t nread = fread(json, 1, (size_t)fsz, f);
-    fclose(f);
-    if (nread != (size_t)fsz) { free(json); return ESP_ERR_INVALID_SIZE; }
-    json[fsz] = '\0';
-    s_vault.entry_count = json_to_entries(json);
-    free(json);
-    if (s_vault.entry_count < 0) s_vault.entry_count = 0;
-    memset(s_vault.derived_key, 0xAB, 32);
-    return ESP_OK;
-
-#else /* Real firmware */
 
     FILE *f = fopen(VAULT_PATH, "rb");
     if (!f) return ESP_ERR_NOT_FOUND;
@@ -506,15 +431,9 @@ static esp_err_t vault_load(const char *master_pw)
     }
 
     /* Verify HMAC over (salt || IV || ciphertext) */
-    uint8_t computed_hmac[HMAC_LEN];
-    compute_hmac(filebuf, (size_t)fsz - HMAC_LEN, candidate_key, computed_hmac);
-
-    /* Constant-time comparison */
-    uint8_t diff = 0;
-    for (int i = 0; i < HMAC_LEN; i++) {
-        diff |= (computed_hmac[i] ^ file_hmac[i]);
-    }
-    if (diff != 0) {
+    if (thistle_crypto_hmac_verify(candidate_key, 32,
+                                    filebuf, (size_t)fsz - HMAC_LEN,
+                                    file_hmac) != 0) {
         free(filebuf);
         memset(candidate_key, 0, 32);
         ESP_LOGW(TAG, "HMAC mismatch — wrong password or corrupted vault");
@@ -556,8 +475,6 @@ static esp_err_t vault_load(const char *master_pw)
 
     s_vault.entry_count = (cnt >= 0) ? cnt : 0;
     return ESP_OK;
-
-#endif /* SIMULATOR_BUILD */
 }
 
 /*
@@ -571,18 +488,6 @@ static esp_err_t vault_save(void)
     size_t json_len = 0;
     char *json = entries_to_json(&json_len);
     if (!json) return ESP_ERR_NO_MEM;
-
-#ifdef SIMULATOR_BUILD
-    /* Simulator: write plaintext JSON (no encryption) */
-    FILE *f = fopen(VAULT_PATH, "w");
-    if (!f) { free(json); return ESP_ERR_NOT_FOUND; }
-    fwrite(json, 1, json_len, f);
-    fclose(f);
-    free(json);
-    ESP_LOGW(TAG, "[SIM] Vault written as plaintext (no encryption)");
-    return ESP_OK;
-
-#else /* Real firmware */
 
     /* PKCS7-pad the JSON */
     uint8_t *padded = NULL;
@@ -626,8 +531,6 @@ static esp_err_t vault_save(void)
 
     ESP_LOGI(TAG, "Vault saved (%d entries)", s_vault.entry_count);
     return ESP_OK;
-
-#endif /* SIMULATOR_BUILD */
 }
 
 /* ------------------------------------------------------------------ */

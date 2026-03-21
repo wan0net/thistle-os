@@ -29,7 +29,7 @@
 #include "flashlight/flashlight_app.h"
 #include "weather/weather_app.h"
 #include "terminal/terminal_app.h"
-/* vault excluded from WASM — no encryption in browser */
+#include "vault/vault_app.h"
 
 #include "lvgl.h"
 #include "hal/board.h"
@@ -82,7 +82,7 @@ int main(void)
     flashlight_app_register();
     weather_app_register();
     terminal_app_register();
-    /* Vault excluded from WASM — no encryption available in browser */
+    vault_app_register();
 
     /* Grant permissions */
     permissions_grant("com.thistle.launcher",   0x7F);
