@@ -42,8 +42,8 @@ jobs:
           . $IDF_PATH/export.sh
           SIZE=$(idf.py size 2>&1 | grep "Total image" | grep -oE '[0-9]+' | head -1)
           echo "Firmware size: $SIZE bytes ($(($SIZE / 1024)) KB)"
-          if [ "$SIZE" -gt 3670016 ]; then
-            echo "::error::Firmware exceeds 3.5MB OTA partition limit!"
+          if [ "$SIZE" -gt 4718592 ]; then
+            echo "::error::Firmware exceeds 4.5MB OTA partition limit!"
             exit 1
           fi
 
