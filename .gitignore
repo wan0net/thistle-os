@@ -33,3 +33,4 @@ simulator/build/
 .playwright-mcp/
 appstore-site/
 appstore-site/
+external/ghostty
