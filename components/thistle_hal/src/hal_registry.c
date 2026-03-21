@@ -132,6 +132,58 @@ esp_err_t hal_storage_register(const hal_storage_driver_t *driver, const void *c
     return ESP_OK;
 }
 
+/* Start all registered drivers by calling their init() functions */
+esp_err_t hal_registry_start_all(void)
+{
+    esp_err_t ret;
+
+    if (s_registry.display && s_registry.display->init) {
+        ret = s_registry.display->init(s_registry.display_config);
+        if (ret != ESP_OK) return ret;
+    }
+    for (int i = 0; i < s_registry.input_count; i++) {
+        if (s_registry.inputs[i] && s_registry.inputs[i]->init) {
+            ret = s_registry.inputs[i]->init(s_registry.input_configs[i]);
+            if (ret != ESP_OK) return ret;
+        }
+    }
+    if (s_registry.radio && s_registry.radio->init)
+        s_registry.radio->init(s_registry.radio_config);
+    if (s_registry.gps && s_registry.gps->init)
+        s_registry.gps->init(s_registry.gps_config);
+    if (s_registry.audio && s_registry.audio->init)
+        s_registry.audio->init(s_registry.audio_config);
+    if (s_registry.power && s_registry.power->init)
+        s_registry.power->init(s_registry.power_config);
+    if (s_registry.imu && s_registry.imu->init)
+        s_registry.imu->init(s_registry.imu_config);
+    for (int i = 0; i < s_registry.storage_count; i++) {
+        if (s_registry.storage[i] && s_registry.storage[i]->init)
+            s_registry.storage[i]->init(s_registry.storage_configs[i]);
+        if (s_registry.storage[i] && s_registry.storage[i]->mount)
+            s_registry.storage[i]->mount(NULL);
+    }
+    return ESP_OK;
+}
+
+/* Stop all registered drivers */
+esp_err_t hal_registry_stop_all(void)
+{
+    for (int i = (int)s_registry.storage_count - 1; i >= 0; i--)
+        if (s_registry.storage[i] && s_registry.storage[i]->deinit)
+            s_registry.storage[i]->deinit();
+    if (s_registry.imu && s_registry.imu->deinit) s_registry.imu->deinit();
+    if (s_registry.power && s_registry.power->deinit) s_registry.power->deinit();
+    if (s_registry.audio && s_registry.audio->deinit) s_registry.audio->deinit();
+    if (s_registry.gps && s_registry.gps->deinit) s_registry.gps->deinit();
+    if (s_registry.radio && s_registry.radio->deinit) s_registry.radio->deinit();
+    for (int i = (int)s_registry.input_count - 1; i >= 0; i--)
+        if (s_registry.inputs[i] && s_registry.inputs[i]->deinit)
+            s_registry.inputs[i]->deinit();
+    if (s_registry.display && s_registry.display->deinit) s_registry.display->deinit();
+    return ESP_OK;
+}
+
 esp_err_t hal_set_board_name(const char *name)
 {
     if (name == NULL) {

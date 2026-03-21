@@ -72,8 +72,7 @@ void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)lev
 /* ── HAL helpers (Rust syscall_table references these) ─────────────── */
 unsigned short hal_display_get_width_helper(void) { return 320; }
 unsigned short hal_display_get_height_helper(void) { return 240; }
-int hal_registry_start_all(void) { return 0; }
-int hal_registry_stop_all(void) { return 0; }
+/* hal_registry_start_all/stop_all — now in hal_registry.c */
 
 /* ── C stdlib wrappers (Rust syscall_table exports these) ──────────── */
 void *libc_malloc(unsigned int sz) { return malloc(sz); }

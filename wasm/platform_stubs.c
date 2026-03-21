@@ -65,8 +65,7 @@ void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)lev
 /* ── HAL helpers ───────────────────────────────────────────────────── */
 unsigned short hal_display_get_width_helper(void) { return 320; }
 unsigned short hal_display_get_height_helper(void) { return 240; }
-int hal_registry_start_all(void) { return 0; }
-int hal_registry_stop_all(void) { return 0; }
+/* hal_registry_start_all/stop_all — now in hal_registry.c */
 /* board_init provided by board_simulator.c */
 
 /* ── C stdlib wrappers ─────────────────────────────────────────────── */
