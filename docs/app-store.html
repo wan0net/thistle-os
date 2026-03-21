@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App Store — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html" class="active">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / App Store</div>
+      <h1>App Store &amp; Catalog</h1>
+      <p class="lead">The ThistleOS app store is decentralized — anyone can host a catalog. The device fetches JSON over HTTPS, verifies SHA-256 checksums and signatures, then downloads and installs entries onto the SD card.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/app-store.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Catalog format</h2>
+    <p>A catalog is a single JSON file. The top-level object contains metadata and an array of entries:</p>
+
+    <pre><code>{
+  <span class="tok-string">"catalog_version"</span>: 1,
+  <span class="tok-string">"name"</span>: <span class="tok-string">"ThistleOS Official"</span>,
+  <span class="tok-string">"url"</span>: <span class="tok-string">"https://wan0net.github.io/thistle-apps/catalog.json"</span>,
+  <span class="tok-string">"updated"</span>: <span class="tok-string">"2026-03-01"</span>,
+  <span class="tok-string">"entries"</span>: [
+    {
+      <span class="tok-string">"id"</span>:          <span class="tok-string">"com.example.chat"</span>,
+      <span class="tok-string">"name"</span>:        <span class="tok-string">"LoRa Chat"</span>,
+      <span class="tok-string">"version"</span>:     <span class="tok-string">"1.2.0"</span>,
+      <span class="tok-string">"type"</span>:        <span class="tok-string">"app"</span>,
+      <span class="tok-string">"url"</span>:         <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf"</span>,
+      <span class="tok-string">"sha256"</span>:      <span class="tok-string">"a3f1b29c..."</span>,
+      <span class="tok-string">"sig_url"</span>:     <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf.sig"</span>,
+      <span class="tok-string">"size_bytes"</span>:  48320,
+      <span class="tok-string">"permissions"</span>: [<span class="tok-string">"radio"</span>, <span class="tok-string">"ipc"</span>],
+      <span class="tok-string">"description"</span>: <span class="tok-string">"Send and receive LoRa messages with nearby devices."</span>,
+      <span class="tok-string">"author"</span>:      <span class="tok-string">"Example Dev"</span>,
+      <span class="tok-string">"min_os"</span>:      <span class="tok-string">"0.1.0"</span>
+    }
+  ]
+}</code></pre>
+
+    <h3>Entry field reference</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>yes</td><td>Reverse-DNS identifier. Must be globally unique.</td></tr>
+          <tr><td><code>name</code></td><td>string</td><td>yes</td><td>Human-readable display name.</td></tr>
+          <tr><td><code>version</code></td><td>string</td><td>yes</td><td>Semantic version (<code>MAJOR.MINOR.PATCH</code>).</td></tr>
+          <tr><td><code>type</code></td><td>string</td><td>yes</td><td><code>"app"</code>, <code>"driver"</code>, or <code>"firmware"</code>.</td></tr>
+          <tr><td><code>url</code></td><td>string</td><td>yes</td><td>HTTPS URL to the binary.</td></tr>
+          <tr><td><code>sha256</code></td><td>string</td><td>yes</td><td>Hex SHA-256 of the binary at <code>url</code>.</td></tr>
+          <tr><td><code>sig_url</code></td><td>string</td><td>no</td><td>URL to the <code>.sig</code> file (HMAC-SHA256 or Ed25519).</td></tr>
+          <tr><td><code>size_bytes</code></td><td>number</td><td>no</td><td>Download size hint for progress display.</td></tr>
+          <tr><td><code>permissions</code></td><td>array</td><td>no</td><td>Permission strings the app declares it needs.</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>no</td><td>Short description shown in the store UI.</td></tr>
+          <tr><td><code>author</code></td><td>string</td><td>no</td><td>Author name or organization.</td></tr>
+          <tr><td><code>min_os</code></td><td>string</td><td>no</td><td>Minimum ThistleOS version required.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Entry types</h3>
+
+    <p><span class="badge badge-purple">app</span> — A <code>.app.elf</code> file. Downloaded to <code>/sdcard/apps/</code>. The kernel's ELF loader runs it. Must implement <code>thistle_app_t</code>.</p>
+
+    <p><span class="badge badge-blue">driver</span> — A <code>.drv.elf</code> file. Downloaded to <code>/sdcard/drivers/</code>. Loaded on next boot, before app loading. Must export <code>driver_init()</code>.</p>
+
+    <p><span class="badge badge-yellow">firmware</span> — A full <code>.bin</code> firmware image. Downloaded to <code>/sdcard/update/thistle_os.bin</code>. The OTA subsystem picks it up on next boot and flashes it to <code>ota_1</code>. This is how ThistleOS updates itself over the air.</p>
+
+    <h2>Hosting your own catalog</h2>
+    <p>A catalog is just a static JSON file served over HTTPS. GitHub Pages is the easiest option:</p>
+
+    <ol class="steps">
+      <li>Create a GitHub repo (e.g., <code>myname/thistle-apps</code>)</li>
+      <li>Enable GitHub Pages from the <code>docs/</code> directory or root</li>
+      <li>Add your <code>catalog.json</code> and binary files to the repo</li>
+      <li>Your catalog URL is <code>https://myname.github.io/thistle-apps/catalog.json</code></li>
+    </ol>
+
+    <p>The device will periodically fetch this URL (configurable in <code>/sdcard/config/system.json</code>) and check for newer versions of installed entries.</p>
+
+    <div class="callout tip">
+      <div class="callout-title">Tip</div>
+      Name your binaries with versions in the filename (e.g., <code>chat-1.2.0.app.elf</code>) so that multiple versions can coexist in the same directory.
+    </div>
+
+    <h2>Catalog caching</h2>
+    <p>The device caches the last-fetched catalog on the SD card at <code>/sdcard/data/catalog_cache.json</code>. This allows the app store UI to show available apps even when WiFi is not connected. The cache is invalidated when the device successfully fetches a newer version (determined by the <code>updated</code> field).</p>
+
+    <h2>Download and verification flow</h2>
+    <div class="diagram">User selects entry in App Store UI
+     &#x2502;
+     &#x25BC;
+[1] HTTP GET binary URL
+    &#x2502;
+    &#x25BC;
+[2] Compute SHA-256 of downloaded bytes
+    &#x251c;&#x2500; SHA-256 mismatch? &#x2500;&#x25BA; abort, show error, delete partial file
+    &#x2502;
+    &#x25BC;
+[3] sig_url present?
+    &#x251c;&#x2500; NO &#x2500;&#x25BA; install with zero permissions (unsigned)
+    &#x2502;
+    &#x25BC;
+[4] HTTP GET sig_url
+    &#x2502;
+    &#x25BC;
+[5] Verify signature against developer public key
+    &#x251c;&#x2500; Signature invalid? &#x2500;&#x25BA; abort, delete binary, show error
+    &#x2502;
+    &#x25BC;
+[6] Grant declared permissions to the app
+    &#x2502;
+    &#x25BC;
+[7] Copy binary to /sdcard/apps/ (or /drivers/ or /update/)
+    &#x2502;
+    &#x25BC;
+[8] Notify user — app appears in launcher on next launch</div>
+
+    <h2>Publishing apps: step by step</h2>
+
+    <ol class="steps">
+      <li>Build your <code>.app.elf</code> — see <a href="app-development.html">Building Apps</a></li>
+      <li>Compute the SHA-256: <code>sha256sum my_app.app.elf</code></li>
+      <li>Sign the binary: <code>thistle-sign --key dev_key.pem my_app.app.elf</code> — produces <code>my_app.app.elf.sig</code></li>
+      <li>Upload both files to your HTTPS host (GitHub Pages, S3, Cloudflare Pages, etc.)</li>
+      <li>Add an entry to your <code>catalog.json</code> with the correct URL and SHA-256</li>
+      <li>Commit and push — devices will find the new entry on their next catalog refresh</li>
+    </ol>
+
+    <h2>Firmware updates via the app store</h2>
+    <p>Firmware updates work exactly like app downloads, but with <code>"type": "firmware"</code> and a <code>.bin</code> extension. The update flow:</p>
+
+    <ol class="steps">
+      <li>User opens App Store → sees "ThistleOS vX.Y.Z available"</li>
+      <li>User taps "Update" — firmware binary downloaded and verified</li>
+      <li>Binary written to <code>/sdcard/update/thistle_os.bin</code></li>
+      <li>Device reboots — Recovery OS checks SD card, finds the binary, flashes to <code>ota_1</code></li>
+      <li>Device boots into new firmware — <code>ota_mark_valid()</code> called to confirm success</li>
+    </ol>
+
+    <p>If the firmware entry's <code>sig_url</code> is present and the signature does not verify, the download is rejected before the file is written to the SD card.</p>
+
+    <div class="callout danger">
+      <div class="callout-title">Firmware signing is mandatory</div>
+      Unsigned firmware entries are rejected outright — the device will not install them regardless of the user's choice. Always sign firmware updates with your development key.
+    </div>
+
+    <h2>Adding the official catalog</h2>
+    <p>The official ThistleOS catalog is pre-configured in <code>/sdcard/config/system.json</code>:</p>
+
+    <pre><code>{
+  <span class="tok-string">"app_store"</span>: {
+    <span class="tok-string">"catalogs"</span>: [
+      <span class="tok-string">"https://wan0net.github.io/thistle-apps/catalog.json"</span>
+    ],
+    <span class="tok-string">"refresh_interval_hours"</span>: 12
+  }
+}</code></pre>
+
+    <p>To add a third-party catalog, append its URL to the <code>catalogs</code> array. The device merges entries from all catalogs. If two catalogs provide the same <code>id</code>, the entry with the higher version wins.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

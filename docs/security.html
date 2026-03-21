@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security &amp; Signing — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html" class="active">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Security</div>
+      <h1>Security &amp; Signing</h1>
+      <p class="lead">ThistleOS uses a layered security model: the Recovery OS verifies the main firmware, the kernel verifies apps and drivers, and each app's permissions are gated by a cryptographic signature from a trusted developer key.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/security.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Chain of trust</h2>
+    <div class="diagram">&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;  <span class="d-dim">eFuse</span>                                         &#x2502;
+&#x2502;  Hardware root of trust.  Never burned by        &#x2502;
+&#x2502;  ThistleOS (unless you explicitly opt in).        &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
+                          &#x2502;
+                          &#x25BC;
+&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;  <span class="d-green">Recovery OS</span> (ota_0)                            &#x2502;
+&#x2502;  Trusted base.  Verifies ota_1 before booting.  &#x2502;
+&#x2502;  SHA-256 + (optional) secure boot signature.    &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
+                          &#x2502;
+                          &#x25BC;
+&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;  <span class="d-blue">ThistleOS firmware</span> (ota_1)                     &#x2502;
+&#x2502;  Kernel verifies SHA-256 of each .app.elf and   &#x2502;
+&#x2502;  .drv.elf before loading.  Signature check for  &#x2502;
+&#x2502;  permission grants.                              &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;
+                          &#x2502;
+                          &#x25BC;
+&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;  <span class="d-purple">Apps and Drivers</span> (SD card)                     &#x2502;
+&#x2502;  Unsigned: zero permissions, isolated.           &#x2502;
+&#x2502;  Signed: declared permissions granted.           &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <h2>Signing scheme</h2>
+    <p>ThistleOS v0.1.0 uses <strong>HMAC-SHA256</strong> with a per-developer shared key stored in the kernel's NVS partition. The developer generates a key pair, registers the public key with the kernel (via a one-time NVS write), and signs binaries with the private key.</p>
+
+    <p>A planned upgrade to <strong>Ed25519</strong> asymmetric signatures is tracked in the roadmap. Ed25519 will allow the kernel to verify signatures using only the public key embedded in firmware, with no shared secret on the device.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>v0.1.0 (current)</th><th>v0.2.0 (planned)</th></tr></thead>
+        <tbody>
+          <tr><td>Algorithm</td><td>HMAC-SHA256</td><td>Ed25519</td></tr>
+          <tr><td>Key type</td><td>Shared secret (32 bytes)</td><td>Public/private key pair</td></tr>
+          <tr><td>Key storage on device</td><td>NVS (encrypted partition)</td><td>Public key only, in firmware</td></tr>
+          <tr><td>Developer workflow</td><td>Pre-shared key exchange</td><td>Publish public key; sign with private key</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Signing a binary (v0.1.0)</h3>
+    <pre><code><span class="tok-comment"># Generate a developer key (keep this secret)</span>
+thistle-keygen --output dev_key.bin
+
+<span class="tok-comment"># Sign an app</span>
+thistle-sign --key dev_key.bin my_app.app.elf
+<span class="tok-comment"># Produces: my_app.app.elf.sig</span>
+
+<span class="tok-comment"># Sign a driver</span>
+thistle-sign --key dev_key.bin my_driver.drv.elf
+<span class="tok-comment"># Produces: my_driver.drv.elf.sig</span>
+
+<span class="tok-comment"># Sign a firmware update</span>
+thistle-sign --key dev_key.bin thistle_os.bin
+<span class="tok-comment"># Produces: thistle_os.bin.sig</span></code></pre>
+
+    <h3>Registering a developer key on the device</h3>
+    <pre><code><span class="tok-comment"># One-time setup: flash developer key into NVS</span>
+thistle-register-key --port /dev/ttyACM0 --key dev_key.bin</code></pre>
+
+    <div class="callout danger">
+      <div class="callout-title">Keep your private key secure</div>
+      Anyone who obtains your private key can sign apps that run with full permissions on any device that trusts your key. Store it in a password manager or hardware security key, not in your source repository.
+    </div>
+
+    <h2>Permission system</h2>
+    <p>Permissions are a bitmask of <code>permission_t</code> values checked on every privileged syscall. The kernel maintains one bitmask per loaded app ID.</p>
+
+    <h3>How permissions are granted</h3>
+    <ol class="steps">
+      <li>App ELF contains a <code>thistle_app_t</code> struct with fields declaring required capabilities</li>
+      <li>The catalog entry for the app also lists the same permissions in its <code>permissions</code> array</li>
+      <li>During install, the kernel verifies the signature against the app's content</li>
+      <li>If valid, <code>permissions_grant(app_id, declared_perms)</code> is called</li>
+      <li>At runtime, every privileged syscall calls <code>permissions_check(app_id, required_perm)</code></li>
+    </ol>
+
+    <h3>How unsigned apps are sandboxed</h3>
+    <p>An app without a valid signature is loaded with <code>permissions_grant(app_id, 0)</code> — zero permissions. It can still call display and input syscalls (those are unpermissioned), but any attempt to access radio, GPS, storage, network, audio, or IPC returns <code>ESP_ERR_NOT_ALLOWED</code>.</p>
+
+    <p>The app itself is not prevented from running — it just cannot do anything sensitive. This is intentional: it allows unsigned apps to be useful (e.g., a calculator or a clock) while preventing them from silently transmitting location data or sending radio packets.</p>
+
+    <h2>OTA update verification</h2>
+    <p>The OTA flow has two levels of verification:</p>
+
+    <ol>
+      <li><strong>SHA-256</strong> — verified immediately after download, before writing to the SD card. A corrupt download is detected and discarded.</li>
+      <li><strong>Signature</strong> — verified before flashing to <code>ota_1</code>. A firmware image without a valid signature from the ThistleOS signing key is rejected outright.</li>
+    </ol>
+
+    <p>After a new firmware image boots successfully, it must call <code>ota_mark_valid()</code> within 30 seconds. If it does not, the ESP-IDF bootloader automatically rolls back to the previous partition on the next reset.</p>
+
+    <h2>Password vault encryption</h2>
+    <p>The built-in settings app includes a password vault. Vault entries are encrypted at rest on the SD card using:</p>
+
+    <ul>
+      <li><strong>Key derivation:</strong> PBKDF2-HMAC-SHA256 with 100,000 iterations and a random 16-byte salt stored alongside the ciphertext</li>
+      <li><strong>Encryption:</strong> AES-256-CBC with a random IV per entry</li>
+      <li><strong>Storage:</strong> <code>/sdcard/data/vault.enc</code></li>
+    </ul>
+
+    <p>The master password is never stored — only the derived key is used for encryption/decryption and is held in DRAM only while the vault app is open. Closing the vault app zeroes the in-memory key.</p>
+
+    <h2>Key management recommendations</h2>
+    <ul>
+      <li>Use a separate developer key per project or product. Do not reuse keys across unrelated applications.</li>
+      <li>Rotate keys periodically. When you rotate, distribute the new public key via a firmware update so that devices can verify future apps.</li>
+      <li>For production devices, consider burning the developer public key into eFuse so that it cannot be changed by a firmware update. See the eFuse section below.</li>
+      <li>Never commit private keys to version control. Use CI secrets or a hardware security module for signing in CI pipelines.</li>
+    </ul>
+
+    <h2>eFuse policy</h2>
+    <p>ThistleOS never burns eFuses by default. eFuse burning is a one-way operation — once a bit is set, it cannot be cleared. Burning the wrong value can permanently brick a device.</p>
+
+    <p>eFuse features available (but not enabled by default):</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Feature</th><th>eFuse</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Secure Boot v2</td><td><code>ABS_DONE_0</code></td><td>Bootloader only boots signed firmware. Requires burning the RSA-3072 or ECDSA public key into eFuse key block.</td></tr>
+          <tr><td>Flash Encryption</td><td><code>FLASH_CRYPT_CNT</code></td><td>Flash contents encrypted at rest. JTAG debugging disabled automatically.</td></tr>
+          <tr><td>JTAG Disable</td><td><code>JTAG_DISABLE</code></td><td>Permanently disables JTAG debugging. Useful for production units.</td></tr>
+          <tr><td>Read-Protect NVS Key</td><td>Key block protection bits</td><td>NVS encryption key cannot be read back via JTAG or software.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout danger">
+      <div class="callout-title">eFuse burning is permanent</div>
+      Do not burn eFuses on development hardware. Once burned, features like Secure Boot cannot be disabled. Only burn eFuses on production devices using a controlled, well-tested process.
+    </div>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

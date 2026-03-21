@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThistleOS — Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html" class="active">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div class="page-header">
+      <h1>ThistleOS</h1>
+      <p class="lead">An open-source operating system for ESP32-S3 devices. Dynamic app loading, swappable hardware drivers, LVGL UI, and LoRa mesh networking — all on a microcontroller.</p>
+      <a href="https://github.com/wan0net/esp32-os" class="edit-link">
+        &#9998; Edit on GitHub
+      </a>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">Status</div>
+      ThistleOS v0.1.0 is in active development. The kernel, HAL, and driver framework are stable. App signing and the online app store are still being finalized.
+    </div>
+
+    <h2>What is ThistleOS?</h2>
+    <p>ThistleOS is a micro operating system for the ESP32-S3, initially targeting the LilyGo T-Deck Pro. It brings concepts from mainstream operating systems — loadable apps, a hardware abstraction layer, app permissions, and an app store — down to a device with 512 KB of internal SRAM and 8 MB of PSRAM.</p>
+
+    <p>Key design decisions:</p>
+    <ul>
+      <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel.</li>
+      <li><strong>Apps are ELF files on an SD card.</strong> The kernel's ELF loader resolves symbols against a syscall table at runtime. No recompilation of the OS needed to install an app.</li>
+      <li><strong>BSD 3-Clause throughout.</strong> No GPL components in the ThistleOS core; swap to any commercial use case without license headaches.</li>
+      <li><strong>Recovery OS is Rust.</strong> A separate, minimal firmware in <code>ota_0</code> that can reflash the main OS without a programmer.</li>
+    </ul>
+
+    <h2>Quick Start</h2>
+    <p>Prerequisites: <a href="https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/">ESP-IDF v5.3+</a> installed and on your <code>PATH</code>.</p>
+
+    <pre><code><span class="tok-comment"># Clone the repo</span>
+git clone https://github.com/wan0net/esp32-os
+cd esp32-os
+
+<span class="tok-comment"># Build for the default board (T-Deck Pro)</span>
+idf.py build
+
+<span class="tok-comment"># Flash and open serial monitor</span>
+idf.py -p /dev/ttyACM0 flash monitor</code></pre>
+
+    <p>The SD card layout is documented in <code>sdcard_layout/</code>. Copy the directory contents to a FAT32 SD card and insert it before first boot.</p>
+
+    <h2>Documentation sections</h2>
+    <div class="card-grid">
+      <a href="architecture.html" class="card">
+        <div class="card-icon">&#9889;</div>
+        <div class="card-title">Architecture</div>
+        <div class="card-desc">HAL vtable design, kernel modules, memory layout, boot sequence, driver loading.</div>
+      </a>
+      <a href="app-development.html" class="card">
+        <div class="card-icon">&#128421;</div>
+        <div class="card-title">Building Apps</div>
+        <div class="card-desc">App SDK, syscalls, LVGL UI patterns, packaging as .app.elf, signing, publishing.</div>
+      </a>
+      <a href="driver-development.html" class="card">
+        <div class="card-icon">&#128268;</div>
+        <div class="card-title">Building Drivers</div>
+        <div class="card-desc">HAL vtable interfaces, step-by-step display driver, testing, signing.</div>
+      </a>
+      <a href="app-store.html" class="card">
+        <div class="card-icon">&#127976;</div>
+        <div class="card-title">App Store</div>
+        <div class="card-desc">Catalog JSON schema, hosting your own catalog, download and verification flow.</div>
+      </a>
+      <a href="board-support.html" class="card">
+        <div class="card-icon">&#128290;</div>
+        <div class="card-title">Board Support</div>
+        <div class="card-desc">Adding new hardware: pin assignments, board component, driver registration.</div>
+      </a>
+      <a href="security.html" class="card">
+        <div class="card-icon">&#128274;</div>
+        <div class="card-title">Security</div>
+        <div class="card-desc">Chain of trust, signing scheme, permissions, OTA verification, key management.</div>
+      </a>
+      <a href="recovery.html" class="card">
+        <div class="card-icon">&#128260;</div>
+        <div class="card-title">Recovery OS</div>
+        <div class="card-desc">Rust-based recovery firmware, captive portal, UART console, building from source.</div>
+      </a>
+    </div>
+
+    <h2>Repository layout</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Path</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>components/thistle_hal/</code></td><td>HAL interface headers — pure vtable structs, no implementation</td></tr>
+          <tr><td><code>components/drv_*/</code></td><td>One component per hardware driver (display, radio, GPS, etc.)</td></tr>
+          <tr><td><code>components/board_*/</code></td><td>Board definitions — wire drivers to HAL, define pin numbers</td></tr>
+          <tr><td><code>components/kernel/</code></td><td>App manager, driver manager, ELF loader, IPC, permissions, OTA</td></tr>
+          <tr><td><code>components/ui/</code></td><td>LVGL window manager, status bar, toast notifications, themes</td></tr>
+          <tr><td><code>components/apps_builtin/</code></td><td>Built-in apps: Launcher, Messenger, Navigator, Notes, Reader, Settings</td></tr>
+          <tr><td><code>components/shim/</code></td><td>Compatibility shims for MeshCore and Arduino-style firmware</td></tr>
+          <tr><td><code>app_sdk/</code></td><td>SDK for third-party app developers — headers + CMake helpers</td></tr>
+          <tr><td><code>recovery/</code></td><td>Recovery OS — Rust + esp-rs, lives in <code>ota_0</code></td></tr>
+          <tr><td><code>sdcard_layout/</code></td><td>Template for the SD card — apps/, drivers/, themes/, config/</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Hardware: LilyGo T-Deck Pro</h2>
+    <p>The primary supported board is the <strong>LilyGo T-Deck Pro</strong>, an ESP32-S3 device with:</p>
+    <ul>
+      <li>3.1" e-paper display (GDEQ031T10, 300×168, partial refresh)</li>
+      <li>Physical QWERTY keyboard (TCA8418 key matrix)</li>
+      <li>Capacitive touch (CST328)</li>
+      <li>SX1262 LoRa radio (915 MHz / 868 MHz)</li>
+      <li>u-blox MIA-M10Q GPS</li>
+      <li>PCM5102A audio DAC</li>
+      <li>BHI260AP IMU</li>
+      <li>4G LTE modem (A7682E, optional)</li>
+      <li>microSD card slot</li>
+    </ul>
+    <p>See <a href="board-support.html">Board Support</a> for how to port ThistleOS to other ESP32-S3 boards.</p>
+
+    <h2>License</h2>
+    <p>ThistleOS is released under the <strong>BSD 3-Clause License</strong>. All source files in <code>components/</code>, <code>app_sdk/</code>, and <code>recovery/</code> carry the SPDX identifier <code>BSD-3-Clause</code>. Third-party managed components (LVGL, RadioLib, esp-modem) retain their own licenses.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

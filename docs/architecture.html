@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html" class="active">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Architecture</div>
+      <h1>Architecture</h1>
+      <p class="lead">A layered design: HAL interfaces at the bottom, drivers implementing them, a kernel coordinating everything, and apps at the top — with each layer knowing nothing about the one above it.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/architecture.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Layer diagram</h2>
+    <div class="diagram">&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
+&#x2502;  <span class="d-purple">Apps (.app.elf)  — PSRAM, loaded at runtime</span>        &#x2502;
+&#x2502;  launcher / messenger / navigator / your-app        &#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-blue">Syscall table  — symbol resolution for ELF loader</span>    &#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-blue">Kernel</span>                                                &#x2502;
+&#x2502;  app_manager  driver_manager  ipc  event_bus  ota    &#x2502;
+&#x2502;  wifi_manager  ble_manager  permissions  elf_loader  &#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-blue">UI (LVGL 9)</span>                                           &#x2502;
+&#x2502;  window_manager  statusbar  theme  toast  app_switcher&#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-green">HAL registry  — hal_get_registry() returns all drivers</span>&#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-green">Drivers (drv_*)</span>                                       &#x2502;
+&#x2502;  epaper  kbd  touch  sx1262  gps  audio  imu  sdcard  &#x2502;
+&#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
+&#x2502;  <span class="d-green">Board definition (board_tdeck_pro)</span>                    &#x2502;
+&#x2502;  pin assignments, bus init, driver registration       &#x2502;
+&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+
+    <h2>HAL vtable design</h2>
+    <p>Every piece of hardware is represented by a C struct of function pointers — a vtable. The kernel calls these function pointers without knowing which chip is behind them. A display driver for an SSD1306 OLED and one for a GDEQ031T10 e-paper display both implement the same <code>hal_display_driver_t</code> interface.</p>
+
+    <pre><code><span class="tok-comment">// components/thistle_hal/include/hal/display.h</span>
+<span class="tok-keyword">typedef</span> <span class="tok-keyword">struct</span> {
+    <span class="tok-type">esp_err_t</span> (*<span class="tok-fn">init</span>)(<span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *config);
+    <span class="tok-keyword">void</span>      (*<span class="tok-fn">deinit</span>)(<span class="tok-keyword">void</span>);
+    <span class="tok-type">esp_err_t</span> (*<span class="tok-fn">flush</span>)(<span class="tok-keyword">const</span> <span class="tok-type">hal_area_t</span> *area, <span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *color_data);
+    <span class="tok-type">esp_err_t</span> (*<span class="tok-fn">set_brightness</span>)(<span class="tok-type">uint8_t</span> percent);
+    <span class="tok-type">esp_err_t</span> (*<span class="tok-fn">sleep</span>)(<span class="tok-type">bool</span> enter);
+    <span class="tok-type">esp_err_t</span> (*<span class="tok-fn">set_refresh_mode</span>)(<span class="tok-type">hal_display_refresh_mode_t</span> mode);
+    <span class="tok-type">uint16_t</span>   width;
+    <span class="tok-type">uint16_t</span>   height;
+    <span class="tok-type">hal_display_type_t</span> type;
+    <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *name;
+} <span class="tok-type">hal_display_driver_t</span>;</code></pre>
+
+    <p>A driver exports a single function returning a <code>const</code> pointer to its vtable. It never allocates — the vtable lives in flash, and the driver state lives in the driver's own static variables or in a config struct passed at registration.</p>
+
+    <pre><code><span class="tok-comment">// How a driver exposes itself</span>
+<span class="tok-keyword">const</span> <span class="tok-type">hal_display_driver_t</span> *<span class="tok-fn">drv_epaper_gdeq031t10_get</span>(<span class="tok-keyword">void</span>);
+
+<span class="tok-comment">// How a board registers it</span>
+<span class="tok-fn">hal_display_register</span>(<span class="tok-fn">drv_epaper_gdeq031t10_get</span>(), &amp;epaper_config);</code></pre>
+
+    <h3>HAL vtable interfaces</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Interface</th><th>Header</th><th>Key functions</th></tr></thead>
+        <tbody>
+          <tr><td><code>hal_display_driver_t</code></td><td><code>hal/display.h</code></td><td>init, flush, set_brightness, sleep, set_refresh_mode</td></tr>
+          <tr><td><code>hal_input_driver_t</code></td><td><code>hal/input.h</code></td><td>init, register_callback, poll</td></tr>
+          <tr><td><code>hal_radio_driver_t</code></td><td><code>hal/radio.h</code></td><td>init, set_frequency, set_tx_power, send, start_receive</td></tr>
+          <tr><td><code>hal_gps_driver_t</code></td><td><code>hal/gps.h</code></td><td>init, enable, get_position</td></tr>
+          <tr><td><code>hal_audio_driver_t</code></td><td><code>hal/audio.h</code></td><td>init, play_pcm, set_volume</td></tr>
+          <tr><td><code>hal_power_driver_t</code></td><td><code>hal/power.h</code></td><td>init, get_battery_mv, get_battery_pct</td></tr>
+          <tr><td><code>hal_imu_driver_t</code></td><td><code>hal/imu.h</code></td><td>init, get_accel, get_gyro, register_gesture_cb</td></tr>
+          <tr><td><code>hal_storage_driver_t</code></td><td><code>hal/storage.h</code></td><td>init, mount, unmount (POSIX FS after mount)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Kernel modules</h2>
+
+    <h3>app_manager</h3>
+    <p>Tracks all running apps. Each app has a numeric ID, an <code>app_manifest_t</code> (parsed from its ELF <code>.thistle_app</code> section), a FreeRTOS task handle, and a permission bitmask. Provides start, pause, resume, and destroy lifecycle hooks.</p>
+
+    <h3>driver_manager</h3>
+    <p>Calls <code>board_init()</code> — which registers drivers with the HAL — then calls <code>init()</code> on every registered driver in registration order. On failure, it logs the error and skips that driver; the rest of the system continues.</p>
+
+    <h3>ELF loader</h3>
+    <p>Loads position-independent ELF files from the SD card into PSRAM. Symbol resolution walks the syscall table by name — each entry is a <code>{"name", func_ptr}</code> pair. If an app references an unknown symbol the load fails cleanly. The loader uses the Espressif <code>espressif/elf_loader</code> managed component under the hood.</p>
+
+    <pre><code><span class="tok-comment">// Load and start an app at runtime</span>
+<span class="tok-type">elf_app_handle_t</span> handle;
+<span class="tok-type">esp_err_t</span> ret = <span class="tok-fn">elf_app_load</span>(<span class="tok-string">"/sdcard/apps/chat.app.elf"</span>, &amp;handle);
+<span class="tok-keyword">if</span> (ret == <span class="tok-macro">ESP_OK</span>) {
+    <span class="tok-fn">elf_app_start</span>(handle);
+}</code></pre>
+
+    <h3>IPC (inter-process communication)</h3>
+    <p>Apps communicate through typed messages. Each message carries a source app ID, destination app ID (0 = broadcast), a 32-bit type, and up to 256 bytes of payload. Messages are delivered via FreeRTOS queues — queue depth is 16 per recipient.</p>
+
+    <pre><code><span class="tok-comment">// Send a message to app 0x02</span>
+<span class="tok-type">ipc_message_t</span> msg = {
+    .src_app  = my_app_id,
+    .dst_app  = 0x02,
+    .msg_type = MSG_TYPE_LOCATION,
+    .data_len = <span class="tok-keyword">sizeof</span>(location_data),
+};
+<span class="tok-fn">memcpy</span>(msg.data, &amp;location_data, <span class="tok-keyword">sizeof</span>(location_data));
+<span class="tok-fn">ipc_send</span>(&amp;msg);</code></pre>
+
+    <h3>Event bus</h3>
+    <p>A publish/subscribe system layered on top of IPC. Apps subscribe to event types (e.g., <code>EVT_BATTERY_LOW</code>, <code>EVT_GPS_FIX</code>, <code>EVT_RADIO_RX</code>) and receive callbacks when those events fire. The kernel itself publishes hardware events from driver interrupt handlers.</p>
+
+    <h3>Permissions</h3>
+    <p>Every app has a <code>permission_set_t</code> bitmask. When an app calls a syscall that requires a permission (e.g., <code>SYSCALL_RADIO_SEND</code> requires <code>PERM_RADIO</code>), the kernel checks the bitmask before dispatching. Unsigned apps loaded from the SD card get no permissions by default — they must be declared in the app manifest and approved.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Flag</th><th>Value</th><th>Grants access to</th></tr></thead>
+        <tbody>
+          <tr><td><code>PERM_RADIO</code></td><td><code>1 &lt;&lt; 0</code></td><td>LoRa radio send/receive</td></tr>
+          <tr><td><code>PERM_GPS</code></td><td><code>1 &lt;&lt; 1</code></td><td>GPS location data</td></tr>
+          <tr><td><code>PERM_STORAGE</code></td><td><code>1 &lt;&lt; 2</code></td><td>SD card file access</td></tr>
+          <tr><td><code>PERM_NETWORK</code></td><td><code>1 &lt;&lt; 3</code></td><td>WiFi / BLE / 4G cellular</td></tr>
+          <tr><td><code>PERM_AUDIO</code></td><td><code>1 &lt;&lt; 4</code></td><td>Audio playback and recording</td></tr>
+          <tr><td><code>PERM_SYSTEM</code></td><td><code>1 &lt;&lt; 5</code></td><td>System settings, reboot, OTA</td></tr>
+          <tr><td><code>PERM_IPC</code></td><td><code>1 &lt;&lt; 6</code></td><td>Inter-process messaging</td></tr>
+          <tr><td><code>PERM_ALL</code></td><td><code>0x7F</code></td><td>All of the above (built-in apps only)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>wifi_manager / ble_manager</h3>
+    <p><code>wifi_manager</code> wraps ESP-IDF's WiFi station mode: scan, connect, disconnect, RSSI, IP, and NTP time sync. <code>ble_manager</code> is planned for a future release. Both are exposed to apps through the syscall table under the <code>PERM_NETWORK</code> permission.</p>
+
+    <h3>OTA</h3>
+    <p>Wraps ESP-IDF's <code>esp_https_ota</code>. The kernel can update itself from an SD card file (<code>/sdcard/update/thistle_os.bin</code>) or from an HTTP URL. The OTA module writes to the inactive partition (<code>ota_1</code>) and reboots. If the new firmware fails to call <code>ota_mark_valid()</code> within 30 seconds, the bootloader rolls back.</p>
+
+    <h2>Memory layout</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Region</th><th>Size</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td>Internal DRAM</td><td>~320 KB</td><td>FreeRTOS stacks, kernel BSS, ISR handlers, time-critical code</td></tr>
+          <tr><td>PSRAM (SPIRAM)</td><td>8 MB</td><td>LVGL frame buffers, loaded app ELFs, app heap allocations</td></tr>
+          <tr><td>Flash — <code>ota_0</code></td><td>128 KB</td><td>Recovery OS (Rust)</td></tr>
+          <tr><td>Flash — <code>ota_1</code></td><td>~3.5 MB</td><td>Main ThistleOS firmware</td></tr>
+          <tr><td>Flash — <code>nvs</code></td><td>24 KB</td><td>WiFi credentials, app settings (ESP-IDF NVS)</td></tr>
+          <tr><td>SD card</td><td>unlimited</td><td>Apps (.app.elf), drivers (.drv.elf), themes, user data</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Apps are loaded into PSRAM via <code>heap_caps_malloc(size, MALLOC_CAP_SPIRAM)</code>. Each app's ELF segments (text + data + BSS) are mapped there. The kernel's text and read-only data live in flash and are executed via the instruction cache.</p>
+
+    <h2>Boot sequence</h2>
+    <div class="diagram">Power on / Reset
+     &#x2502;
+     &#x25BC;
+[Bootloader (flash)] &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500; checks OTA state
+     &#x2502;
+     &#x251c;&#x2500; ota_1 valid? &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500; YES &#x2500;&#x25BA; [ThistleOS main firmware]
+     &#x2502;                                              &#x2502;
+     &#x2514;&#x2500; ota_1 missing / invalid &#x2500;&#x25BA; [Recovery OS]   &#x25BC;
+                                             kernel_init()
+                                              &#x2502;
+                                              &#x251c;&#x2500; syscall_table_init()
+                                              &#x251c;&#x2500; permissions_init()
+                                              &#x251c;&#x2500; driver_manager_init()
+                                              &#x2502;    &#x2514;&#x2500; board_init()
+                                              &#x2502;        &#x251c;&#x2500; spi_bus_initialize()
+                                              &#x2502;        &#x251c;&#x2500; i2c_new_master_bus()
+                                              &#x2502;        &#x2514;&#x2500; hal_*_register() x8
+                                              &#x251c;&#x2500; driver_manager_start_all()
+                                              &#x251c;&#x2500; elf_loader_init()
+                                              &#x251c;&#x2500; ui_init()  (LVGL)
+                                              &#x251c;&#x2500; load SD card .drv.elf files
+                                              &#x251c;&#x2500; launch launcher_app
+                                              &#x2514;&#x2500; kernel_run()  (never returns)</div>
+
+    <h2>Driver loading: compiled-in vs SD card</h2>
+    <p>ThistleOS supports two driver deployment modes:</p>
+
+    <p><strong>Compiled-in drivers</strong> (the default): The driver component is listed in the board component's <code>CMakeLists.txt</code> as a <code>REQUIRES</code> dependency. The linker includes it in the firmware binary. <code>board_init()</code> calls <code>drv_*_get()</code> and passes the vtable directly to <code>hal_*_register()</code>. Zero overhead, zero startup latency, no SD card needed.</p>
+
+    <p><strong>Runtime drivers</strong> (SD card <code>.drv.elf</code>): During <code>kernel_init()</code>, after built-in drivers are registered, the ELF loader scans <code>/sdcard/drivers/</code> and loads each <code>.drv.elf</code> it finds. Each file must export a <code>driver_init()</code> function (its ELF entry point). That function calls <code>hal_*_register()</code> — the same registration functions used by built-in drivers, exposed through the syscall table.</p>
+
+    <div class="callout tip">
+      <div class="callout-title">Tip</div>
+      Runtime drivers let you ship a display driver update without reflashing the OS. Drop a new <code>drv_oled.drv.elf</code> on the SD card and reboot.
+    </div>
+
+    <h2>LVGL UI framework</h2>
+    <p>ThistleOS uses LVGL 9 via the Espressif <code>esp_lvgl_port</code> managed component. The UI layer registers the display driver and input drivers with LVGL during <code>ui_init()</code> by reading them from the HAL registry.</p>
+
+    <p>Apps create LVGL objects (widgets) directly — LVGL symbols are exported through the syscall table, so <code>lv_label_create()</code>, <code>lv_obj_set_style_*</code>, and all other LVGL functions are available to dynamically loaded apps without being duplicated in every ELF.</p>
+
+    <p>The window manager assigns each app a top-level <code>lv_obj_t</code> container. When an app is paused, its container is hidden; when resumed, it is shown. This gives instant task switching without rebuilding the widget tree.</p>
+
+    <p>The e-paper display (<code>HAL_DISPLAY_TYPE_EPAPER</code>) gets special treatment: the epaper_refresh module coalesces LVGL flush calls and decides whether to issue a fast, partial, or full panel refresh based on how many pixels changed and when the last full refresh happened.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

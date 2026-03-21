@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recovery OS — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html" class="active">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Recovery OS</div>
+      <h1>Recovery OS</h1>
+      <p class="lead">A minimal Rust firmware in <code>ota_0</code> that can reinstall ThistleOS without a programmer — via SD card, WiFi, or the UART console.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/recovery.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Purpose and design</h2>
+    <p>The Recovery OS occupies the <code>ota_0</code> partition — a 128 KB slot that the ESP-IDF bootloader can always fall back to. Its job is simple: make sure there is a working ThistleOS in <code>ota_1</code>. If there is not, it provides a way to install one.</p>
+
+    <p>Key design choices:</p>
+    <ul>
+      <li><strong>Rust + esp-rs</strong> — smaller binary than equivalent C code, and memory safety means fewer panic-class bugs in the one piece of code that must always work.</li>
+      <li><strong>No LVGL</strong> — the recovery UI is a captive portal web page served over WiFi, viewable on any phone or laptop. The e-paper display shows status messages via raw framebuffer writes.</li>
+      <li><strong>No SD card required</strong> — if the SD card is missing or corrupt, recovery can still download firmware over WiFi.</li>
+      <li><strong>UART console as fallback</strong> — if WiFi is not available, a serial console provides the same commands.</li>
+    </ul>
+
+    <h2>Boot flow</h2>
+    <div class="diagram">Power on
+  &#x2502;
+  &#x25BC;
+[ESP-IDF bootloader]
+  &#x251c;&#x2500; ota_1 marked valid? &#x2500;&#x25BA; YES &#x2500;&#x25BA; Boot ThistleOS (done)
+  &#x2502;
+  &#x2514;&#x2500; NO &#x2500;&#x25BA; Boot Recovery OS (ota_0)
+                     &#x2502;
+                     &#x25BC;
+          [Step 1] Check ota_1 partition state
+          &#x251c;&#x2500; Valid &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25BA; boot_ota1() — reboot into main OS
+          &#x251c;&#x2500; PendingVerify &#x2500;&#x25BA; boot_ota1() — let it verify itself
+          &#x2514;&#x2500; Invalid / NotFound &#x2500;&#x25BA; continue recovery
+                     &#x2502;
+                     &#x25BC;
+          [Step 2] Check SD card for firmware
+          &#x251c;&#x2500; /sdcard/update/thistle_os.bin found?
+          &#x2502;   &#x2514;&#x2500; YES &#x2500;&#x25BA; flash to ota_1 &#x2500;&#x25BA; reboot
+          &#x2514;&#x2500; NO &#x2500;&#x25BA; continue
+                     &#x2502;
+                     &#x25BC;
+          [Step 3] Start WiFi AP "ThistleOS-Recovery"
+          [Step 4] Start HTTP captive portal (192.168.4.1)
+          [Step 5] Start UART console loop
+                     &#x2502;
+                     &#x25BC; (user action via web or UART)
+          download_and_flash(CATALOG_URL)
+                     &#x2502;
+                     &#x25BC;
+          Reboot into ThistleOS</div>
+
+    <h2>Captive portal web UI</h2>
+    <p>When Recovery OS starts its WiFi AP, any device that connects to <strong>ThistleOS-Recovery</strong> (open network, no password) is automatically redirected to the captive portal. The portal is a single self-contained HTML page served from flash — no SD card needed.</p>
+
+    <p>The portal provides three functions:</p>
+    <ol>
+      <li><strong>WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP).</li>
+      <li><strong>Download &amp; Install</strong> — fetches the latest ThistleOS from the official catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>), streams it to flash, and reboots.</li>
+      <li><strong>Status / Reboot</strong> — shows current recovery state; reboots the device.</li>
+    </ol>
+
+    <p>The portal design reuses the same link42 dark theme as these docs:</p>
+
+    <div class="callout info">
+      <div class="callout-title">Captive portal redirect paths</div>
+      iOS, Android, and Windows all use different URLs to detect captive portals. The Recovery OS handles <code>/generate_204</code> (Android), <code>/hotspot-detect.html</code> (iOS), and <code>/connecttest.txt</code> (Windows), redirecting all of them to <code>/</code>.
+    </div>
+
+    <h2>UART console commands</h2>
+    <p>Connect at 115200 baud, 8N1. Hit Enter after each command.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>help</code></td><td>Show available commands</td></tr>
+          <tr><td><code>status</code></td><td>Recovery version, WiFi state, ota_1 state, SD firmware presence</td></tr>
+          <tr><td><code>scan</code></td><td>Scan for WiFi networks and list up to 15 results with RSSI and channel</td></tr>
+          <tr><td><code>connect SSID,PASS</code></td><td>Connect to a WiFi network (WPA2). No spaces in SSID or password.</td></tr>
+          <tr><td><code>download</code></td><td>Download and install ThistleOS from the app store catalog (requires WiFi)</td></tr>
+          <tr><td><code>reboot</code></td><td>Restart the device</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Example session:</p>
+    <pre><code>recovery> status
+Recovery v0.1.0
+WiFi AP: ThistleOS-Recovery (192.168.4.1)
+WiFi STA: disconnected
+ota_1: Invalid
+SD card firmware: false
+
+recovery> scan
+Scanning...
+   1. HomeNetwork                     -52 dBm  ch 6  [secured]
+   2. Neighbors-5GHz                  -71 dBm  ch44  [secured]
+Found 2 networks
+
+recovery> connect HomeNetwork,mypassword
+Connecting to 'HomeNetwork'...
+Connected!
+IP: 192.168.1.42
+
+recovery> download
+Downloading firmware from https://wan0net.github.io/thistle-apps/catalog.json...
+Firmware installed! Rebooting...</code></pre>
+
+    <h2>REST API endpoints</h2>
+    <p>The captive portal web server also exposes a small REST API for scripted recovery:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/</code></td><td>Captive portal HTML page</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/status</code></td><td>JSON: version, mode, ota1 state, sd_firmware</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/wifi/connect</code></td><td>Body: <code>{"ssid":"...","password":"..."}</code>. Returns <code>{"ok":true,"ip":"..."}</code></td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/ota/download</code></td><td>Triggers firmware download from catalog. Returns <code>{"ok":true}</code> then reboots.</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/reboot</code></td><td>Reboots the device after 1 second.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Building from source</h2>
+    <p>The Recovery OS is a standard <code>esp-idf-svc</code> Rust project. You need:</p>
+    <ul>
+      <li>Rust toolchain with the <code>xtensa-esp32s3-espidf</code> target</li>
+      <li><code>espup</code> (Espressif's Rust toolchain installer)</li>
+    </ul>
+
+    <pre><code><span class="tok-comment"># Install espup and the Xtensa Rust toolchain</span>
+cargo install espup
+espup install
+
+<span class="tok-comment"># Activate the toolchain in your shell</span>
+. $HOME/export-esp.sh
+
+<span class="tok-comment"># Build the recovery firmware</span>
+cd recovery
+cargo build --release
+
+<span class="tok-comment"># Flash to ota_0 partition specifically</span>
+espflash flash --partition-table partitions.csv \
+    --partition ota_0 \
+    target/xtensa-esp32s3-espidf/release/thistleos-recovery</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">Toolchain</div>
+      The Recovery OS uses <code>esp-idf-svc</code> which builds a vendored ESP-IDF internally. The first build takes several minutes and requires internet access to download the ESP-IDF toolchain managed by <code>.embuild/</code>.
+    </div>
+
+    <h2>Source layout</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>File</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>recovery/src/main.rs</code></td><td>Boot sequence, WiFi AP setup, UART console loop</td></tr>
+          <tr><td><code>recovery/src/recovery_ota.rs</code></td><td><code>check_ota1()</code>, <code>check_sd_firmware()</code>, <code>apply_sd_firmware()</code>, <code>download_and_flash()</code></td></tr>
+          <tr><td><code>recovery/src/recovery_web.rs</code></td><td>Captive portal HTML (embedded as a <code>&amp;str</code>), HTTP handler registration</td></tr>
+          <tr><td><code>recovery/Cargo.toml</code></td><td>Crate dependencies: <code>esp-idf-svc</code>, <code>esp-idf-hal</code>, <code>esp-idf-sys</code>, <code>anyhow</code></td></tr>
+          <tr><td><code>recovery/build.rs</code></td><td>ESP-IDF build integration</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Building Apps — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html" class="active">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Building Apps</div>
+      <h1>Building Apps</h1>
+      <p class="lead">Apps are position-independent ELF files that live on the SD card. The kernel loads them at runtime, resolves syscall symbols, and runs them in their own FreeRTOS task.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/app-development.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">App SDK</div>
+      Everything you need is in <code>app_sdk/</code>. Copy that directory into your project, or reference it from a shared location. No separate installation step.
+    </div>
+
+    <h2>App SDK overview</h2>
+    <p>The App SDK consists of two things:</p>
+    <ul>
+      <li><code>app_sdk/include/thistle_app.h</code> — the single header your app includes. Declares <code>thistle_app_t</code>, the <code>THISTLE_APP()</code> macro, and all available syscall stubs.</li>
+      <li><code>app_sdk/CMakeLists.txt</code> — provides the <code>thistle_app()</code> CMake function that compiles your source files into a <code>.app.elf</code> with the correct flags.</li>
+    </ul>
+
+    <p>Your app does <strong>not</strong> link against ESP-IDF, FreeRTOS, or the C standard library. All system services are accessed through the syscall table that the kernel exports at runtime. This keeps your ELF small and independent of the firmware version.</p>
+
+    <h2>App entry point: <code>thistle_app_t</code></h2>
+    <p>Every app defines one <code>thistle_app_t</code> struct and passes it to the <code>THISTLE_APP()</code> macro. The macro places a pointer to your struct in a special ELF section (<code>.thistle_app</code>) that the kernel reads during loading.</p>
+
+    <pre><code><span class="tok-keyword">typedef</span> <span class="tok-keyword">struct</span> {
+    <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *id;               <span class="tok-comment">// reverse-DNS, e.g. "com.example.myapp"</span>
+    <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *name;             <span class="tok-comment">// display name shown in launcher</span>
+    <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *version;          <span class="tok-comment">// semver string "1.0.0"</span>
+    <span class="tok-type">bool</span>        allow_background;  <span class="tok-comment">// keep running when another app is foreground</span>
+    <span class="tok-keyword">int</span>        (*<span class="tok-fn">on_create</span>)(<span class="tok-keyword">void</span>);   <span class="tok-comment">// allocate resources; return 0 = OK</span>
+    <span class="tok-keyword">void</span>       (*<span class="tok-fn">on_start</span>)(<span class="tok-keyword">void</span>);    <span class="tok-comment">// build UI, start tasks</span>
+    <span class="tok-keyword">void</span>       (*<span class="tok-fn">on_pause</span>)(<span class="tok-keyword">void</span>);    <span class="tok-comment">// another app came to foreground</span>
+    <span class="tok-keyword">void</span>       (*<span class="tok-fn">on_resume</span>)(<span class="tok-keyword">void</span>);   <span class="tok-comment">// back in foreground</span>
+    <span class="tok-keyword">void</span>       (*<span class="tok-fn">on_destroy</span>)(<span class="tok-keyword">void</span>);  <span class="tok-comment">// user closed the app; free everything</span>
+} <span class="tok-type">thistle_app_t</span>;</code></pre>
+
+    <h3>Lifecycle</h3>
+    <div class="diagram">install (copy .app.elf to /sdcard/apps/)
+     &#x2502;
+     &#x25BC;
+on_create() &#x2500;&#x2500; allocate resources, return 0 on success
+     &#x2502;
+     &#x25BC;
+on_start()  &#x2500;&#x2500; build LVGL UI, register input callback
+     &#x2502;
+     &#x251c;&#x2500;&#x2500;&#x2500;&#x2500; user switches away &#x2500;&#x25BA; on_pause()
+     &#x2502;
+     &#x251c;&#x2500;&#x2500;&#x2500;&#x2500; user switches back &#x2500;&#x25BA; on_resume()
+     &#x2502;
+     &#x25BC;
+on_destroy() &#x2500;&#x2500; user closed app; free LVGL objects, free memory</div>
+
+    <h2>Available syscalls</h2>
+
+    <h3>System</h3>
+    <pre><code><span class="tok-keyword">void</span>     <span class="tok-fn">thistle_log</span>(<span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *tag, <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *fmt, ...);
+<span class="tok-type">uint32_t</span> <span class="tok-fn">thistle_millis</span>(<span class="tok-keyword">void</span>);
+<span class="tok-keyword">void</span>     <span class="tok-fn">thistle_delay</span>(<span class="tok-type">uint32_t</span> ms);
+<span class="tok-keyword">void</span>    *<span class="tok-fn">thistle_malloc</span>(<span class="tok-type">size_t</span> size);  <span class="tok-comment">// allocates from PSRAM</span>
+<span class="tok-keyword">void</span>     <span class="tok-fn">thistle_free</span>(<span class="tok-keyword">void</span> *ptr);</code></pre>
+
+    <h3>Display</h3>
+    <p>Apps use LVGL directly — all LVGL symbols are exported through the syscall table. The display syscalls are convenience helpers for reading screen dimensions.</p>
+    <pre><code><span class="tok-type">uint16_t</span> <span class="tok-fn">thistle_display_get_width</span>(<span class="tok-keyword">void</span>);
+<span class="tok-type">uint16_t</span> <span class="tok-fn">thistle_display_get_height</span>(<span class="tok-keyword">void</span>);</code></pre>
+
+    <h3>Input</h3>
+    <pre><code><span class="tok-keyword">typedef</span> <span class="tok-keyword">void</span> (*<span class="tok-type">thistle_input_cb_t</span>)(<span class="tok-keyword">int</span> event_type, <span class="tok-keyword">int</span> keycode,
+                                       <span class="tok-keyword">int</span> x, <span class="tok-keyword">int</span> y);
+<span class="tok-keyword">void</span> <span class="tok-fn">thistle_input_register_cb</span>(<span class="tok-type">thistle_input_cb_t</span> cb);</code></pre>
+
+    <h3>Radio (requires <code>PERM_RADIO</code>)</h3>
+    <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_radio_send</span>(<span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *data, <span class="tok-type">size_t</span> len);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_radio_set_freq</span>(<span class="tok-type">uint32_t</span> freq_hz);</code></pre>
+
+    <h3>GPS (requires <code>PERM_GPS</code>)</h3>
+    <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_gps_enable</span>(<span class="tok-keyword">void</span>);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_gps_get_lat_lon</span>(<span class="tok-keyword">double</span> *lat, <span class="tok-keyword">double</span> *lon);</code></pre>
+
+    <h3>Storage (requires <code>PERM_STORAGE</code>)</h3>
+    <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_open</span> (<span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *path, <span class="tok-keyword">int</span> flags);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_read</span> (<span class="tok-keyword">int</span> fd, <span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> len);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_write</span>(<span class="tok-keyword">int</span> fd, <span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> len);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_close</span>(<span class="tok-keyword">int</span> fd);</code></pre>
+
+    <h3>IPC (requires <code>PERM_IPC</code>)</h3>
+    <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_msg_send</span>(<span class="tok-type">uint32_t</span> dst_app, <span class="tok-type">uint32_t</span> type,
+                     <span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *data, <span class="tok-type">size_t</span> len);
+<span class="tok-keyword">int</span> <span class="tok-fn">thistle_msg_recv</span>(<span class="tok-type">uint32_t</span> *src_app, <span class="tok-type">uint32_t</span> *type,
+                     <span class="tok-keyword">void</span> *data, <span class="tok-type">size_t</span> *len, <span class="tok-type">uint32_t</span> timeout_ms);</code></pre>
+
+    <h3>Power</h3>
+    <pre><code><span class="tok-type">uint16_t</span> <span class="tok-fn">thistle_power_get_battery_mv</span>(<span class="tok-keyword">void</span>);
+<span class="tok-type">uint8_t</span>  <span class="tok-fn">thistle_power_get_battery_pct</span>(<span class="tok-keyword">void</span>);</code></pre>
+
+    <h2>Building with CMake</h2>
+    <p>Create a directory for your app and write a <code>CMakeLists.txt</code>:</p>
+
+    <pre><code>cmake_minimum_required(VERSION 3.16)
+project(my_app)
+
+<span class="tok-comment"># Point to the App SDK directory</span>
+set(THISTLE_SDK_PATH <span class="tok-string">"/path/to/esp32-os/app_sdk"</span>)
+include(${THISTLE_SDK_PATH}/CMakeLists.txt)
+
+<span class="tok-comment"># List all your .c source files</span>
+thistle_app(my_app SRCS main.c ui.c)</code></pre>
+
+    <p>Build with standard CMake + the Xtensa toolchain that ships with ESP-IDF:</p>
+
+    <pre><code>export IDF_PATH=~/esp/esp-idf
+source $IDF_PATH/export.sh
+
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=$IDF_PATH/tools/cmake/toolchain-esp32s3.cmake
+cmake --build build
+
+<span class="tok-comment"># Output: build/my_app.app.elf</span></code></pre>
+
+    <h2>LVGL UI patterns</h2>
+    <p>LVGL runs in the kernel's UI task. All LVGL calls from your app must happen on that same task — the easiest way is to do everything in <code>on_start()</code> and LVGL event callbacks (which also run on the UI task).</p>
+
+    <h3>Create a label</h3>
+    <pre><code><span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">my_start</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-type">lv_obj_t</span> *screen = <span class="tok-fn">lv_scr_act</span>();
+
+    <span class="tok-type">lv_obj_t</span> *label = <span class="tok-fn">lv_label_create</span>(screen);
+    <span class="tok-fn">lv_label_set_text</span>(label, <span class="tok-string">"Hello from my app!"</span>);
+    <span class="tok-fn">lv_obj_center</span>(label);
+}</code></pre>
+
+    <h3>Handle button press</h3>
+    <pre><code><span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">btn_handler</span>(<span class="tok-type">lv_event_t</span> *e)
+{
+    <span class="tok-fn">thistle_log</span>(<span class="tok-string">"myapp"</span>, <span class="tok-string">"Button pressed!"</span>);
+}
+
+<span class="tok-type">lv_obj_t</span> *btn = <span class="tok-fn">lv_btn_create</span>(screen);
+<span class="tok-fn">lv_obj_add_event_cb</span>(btn, btn_handler, <span class="tok-macro">LV_EVENT_CLICKED</span>, <span class="tok-macro">NULL</span>);
+<span class="tok-fn">lv_obj_set_size</span>(btn, 120, 40);
+<span class="tok-fn">lv_obj_center</span>(btn);</code></pre>
+
+    <h3>Handle keyboard input via syscall</h3>
+    <pre><code><span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">input_cb</span>(<span class="tok-keyword">int</span> event_type, <span class="tok-keyword">int</span> keycode, <span class="tok-keyword">int</span> x, <span class="tok-keyword">int</span> y)
+{
+    <span class="tok-keyword">if</span> (event_type == <span class="tok-macro">HAL_INPUT_EVENT_KEY_DOWN</span>) {
+        <span class="tok-fn">thistle_log</span>(<span class="tok-string">"myapp"</span>, <span class="tok-string">"Key: %d"</span>, keycode);
+    }
+}
+
+<span class="tok-comment">// Register in on_create or on_start</span>
+<span class="tok-fn">thistle_input_register_cb</span>(input_cb);</code></pre>
+
+    <h2>Example: Hello World walkthrough</h2>
+    <p>The complete hello world app from <code>app_sdk/examples/hello_world/main.c</code>:</p>
+
+    <pre><code>#include <span class="tok-string">"thistle_app.h"</span>
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">int</span> <span class="tok-fn">hello_create</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-fn">thistle_log</span>(<span class="tok-string">"hello"</span>, <span class="tok-string">"Hello World app created!"</span>);
+    <span class="tok-keyword">return</span> 0;
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">hello_start</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-type">lv_obj_t</span> *label = <span class="tok-fn">lv_label_create</span>(<span class="tok-fn">lv_scr_act</span>());
+    <span class="tok-fn">lv_label_set_text</span>(label, <span class="tok-string">"Hello from ThistleOS!"</span>);
+    <span class="tok-fn">lv_obj_center</span>(label);
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">hello_pause</span>(<span class="tok-keyword">void</span>)   {}
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">hello_resume</span>(<span class="tok-keyword">void</span>)  {}
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">hello_destroy</span>(<span class="tok-keyword">void</span>) {}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">thistle_app_t</span> hello_app = {
+    .id               = <span class="tok-string">"com.example.hello"</span>,
+    .name             = <span class="tok-string">"Hello World"</span>,
+    .version          = <span class="tok-string">"1.0.0"</span>,
+    .allow_background = <span class="tok-keyword">false</span>,
+    .on_create        = hello_create,
+    .on_start         = hello_start,
+    .on_pause         = hello_pause,
+    .on_resume        = hello_resume,
+    .on_destroy       = hello_destroy,
+};
+
+<span class="tok-macro">THISTLE_APP</span>(hello_app);</code></pre>
+
+    <h2>Example: Chat app with LoRa radio</h2>
+    <p>A more realistic app that sends and receives LoRa messages and displays them in an LVGL list:</p>
+
+    <pre><code>#include <span class="tok-string">"thistle_app.h"</span>
+
+<span class="tok-keyword">static</span> <span class="tok-type">lv_obj_t</span> *g_list;
+<span class="tok-keyword">static</span> <span class="tok-type">lv_obj_t</span> *g_input;
+
+<span class="tok-comment">/* Called from radio RX callback (runs in radio task) */</span>
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">on_radio_rx</span>(<span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *data, <span class="tok-type">size_t</span> len,
+                        <span class="tok-keyword">int</span> rssi, <span class="tok-keyword">void</span> *user)
+{
+    <span class="tok-comment">/* Schedule label creation on LVGL task via event */</span>
+    <span class="tok-comment">/* (simplified — real code needs thread-safe queue) */</span>
+    <span class="tok-keyword">char</span> buf[128];
+    <span class="tok-fn">snprintf</span>(buf, <span class="tok-keyword">sizeof</span>(buf), <span class="tok-string">"[%d dBm] %.*s"</span>, rssi, (<span class="tok-keyword">int</span>)len, data);
+    <span class="tok-fn">lv_list_add_text</span>(g_list, buf);
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">int</span> <span class="tok-fn">chat_create</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-fn">thistle_radio_set_freq</span>(915000000);
+    <span class="tok-keyword">return</span> 0;
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">send_btn_cb</span>(<span class="tok-type">lv_event_t</span> *e)
+{
+    <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *txt = <span class="tok-fn">lv_textarea_get_text</span>(g_input);
+    <span class="tok-fn">thistle_radio_send</span>((<span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *)txt, <span class="tok-fn">strlen</span>(txt));
+    <span class="tok-fn">lv_textarea_set_text</span>(g_input, <span class="tok-string">""</span>);
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">chat_start</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-type">lv_obj_t</span> *scr = <span class="tok-fn">lv_scr_act</span>();
+    g_list  = <span class="tok-fn">lv_list_create</span>(scr);
+    g_input = <span class="tok-fn">lv_textarea_create</span>(scr);
+    <span class="tok-type">lv_obj_t</span> *btn = <span class="tok-fn">lv_btn_create</span>(scr);
+    <span class="tok-fn">lv_obj_add_event_cb</span>(btn, send_btn_cb, <span class="tok-macro">LV_EVENT_CLICKED</span>, <span class="tok-macro">NULL</span>);
+    <span class="tok-fn">lv_label_set_text</span>(<span class="tok-fn">lv_label_create</span>(btn), <span class="tok-string">"Send"</span>);
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">thistle_app_t</span> chat_app = {
+    .id               = <span class="tok-string">"com.example.chat"</span>,
+    .name             = <span class="tok-string">"LoRa Chat"</span>,
+    .version          = <span class="tok-string">"1.0.0"</span>,
+    .allow_background = <span class="tok-keyword">true</span>,  <span class="tok-comment">// keep receiving in background</span>
+    .on_create  = chat_create,
+    .on_start   = chat_start,
+    .on_pause   = <span class="tok-macro">NULL</span>,
+    .on_resume  = <span class="tok-macro">NULL</span>,
+    .on_destroy = <span class="tok-macro">NULL</span>,
+};
+
+<span class="tok-macro">THISTLE_APP</span>(chat_app);</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">Thread safety</div>
+      LVGL is not thread-safe. Only call LVGL functions from the LVGL task (i.e., inside lifecycle callbacks or LVGL event handlers). If you need to update the UI from a radio RX callback or a FreeRTOS timer, use <code>lv_async_call()</code> or post a message to your own queue and process it in an LVGL timer callback.
+    </div>
+
+    <h2>Packaging and installing</h2>
+    <p>After building, copy the <code>.app.elf</code> to the SD card:</p>
+
+    <pre><code>cp build/my_app.app.elf /path/to/sdcard/apps/
+<span class="tok-comment"># Reboot the device — the launcher will show the new app</span></code></pre>
+
+    <p>The launcher scans <code>/sdcard/apps/</code> on startup and adds any <code>.app.elf</code> files it finds. The app's name and ID come from the <code>thistle_app_t</code> struct inside the ELF, not from the filename.</p>
+
+    <h2>Signing your app</h2>
+    <p>Unsigned apps run in restricted mode — they receive no permissions. To grant permissions, the app must be signed. See <a href="security.html">Security &amp; Signing</a> for the full signing workflow. The short version:</p>
+
+    <ol class="steps">
+      <li>Build your <code>.app.elf</code></li>
+      <li>Run <code>thistle-sign --key your_key.pem my_app.app.elf</code> to produce <code>my_app.app.elf.sig</code></li>
+      <li>Include both files in your catalog entry and on the SD card</li>
+      <li>The kernel verifies the signature at load time and grants the declared permissions</li>
+    </ol>
+
+    <h2>Publishing to the app store</h2>
+    <p>Once your app is built and signed, add it to a <code>catalog.json</code> and host it. See <a href="app-store.html">App Store</a> for the full catalog format. The minimum entry looks like:</p>
+
+    <pre><code>{
+  <span class="tok-string">"id"</span>: <span class="tok-string">"com.example.chat"</span>,
+  <span class="tok-string">"name"</span>: <span class="tok-string">"LoRa Chat"</span>,
+  <span class="tok-string">"version"</span>: <span class="tok-string">"1.0.0"</span>,
+  <span class="tok-string">"type"</span>: <span class="tok-string">"app"</span>,
+  <span class="tok-string">"url"</span>: <span class="tok-string">"https://example.com/apps/chat.app.elf"</span>,
+  <span class="tok-string">"sha256"</span>: <span class="tok-string">"a3f1..."</span>,
+  <span class="tok-string">"sig_url"</span>: <span class="tok-string">"https://example.com/apps/chat.app.elf.sig"</span>,
+  <span class="tok-string">"permissions"</span>: [<span class="tok-string">"radio"</span>, <span class="tok-string">"ipc"</span>],
+  <span class="tok-string">"description"</span>: <span class="tok-string">"Send and receive LoRa messages."</span>
+}</code></pre>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

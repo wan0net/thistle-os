@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Building Drivers — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html" class="active">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Building Drivers</div>
+      <h1>Building Drivers</h1>
+      <p class="lead">Drivers implement HAL vtable interfaces and register themselves with the HAL registry. They can be compiled directly into the firmware or deployed as <code>.drv.elf</code> files on the SD card.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/driver-development.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Driver SDK overview</h2>
+    <p>The Driver SDK is a single header: <code>app_sdk/include/thistle_driver.h</code>. It declares the HAL registration functions and the kernel utilities available to drivers.</p>
+
+    <p>A runtime driver (loaded from SD card) must export one symbol: <code>driver_init()</code>. This is called by the kernel synchronously during boot, after all compiled-in drivers have been registered. Return 0 on success.</p>
+
+    <pre><code><span class="tok-comment">// Minimal driver skeleton</span>
+#include <span class="tok-string">"thistle_driver.h"</span>
+#include <span class="tok-string">"hal/display.h"</span>
+
+<span class="tok-keyword">static</span> <span class="tok-type">esp_err_t</span> <span class="tok-fn">my_init</span>(<span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *config)   { <span class="tok-keyword">return</span> 0; }
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span>      <span class="tok-fn">my_deinit</span>(<span class="tok-keyword">void</span>)               {}
+<span class="tok-keyword">static</span> <span class="tok-type">esp_err_t</span> <span class="tok-fn">my_flush</span>(<span class="tok-keyword">const</span> <span class="tok-type">hal_area_t</span> *area,
+                          <span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *data) { <span class="tok-keyword">return</span> 0; }
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">hal_display_driver_t</span> my_display = {
+    .init            = my_init,
+    .deinit          = my_deinit,
+    .flush           = my_flush,
+    .set_brightness  = <span class="tok-macro">NULL</span>,
+    .sleep           = <span class="tok-macro">NULL</span>,
+    .set_refresh_mode = <span class="tok-macro">NULL</span>,
+    .width  = 320,
+    .height = 240,
+    .type   = <span class="tok-macro">HAL_DISPLAY_TYPE_LCD</span>,
+    .name   = <span class="tok-string">"my_display"</span>,
+};
+
+<span class="tok-keyword">int</span> <span class="tok-fn">driver_init</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-fn">thistle_log</span>(<span class="tok-string">"mydrv"</span>, <span class="tok-string">"Registering my display"</span>);
+    <span class="tok-keyword">return</span> <span class="tok-fn">hal_display_register</span>(&amp;my_display, <span class="tok-macro">NULL</span>);
+}</code></pre>
+
+    <h2>HAL vtable interfaces</h2>
+
+    <h3>Display — <code>hal_display_driver_t</code></h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function pointer</th><th>Signature</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>init</code></td><td><code>(const void *config) → esp_err_t</code></td><td>Initialize hardware. Config struct is driver-defined.</td></tr>
+          <tr><td><code>deinit</code></td><td><code>(void) → void</code></td><td>Release hardware resources.</td></tr>
+          <tr><td><code>flush</code></td><td><code>(const hal_area_t *, const uint8_t *) → esp_err_t</code></td><td>Write pixels to the display. Called by LVGL.</td></tr>
+          <tr><td><code>set_brightness</code></td><td><code>(uint8_t percent) → esp_err_t</code></td><td>0–100. Null if unsupported.</td></tr>
+          <tr><td><code>sleep</code></td><td><code>(bool enter) → esp_err_t</code></td><td>Display sleep / wake.</td></tr>
+          <tr><td><code>set_refresh_mode</code></td><td><code>(hal_display_refresh_mode_t) → esp_err_t</code></td><td>FULL / PARTIAL / FAST. E-paper only.</td></tr>
+          <tr><td><code>width</code>, <code>height</code></td><td>uint16_t</td><td>Physical pixel dimensions.</td></tr>
+          <tr><td><code>type</code></td><td>hal_display_type_t</td><td>LCD or EPAPER.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Input — <code>hal_input_driver_t</code></h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function pointer</th><th>Signature</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>init</code></td><td><code>(const void *config) → esp_err_t</code></td><td>Initialize device.</td></tr>
+          <tr><td><code>deinit</code></td><td><code>(void) → void</code></td><td></td></tr>
+          <tr><td><code>register_callback</code></td><td><code>(hal_input_cb_t, void *) → esp_err_t</code></td><td>Driver calls this callback on every event.</td></tr>
+          <tr><td><code>poll</code></td><td><code>(void) → esp_err_t</code></td><td>Called periodically if the driver is polled (not interrupt-driven).</td></tr>
+          <tr><td><code>is_touch</code></td><td>bool</td><td>True for touch panels; false for keyboards/buttons.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Radio — <code>hal_radio_driver_t</code></h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function pointer</th><th>Signature</th></tr></thead>
+        <tbody>
+          <tr><td><code>set_frequency</code></td><td><code>(uint32_t freq_hz) → esp_err_t</code></td></tr>
+          <tr><td><code>set_tx_power</code></td><td><code>(int8_t dbm) → esp_err_t</code></td></tr>
+          <tr><td><code>set_bandwidth</code></td><td><code>(uint32_t bw_hz) → esp_err_t</code></td></tr>
+          <tr><td><code>set_spreading_factor</code></td><td><code>(uint8_t sf) → esp_err_t</code></td></tr>
+          <tr><td><code>send</code></td><td><code>(const uint8_t *, size_t) → esp_err_t</code></td></tr>
+          <tr><td><code>start_receive</code></td><td><code>(hal_radio_rx_cb_t, void *) → esp_err_t</code></td></tr>
+          <tr><td><code>get_rssi</code></td><td><code>(void) → int</code></td></tr>
+          <tr><td><code>sleep</code></td><td><code>(bool) → esp_err_t</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Step-by-step: implementing a display driver</h2>
+    <p>This walkthrough implements a driver for a hypothetical SPI LCD. The same pattern applies to any SPI or I2C display.</p>
+
+    <h3>1. Create the driver component</h3>
+    <pre><code>mkdir -p components/drv_lcd_mydevice/include
+mkdir -p components/drv_lcd_mydevice/src</code></pre>
+
+    <h3>2. CMakeLists.txt</h3>
+    <pre><code>idf_component_register(
+    SRCS <span class="tok-string">"src/drv_lcd_mydevice.c"</span>
+    INCLUDE_DIRS <span class="tok-string">"include"</span>
+    REQUIRES <span class="tok-string">"thistle_hal"</span> <span class="tok-string">"driver"</span>  <span class="tok-comment"># ESP-IDF "driver" for GPIO/SPI</span>
+)</code></pre>
+
+    <h3>3. Config struct in the header</h3>
+    <pre><code><span class="tok-comment">// include/drv_lcd_mydevice.h</span>
+#pragma once
+#include <span class="tok-string">"hal/display.h"</span>
+#include <span class="tok-string">"driver/spi_master.h"</span>
+#include <span class="tok-string">"driver/gpio.h"</span>
+
+<span class="tok-keyword">typedef</span> <span class="tok-keyword">struct</span> {
+    <span class="tok-type">spi_host_device_t</span> spi_host;
+    <span class="tok-type">gpio_num_t</span>        pin_cs;
+    <span class="tok-type">gpio_num_t</span>        pin_dc;
+    <span class="tok-type">gpio_num_t</span>        pin_rst;
+    <span class="tok-type">uint32_t</span>          spi_clock_hz;
+} <span class="tok-type">lcd_mydevice_config_t</span>;
+
+<span class="tok-keyword">const</span> <span class="tok-type">hal_display_driver_t</span> *<span class="tok-fn">drv_lcd_mydevice_get</span>(<span class="tok-keyword">void</span>);</code></pre>
+
+    <h3>4. Driver implementation</h3>
+    <pre><code><span class="tok-comment">// src/drv_lcd_mydevice.c</span>
+#include <span class="tok-string">"drv_lcd_mydevice.h"</span>
+#include <span class="tok-string">"esp_log.h"</span>
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *TAG = <span class="tok-string">"drv_lcd_mydevice"</span>;
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">lcd_mydevice_config_t</span> *s_cfg;
+<span class="tok-keyword">static</span> <span class="tok-type">spi_device_handle_t</span> s_spi;
+
+<span class="tok-keyword">static</span> <span class="tok-type">esp_err_t</span> <span class="tok-fn">lcd_init</span>(<span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *config)
+{
+    s_cfg = (<span class="tok-keyword">const</span> <span class="tok-type">lcd_mydevice_config_t</span> *)config;
+
+    <span class="tok-comment">// Toggle reset pin</span>
+    <span class="tok-fn">gpio_set_direction</span>(s_cfg-&gt;pin_rst, <span class="tok-macro">GPIO_MODE_OUTPUT</span>);
+    <span class="tok-fn">gpio_set_level</span>(s_cfg-&gt;pin_rst, 0);
+    <span class="tok-fn">vTaskDelay</span>(<span class="tok-fn">pdMS_TO_TICKS</span>(10));
+    <span class="tok-fn">gpio_set_level</span>(s_cfg-&gt;pin_rst, 1);
+    <span class="tok-fn">vTaskDelay</span>(<span class="tok-fn">pdMS_TO_TICKS</span>(50));
+
+    <span class="tok-comment">// Add device to SPI bus</span>
+    <span class="tok-type">spi_device_interface_config_t</span> dev_cfg = {
+        .clock_speed_hz = s_cfg-&gt;spi_clock_hz,
+        .spics_io_num   = s_cfg-&gt;pin_cs,
+        .queue_size     = 7,
+    };
+    <span class="tok-type">esp_err_t</span> ret = <span class="tok-fn">spi_bus_add_device</span>(s_cfg-&gt;spi_host, &amp;dev_cfg, &amp;s_spi);
+    <span class="tok-keyword">if</span> (ret != <span class="tok-macro">ESP_OK</span>) <span class="tok-keyword">return</span> ret;
+
+    <span class="tok-comment">/* Send init command sequence ... */</span>
+    <span class="tok-macro">ESP_LOGI</span>(TAG, <span class="tok-string">"LCD initialized"</span>);
+    <span class="tok-keyword">return</span> <span class="tok-macro">ESP_OK</span>;
+}
+
+<span class="tok-keyword">static</span> <span class="tok-type">esp_err_t</span> <span class="tok-fn">lcd_flush</span>(<span class="tok-keyword">const</span> <span class="tok-type">hal_area_t</span> *area,
+                          <span class="tok-keyword">const</span> <span class="tok-type">uint8_t</span> *color_data)
+{
+    <span class="tok-comment">/* Set column/page address, then DMA the pixel data */</span>
+    <span class="tok-keyword">return</span> <span class="tok-macro">ESP_OK</span>;
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">lcd_deinit</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-fn">spi_bus_remove_device</span>(s_spi);
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">hal_display_driver_t</span> s_driver = {
+    .init            = lcd_init,
+    .deinit          = lcd_deinit,
+    .flush           = lcd_flush,
+    .set_brightness  = <span class="tok-macro">NULL</span>,
+    .sleep           = <span class="tok-macro">NULL</span>,
+    .set_refresh_mode = <span class="tok-macro">NULL</span>,
+    .width  = 320,
+    .height = 240,
+    .type   = <span class="tok-macro">HAL_DISPLAY_TYPE_LCD</span>,
+    .name   = <span class="tok-string">"lcd_mydevice"</span>,
+};
+
+<span class="tok-keyword">const</span> <span class="tok-type">hal_display_driver_t</span> *<span class="tok-fn">drv_lcd_mydevice_get</span>(<span class="tok-keyword">void</span>)
+{
+    <span class="tok-keyword">return</span> &amp;s_driver;
+}</code></pre>
+
+    <h3>5. Register it in a board definition</h3>
+    <pre><code><span class="tok-comment">// In your board_*/src/board_*.c</span>
+#include <span class="tok-string">"drv_lcd_mydevice.h"</span>
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">lcd_mydevice_config_t</span> lcd_cfg = {
+    .spi_host    = <span class="tok-macro">SPI2_HOST</span>,
+    .pin_cs      = <span class="tok-macro">GPIO_NUM_10</span>,
+    .pin_dc      = <span class="tok-macro">GPIO_NUM_11</span>,
+    .pin_rst     = <span class="tok-macro">GPIO_NUM_12</span>,
+    .spi_clock_hz = 40000000,
+};
+
+<span class="tok-comment">// In board_init():</span>
+<span class="tok-fn">hal_display_register</span>(<span class="tok-fn">drv_lcd_mydevice_get</span>(), &amp;lcd_cfg);</code></pre>
+
+    <h2>Implementing an input driver</h2>
+    <p>Input drivers are interrupt-driven. When the hardware fires an interrupt, the ISR reads the event and calls the registered callback. Here is the pattern used by the TCA8418 keyboard driver:</p>
+
+    <pre><code><span class="tok-keyword">static</span> <span class="tok-type">hal_input_cb_t</span>   s_callback;
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span>             *s_user_data;
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-macro">IRAM_ATTR</span> <span class="tok-fn">kbd_isr</span>(<span class="tok-keyword">void</span> *arg)
+{
+    <span class="tok-comment">/* Read key event from TCA8418 over I2C (in a task, not ISR)
+     * — use a binary semaphore to signal a task */</span>
+    <span class="tok-type">BaseType_t</span> woken = <span class="tok-macro">pdFALSE</span>;
+    <span class="tok-fn">xSemaphoreGiveFromISR</span>(s_isr_sem, &amp;woken);
+    <span class="tok-keyword">if</span> (woken) <span class="tok-fn">portYIELD_FROM_ISR</span>();
+}
+
+<span class="tok-keyword">static</span> <span class="tok-keyword">void</span> <span class="tok-fn">kbd_task</span>(<span class="tok-keyword">void</span> *arg)
+{
+    <span class="tok-keyword">while</span> (1) {
+        <span class="tok-fn">xSemaphoreTake</span>(s_isr_sem, <span class="tok-fn">portMAX_DELAY</span>);
+
+        <span class="tok-comment">/* Read key from TCA8418 */</span>
+        <span class="tok-type">uint8_t</span> key_event = <span class="tok-fn">tca8418_read_key</span>();
+        <span class="tok-type">hal_input_event_t</span> evt = {
+            .type      = (key_event &amp; 0x80) ?
+                         <span class="tok-macro">HAL_INPUT_EVENT_KEY_DOWN</span> :
+                         <span class="tok-macro">HAL_INPUT_EVENT_KEY_UP</span>,
+            .timestamp = <span class="tok-fn">esp_timer_get_time</span>() / 1000,
+            .key       = { .keycode = key_event &amp; 0x7F },
+        };
+
+        <span class="tok-keyword">if</span> (s_callback)
+            s_callback(&amp;evt, s_user_data);
+    }
+}
+
+<span class="tok-keyword">static</span> <span class="tok-type">esp_err_t</span> <span class="tok-fn">kbd_register_callback</span>(<span class="tok-type">hal_input_cb_t</span> cb, <span class="tok-keyword">void</span> *ud)
+{
+    s_callback  = cb;
+    s_user_data = ud;
+    <span class="tok-keyword">return</span> <span class="tok-macro">ESP_OK</span>;
+}</code></pre>
+
+    <h2>Using ESP-IDF APIs from a runtime driver</h2>
+    <p>Runtime drivers (<code>.drv.elf</code>) cannot call ESP-IDF functions directly — those symbols live in the kernel's flash and are not exported. Instead, the kernel re-exports the most commonly needed GPIO, I2C, and SPI functions through the syscall table.</p>
+
+    <div class="callout warn">
+      <div class="callout-title">Symbol availability</div>
+      Only symbols listed in the syscall table are available to runtime drivers. If you need a function that is not exported, either use a compiled-in driver (no restriction) or open a GitHub issue to request an export.
+    </div>
+
+    <p>Currently exported hardware symbols include:</p>
+    <ul>
+      <li><code>gpio_set_direction</code>, <code>gpio_set_level</code>, <code>gpio_get_level</code></li>
+      <li><code>spi_bus_add_device</code>, <code>spi_device_transmit</code>, <code>spi_bus_remove_device</code></li>
+      <li><code>i2c_master_transmit</code>, <code>i2c_master_receive</code></li>
+      <li><code>vTaskDelay</code>, <code>xTaskCreate</code>, <code>xSemaphoreCreateBinary</code></li>
+      <li><code>esp_timer_get_time</code></li>
+    </ul>
+
+    <h2>Building as a runtime driver (.drv.elf)</h2>
+    <p>Runtime drivers use the same CMake flags as apps: position-independent, no stdlib, relocatable output.</p>
+
+    <pre><code>add_executable(drv_lcd_mydevice src/drv_lcd_mydevice.c)
+
+target_include_directories(drv_lcd_mydevice PRIVATE
+    include
+    ${THISTLE_SDK_PATH}/include
+)
+
+target_compile_options(drv_lcd_mydevice PRIVATE
+    -fPIC -nostdlib -fno-exceptions
+)
+
+target_link_options(drv_lcd_mydevice PRIVATE
+    -nostdlib -Wl,-relocatable
+)
+
+set_target_properties(drv_lcd_mydevice PROPERTIES SUFFIX <span class="tok-string">".drv.elf"</span>)</code></pre>
+
+    <p>Deploy by copying to the SD card:</p>
+
+    <pre><code>cp build/drv_lcd_mydevice.drv.elf /sdcard/drivers/
+<span class="tok-comment"># Reboot — the kernel will load it during driver_manager_init()</span></code></pre>
+
+    <h2>Signing and publishing</h2>
+    <p>Driver signing follows the same process as app signing. See <a href="security.html">Security &amp; Signing</a>. In the app store catalog, use <code>"type": "driver"</code> to distinguish drivers from apps.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>
