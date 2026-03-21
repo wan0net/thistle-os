@@ -1,5 +1,9 @@
 /* ThistleOS Documentation — link42 dark theme */
+@import url('https://cdn.jsdelivr.net/npm/@fontsource/monaspace-neon@5/index.css');
+
 :root {
+  --font-mono: 'Monaspace Neon', 'Monaspace', monospace;
+  --thistle-purple: #9D4EDD;
   --bg: #111110;
   --surface: #1c1c1b;
   --surface-2: #232322;
@@ -278,7 +282,7 @@ hr {
 /* ── Code ─────────────────────────────────────────────────── */
 
 code {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.88em;
   background: var(--code-bg);
   color: #c4b5fd;
@@ -542,7 +546,7 @@ td code {
 /* ── Diagram / ASCII art ──────────────────────────────────── */
 
 .diagram {
-  font-family: "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
