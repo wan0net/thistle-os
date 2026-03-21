@@ -566,6 +566,129 @@ and `user_data` opaque pointers. All storage is in a `static Mutex<EventBus>`.
 
 ---
 
+## Module: crypto
+
+**Source:** `src/crypto.rs`, FFI glue in `src/ffi.rs`
+
+### Purpose
+
+Platform-independent cryptographic primitives with optional hardware acceleration
+via HAL dispatch. All symmetric crypto operations used by the kernel (AES-256-CBC
+encryption/decryption, HMAC-SHA256, SHA-256 hashing, PBKDF2 key derivation, and
+CSPRNG random bytes) are routed through this module. If a `hal_crypto_driver_t`
+vtable is registered (e.g. an ESP32-S3 hardware crypto driver), its functions are
+called first. If the vtable is absent or a particular operation is not implemented
+in hardware, the module falls back to pure Rust software implementations
+transparently. The kernel itself never calls ESP-IDF hardware crypto APIs directly.
+
+### Rust API
+
+```rust
+/// Compute SHA-256 over `data`. Always uses software (no HAL path for hash yet).
+pub fn sw_sha256(data: &[u8]) -> [u8; 32];
+
+/// Compute HMAC-SHA256 over `data` with `key`.
+pub fn sw_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32];
+
+/// Encrypt `plaintext` with AES-256-CBC using `key` (32 bytes) and `iv` (16 bytes).
+/// Returns ciphertext (PKCS#7 padded). Dispatches to HAL if available.
+pub fn sw_aes256_cbc_encrypt(key: &[u8; 32], iv: &[u8; 16], plaintext: &[u8])
+    -> Result<Vec<u8>, CryptoError>;
+
+/// Decrypt `ciphertext` with AES-256-CBC. Returns unpadded plaintext.
+/// Dispatches to HAL if available.
+pub fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ciphertext: &[u8])
+    -> Result<Vec<u8>, CryptoError>;
+
+/// Fill `buf` with cryptographically secure random bytes.
+/// Dispatches to HAL if available, otherwise uses `getrandom`.
+pub fn sw_random(buf: &mut [u8]) -> Result<(), CryptoError>;
+```
+
+### C FFI
+
+All functions are exported from `src/ffi.rs`. Include `thistle/kernel_rs.h`.
+
+```c
+// Compute SHA-256 digest. `out` must be 32 bytes.
+esp_err_t thistle_crypto_sha256(const uint8_t *data, size_t len, uint8_t *out);
+
+// Compute HMAC-SHA256. `out` must be 32 bytes.
+esp_err_t thistle_crypto_hmac_sha256(const uint8_t *key, size_t key_len,
+                                     const uint8_t *data, size_t data_len,
+                                     uint8_t *out);
+
+// Constant-time HMAC-SHA256 verification. Returns ESP_OK if match, ESP_ERR_INVALID_ARG if mismatch.
+esp_err_t thistle_crypto_hmac_verify(const uint8_t *key, size_t key_len,
+                                     const uint8_t *data, size_t data_len,
+                                     const uint8_t *expected_mac);
+
+// AES-256-CBC encrypt. `out_buf` must be at least `in_len + 16` bytes (PKCS#7 padding).
+// `out_len` is set to the actual ciphertext length.
+esp_err_t thistle_crypto_aes256_cbc_encrypt(const uint8_t key[32], const uint8_t iv[16],
+                                            const uint8_t *in_buf, size_t in_len,
+                                            uint8_t *out_buf, size_t *out_len);
+
+// AES-256-CBC decrypt. `out_buf` must be at least `in_len` bytes.
+// `out_len` is set to the actual plaintext length (after padding removal).
+esp_err_t thistle_crypto_aes256_cbc_decrypt(const uint8_t key[32], const uint8_t iv[16],
+                                            const uint8_t *in_buf, size_t in_len,
+                                            uint8_t *out_buf, size_t *out_len);
+
+// PBKDF2-HMAC-SHA256 key derivation.
+// `out` must be `out_len` bytes. Typical: out_len=32, iterations=100000.
+esp_err_t thistle_crypto_pbkdf2_sha256(const uint8_t *password, size_t password_len,
+                                       const uint8_t *salt, size_t salt_len,
+                                       uint32_t iterations,
+                                       uint8_t *out, size_t out_len);
+
+// Fill `buf` with `len` bytes of cryptographically secure random data.
+esp_err_t thistle_crypto_random(uint8_t *buf, size_t len);
+```
+
+### HAL Dispatch
+
+The module checks the `hal_crypto_driver_t` vtable (via `hal_get_registry()->crypto`)
+before each operation:
+
+- If the vtable pointer is non-null and the relevant function pointer is set, the HAL
+  function is called.
+- If the vtable is null or the specific function pointer is null, the software
+  implementation runs instead.
+- This dispatch is invisible to callers — the C FFI and Rust API are identical
+  regardless of whether hardware acceleration is in use.
+
+### Tests
+
+5 unit tests in `src/crypto.rs` (`#[cfg(test)]`), host target only:
+
+| Test | What it covers |
+|------|----------------|
+| `test_sha256` | Known-answer SHA-256 digest |
+| `test_hmac_sha256` | Known-answer HMAC-SHA256 |
+| `test_aes256_cbc_roundtrip` | Encrypt then decrypt, verify plaintext recovered |
+| `test_pbkdf2` | Known-answer PBKDF2-SHA256 with 1 iteration |
+| `test_random` | 32 bytes returned, non-zero (probabilistic) |
+
+### Improvement Areas
+
+- **PBKDF2 always uses software HMAC.** Even when a hardware HMAC accelerator is
+  registered via the HAL, `thistle_crypto_pbkdf2_sha256` iterates using the software
+  HMAC path. The HAL dispatch hook is not wired into the PBKDF2 inner loop. This
+  means key derivation on hardware with a SHA accelerator does not benefit from it.
+
+- **No AES-GCM.** The current interface exposes AES-256-CBC only. AES-GCM would
+  provide authenticated encryption in a single pass (confidentiality + integrity
+  without a separate HMAC), reducing code paths in the Vault app and app store
+  download verification.
+
+- **No hardware-backed key storage API.** Encryption keys are passed in as byte
+  slices from RAM. There is no interface for sealing a key into hardware (e.g.
+  ESP32-S3 eFuse key slots or a dedicated secure element), so keys exist in PSRAM
+  for the duration of operations and are vulnerable to a physical memory read.
+
+---
+
 ## Module: app_manager (being ported)
 
 **Source:** `src/app_manager.rs` — **file does not yet exist**. This module is
@@ -717,9 +840,10 @@ ESP-IDF.
 | `permissions` | 8 | Covers grant/revoke/check, accumulation, slot exhaustion, parse/format |
 | `ipc` | 4 | send/recv, handler dispatch, queue full, recv timeout |
 | `event` | 4 | subscribe/publish, unsubscribe, multi-subscriber, invalid type |
+| `crypto` | 5 | SHA-256, HMAC-SHA256, AES-256-CBC roundtrip, PBKDF2, random |
 | `version` | — | Tested indirectly via `manifest` compatibility tests |
 
-Total: 24 unit tests. All run on the host target.
+Total: 29 unit tests. All run on the host target.
 
 **ESP-IDF integration testing** (running on target hardware or QEMU) does not
 exist yet. Key gaps: VFS-based manifest file reading, FreeRTOS Condvar
@@ -760,21 +884,23 @@ triple and linker flags.
 
 | Module | C file | Rust file | Status | Host tests |
 |--------|--------|-----------|--------|-----------|
-| manifest | `manifest.c` | `manifest.rs` + `ffi.rs` | Dual (both exist) | 8 |
-| version | `kernel.h` (constant) | `version.rs` + `ffi.rs` | Rust-only | via manifest |
-| permissions | `permissions.c` | `permissions.rs` | Dual (both exist) | 8 |
-| ipc | `ipc.c` | `ipc.rs` | Dual (both exist) | 4 |
-| event | `event.c` | `event.rs` | Dual (both exist) | 4 |
-| app_manager | `app_manager.c` | — (planned) | C-only | — |
-| signing | `signing.c` | — | C-only (Monocypher/Ed25519) | via C tests |
-| elf_loader | `elf_loader.c` | — | C-only | — |
-| driver_loader | `driver_loader.c` | — | C-only | — |
-| kernel | `kernel.c` | — | C-only (boot sequence) | — |
+| manifest | `manifest.c` | `manifest.rs` + `ffi.rs` | Rust | 8 |
+| version | `kernel.h` (constant) | `version.rs` + `ffi.rs` | Rust | via manifest |
+| permissions | `permissions.c` | `permissions.rs` | Rust | 8 |
+| ipc | `ipc.c` | `ipc.rs` | Rust | 4 |
+| event | `event.c` | `event.rs` | Rust | 4 |
+| app_manager | `app_manager.c` | `app_manager.rs` | Rust | — |
+| signing | `signing.c` | `signing.rs` | Rust (Monocypher/Ed25519) | via C tests |
+| elf_loader | `elf_loader.c` | `elf_loader.rs` | Rust | — |
+| driver_loader | `driver_loader.c` | `driver_loader.rs` | Rust | — |
+| kernel | `kernel.c` | `kernel.rs` | Rust (boot sequence) | — |
+| crypto | — | `crypto.rs` + `ffi.rs` | Rust | 5 |
 
-"Dual" means both the C and Rust implementations exist on disk. The active
-implementation is determined by whether the C source is listed in
-`components/kernel/CMakeLists.txt SRCS` and whether `kernel_rs` is in
-`REQUIRES`. During transition, only one should be linked.
+All modules are now implemented in Rust. The C files listed above are retained
+for reference during the transition period but are no longer linked — the
+`CMakeLists.txt` for each subsystem pulls only from `kernel_rs`. The Rust
+implementations expose `rs_*` and `thistle_*` C FFI symbols consumed by the
+remaining C components (display server, ELF loader glue, board init).
 
 ---
 

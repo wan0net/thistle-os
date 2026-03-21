@@ -42,13 +42,13 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 │         DISPLAY SERVER (kernel)            │
 │  Surfaces • Input routing • Compositor     │
 ├─────────────────────────────────────────────┤
-│         KERNEL (Rust + C, immutable)       │
+│         KERNEL (100% Rust, immutable)      │
 │  App Manager • IPC • Permissions • Events  │
-│  Signing • Manifest • Syscall table        │
+│  Signing • Manifest • Crypto • Syscall table│
 ├─────────────────────────────────────────────┤
 │         HAL (vtable interfaces)            │
 │  Display • Input • Radio • GPS • Audio     │
-│  Power • IMU • Storage • Network           │
+│  Power • IMU • Storage • Network • Crypto  │
 ├─────────────────────────────────────────────┤
 │         DRIVERS (.drv.elf from SPIFFS/SD)  │
 │  e-paper • LCD • SX1262 • TCA8418 ...     │
@@ -60,7 +60,7 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 ThistleOS uses a three-tier immutable trust chain:
 
 1. **Recovery OS** (Rust, ota_0) — immutable root of trust. Verifies the kernel's Ed25519 signature before booting it.
-2. **Kernel** (Rust + C, ota_1) — immutable. Contains the display server, app/driver lifecycle, IPC, permissions, signing, and HAL. Reads `board.json` from SPIFFS to initialize hardware buses and load drivers.
+2. **Kernel** (100% Rust, ota_1) — immutable. Contains the display server, app/driver lifecycle, IPC, permissions, signing, crypto, and HAL. The kernel is hardware-independent: it never calls ESP-IDF hardware APIs directly. All hardware interaction goes through HAL driver vtables. Reads `board.json` from SPIFFS to initialize hardware buses and load drivers.
 3. **Everything else** (SPIFFS + SD card) — updateable. Apps, drivers, window managers, and themes are all loaded at runtime. Update any component by replacing its file — no firmware reflash needed.
 
 The kernel never talks to hardware directly. It talks through **HAL vtables** — C structs of function pointers. Drivers are loaded from SPIFFS/SD as `.drv.elf` files and register themselves with the HAL at boot.
@@ -106,6 +106,7 @@ static const hal_display_driver_t my_driver = {
 | `hal_imu_driver_t` | Motion, environment | BHI260AP |
 | `hal_storage_driver_t` | SD cards, flash | SDSPI + FATFS |
 | `hal_net_driver_t` | Internet connectivity | WiFi, 4G PPP (esp_modem), simulator host |
+| `hal_crypto_driver_t` | Crypto acceleration | ESP32-S3 hardware AES/SHA, software fallback |
 
 ### Official FOSS upstream drivers
 
@@ -278,7 +279,10 @@ Signing and verification at every level — from boot to apps:
 - The **developer** holds the Ed25519 private key (never on-device)
 - The **device** holds only the public key (embedded in Recovery firmware)
 - The device **cannot forge signatures** — it can only verify them
-- Cryptography uses **mbedtls** (built into ESP-IDF) — no hand-rolled crypto
+- Cryptography uses **mbedtls** (built into ESP-IDF) for TLS and Ed25519 verification; symmetric crypto (AES-256, HMAC-SHA256, PBKDF2) goes through the kernel crypto module
+
+**Kernel crypto module:**
+The kernel contains a platform-independent crypto layer (`components/kernel_rs/src/crypto.rs`). It dispatches through the `hal_crypto_driver_t` vtable first — on ESP32-S3 this can use the hardware AES and SHA accelerators. When no hardware crypto driver is registered (simulator, WASM, or boards without hardware crypto), it falls back to pure Rust software implementations transparently. The Vault app uses this kernel crypto on all platforms, including the SDL2 simulator and the planned WASM web simulator.
 
 **eFuse burning is NEVER done by default.** It's an optional, irreversible step for production devices only. Software-only signing provides strong security without hardware lock-in.
 
@@ -342,7 +346,7 @@ cmake .. && make -j8 && ./thistle_sim
 | Built-in apps | 14 |
 | HAL drivers | 12 |
 | Board configs | 2 (T-Deck Pro, T-Deck) |
-| Unit tests | 80+ (C) + 28 (Rust) |
+| Unit tests | 80+ (C) + 37 (Rust) |
 | Firmware binary | ~1.6 MB |
 | Commits | 75+ |
 | License | BSD 3-Clause |
@@ -401,6 +405,10 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | NimBLE | Apache-2.0 | BLE |
 | Monocypher | BSD-2-Clause | Ed25519 signing |
 | mbedtls | Apache-2.0 | TLS, AES, hashing |
+| aes | MIT/Apache-2.0 | Rust software AES-256 |
+| hmac | MIT/Apache-2.0 | Rust software HMAC |
+| pbkdf2 | MIT/Apache-2.0 | Rust software PBKDF2 |
+| getrandom | MIT/Apache-2.0 | Rust CSPRNG entropy |
 | FreeRTOS | MIT | RTOS kernel |
 | SDL2 | zlib | Simulator |
 | libcurl | MIT | Simulator HTTP |
