@@ -1,0 +1,6 @@
+[build]
+target = "xtensa-esp32s3-espidf"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["panic_immediate_abort"]
