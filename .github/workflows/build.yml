@@ -19,20 +19,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache ESP-IDF build
+      - name: Install Rust ESP toolchain
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          . "$HOME/.cargo/env"
+          cargo install espup
+          espup install
+          . "$HOME/export-esp.sh" 2>/dev/null || true
+
+      - name: Cache ESP-IDF + Rust builds
         uses: actions/cache@v4
         with:
           path: |
             build
             managed_components
-          key: espidf-v5.5-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
+            components/kernel_rs/target
+          key: espidf-v5.5-rust-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'components/kernel_rs/src/**', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
           restore-keys: |
-            espidf-v5.5-
+            espidf-v5.5-rust-
 
       - name: Build firmware
         shell: bash
         run: |
           . $IDF_PATH/export.sh
+          . "$HOME/.cargo/env"
+          . "$HOME/export-esp.sh" 2>/dev/null || true
           idf.py set-target esp32s3
           idf.py build
 
