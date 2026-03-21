@@ -305,12 +305,15 @@ cmake .. && make -j8 && ./thistle_sim
 
 | Metric | Value |
 |--------|-------|
-| Lines of code | ~31,000 |
-| Source files | 249 |
+| C source code | ~33,000 lines |
+| Rust kernel code | ~2,800 lines |
+| Source files | 160+ |
 | Built-in apps | 14 |
 | HAL drivers | 12 |
-| Unit tests | 80+ |
-| Commits | 39 |
+| Board configs | 2 (T-Deck Pro, T-Deck) |
+| Unit tests | 80+ (C) + 28 (Rust) |
+| Firmware binary | ~1.6 MB |
+| Commits | 65+ |
 | License | BSD 3-Clause |
 | Dependencies | All BSD/MIT/Apache-2.0 (no GPL) |
 
@@ -328,10 +331,14 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 
 - [x] Ed25519 asymmetric signing (Monocypher, replaces HMAC-SHA256)
 - [x] Recovery OS completion (Rust, compiles clean)
-- [ ] Rust kernel migration (incremental, app_manager first)
+- [x] Rust kernel migration — 6 modules ported (manifest, permissions, IPC, event bus, app manager, version)
+- [x] Unified manifest system for apps, drivers, and firmware
 - [ ] Hardware auto-detection bootloader
 - [ ] Claude API integration in AI assistant
 - [ ] More board support (T-Beam, M5Stack, Heltec, custom)
+- [ ] Switch C kernel calls to Rust implementations
+- [ ] Async event dispatch and per-app IPC queues
+- [ ] Permission enforcement at syscall boundary
 
 ## Dependencies
 
