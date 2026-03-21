@@ -35,6 +35,11 @@ jobs:
         working-directory: components/kernel_rs
         run: cargo build --release --target wasm32-unknown-emscripten
 
+      - name: Fetch LVGL (needed for WASM build)
+        run: |
+          mkdir -p managed_components/lvgl__lvgl
+          git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git managed_components/lvgl__lvgl
+
       - name: Build WASM simulator
         run: |
           cd wasm

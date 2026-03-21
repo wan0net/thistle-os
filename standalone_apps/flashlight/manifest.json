@@ -1,0 +1,14 @@
+{
+    "type": "app",
+    "id": "com.thistle.flashlight",
+    "name": "Flashlight",
+    "version": "2.0.0",
+    "author": "ThistleOS",
+    "description": "Full-screen white light + SOS Morse code pattern",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "flashlight.app.elf",
+    "permissions": ["system"],
+    "background": false,
+    "min_memory_kb": 16
+}

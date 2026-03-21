@@ -92,6 +92,12 @@ extern void thistle_ui_set_gap(thistle_widget_t widget, int gap);
 extern void thistle_ui_set_flex_grow(thistle_widget_t widget, int grow);
 extern void thistle_ui_set_scrollable(thistle_widget_t widget, _Bool scrollable);
 extern void thistle_ui_set_padding(thistle_widget_t widget, int t, int r, int b, int l);
+extern void thistle_ui_set_border_width(thistle_widget_t widget, int w);
+extern void thistle_ui_set_radius(thistle_widget_t widget, int r);
+extern void thistle_ui_set_align(thistle_widget_t widget, int main_align, int cross_align);
+extern void thistle_ui_set_password_mode(thistle_widget_t widget, _Bool pw);
+extern void thistle_ui_set_one_line(thistle_widget_t widget, _Bool one_line);
+extern void thistle_ui_set_placeholder(thistle_widget_t widget, const char *text);
 
 #define THISTLE_LAYOUT_NONE        0
 #define THISTLE_LAYOUT_FLEX_COLUMN 1
