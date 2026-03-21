@@ -81,13 +81,16 @@ fn load_config(config_path: &str) -> i32 {
     unsafe { driver_loader_init(); }
 
     if let Some(drivers_arr) = find_array(&json, "drivers") {
-        for i in 0..12 {
+        for i in 0..8 {
             if let Some(drv) = nth_object(&drivers_arr, i) {
                 let entry = json_get_string(&drv, "entry").unwrap_or_default();
-                let _id = json_get_string(&drv, "id").unwrap_or_default();
-                let _hal = json_get_string(&drv, "hal").unwrap_or_default();
 
                 if entry.is_empty() { continue; }
+
+                // Sanitize entry path — reject traversal and absolute paths
+                if entry.contains("..") || entry.contains('/') || entry.contains('\\') || entry.starts_with('.') {
+                    continue;
+                }
 
                 // Extract config sub-object
                 let config = extract_object(&drv, "config").unwrap_or_else(|| "{}".to_string());

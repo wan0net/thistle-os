@@ -630,20 +630,19 @@ pub unsafe extern "C" fn appstore_install_entry(
         let sig_dl = appstore_download_file(sig_url_ptr, sig_cstr.as_ptr(), std::ptr::null(), None, std::ptr::null_mut());
 
         if sig_dl != ESP_OK {
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"Signature download failed: %d\0".as_ptr(), sig_dl);
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature download failed - aborting install\0".as_ptr());
+            let _ = std::fs::remove_file(&dest_path);
+            return ESP_FAIL;
         }
 
         let sig_ret = signing_verify_file(dest_cstr.as_ptr());
-        if sig_ret == ESP_ERR_INVALID_CRC {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature INVALID - deleting\0".as_ptr());
+        if sig_ret != ESP_OK {
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature verification failed - deleting\0".as_ptr());
             let _ = std::fs::remove_file(&dest_path);
             let _ = std::fs::remove_file(format!("{}.sig", dest_path));
             return ESP_ERR_INVALID_CRC;
-        } else if sig_ret == ESP_ERR_NOT_FOUND {
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"No signature file found\0".as_ptr());
-        } else if sig_ret == ESP_OK {
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Signature verified OK\0".as_ptr());
         }
+        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Signature verified OK\0".as_ptr());
     }
 
     let name_str = CStr::from_ptr(e.name.as_ptr() as *const c_char)

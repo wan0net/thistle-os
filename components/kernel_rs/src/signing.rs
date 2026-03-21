@@ -160,6 +160,14 @@ pub unsafe extern "C" fn signing_verify_file(elf_path: *const c_char) -> i32 {
         return ESP_ERR_INVALID_SIZE;
     }
 
+    // Size limit: reject files > 16 MB to prevent heap exhaustion
+    const MAX_VERIFY_SIZE: u64 = 16 * 1024 * 1024;
+    if let Ok(meta) = fs::metadata(path_str) {
+        if meta.len() > MAX_VERIFY_SIZE {
+            return ESP_ERR_INVALID_SIZE;
+        }
+    }
+
     let elf_bytes = match fs::read(path_str) {
         Ok(b) => b,
         Err(_) => return ESP_ERR_NOT_FOUND,
