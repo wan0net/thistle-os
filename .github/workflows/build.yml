@@ -66,6 +66,21 @@ jobs:
           name: thistle-os-firmware
           path: build/thistle_os.bin
 
+  rust-tests:
+    name: Rust Kernel Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Run Rust kernel tests
+        working-directory: components/kernel_rs
+        run: cargo test --target x86_64-unknown-linux-gnu -- --test-threads=1
+
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
