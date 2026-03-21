@@ -326,7 +326,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 
 ## Roadmap
 
-- [ ] Ed25519 asymmetric signing (replace HMAC-SHA256 placeholder)
+- [x] Ed25519 asymmetric signing (Monocypher, replaces HMAC-SHA256)
 - [ ] Recovery OS completion (Rust, 3 type errors remaining)
 - [ ] Rust kernel migration (incremental, app_manager first)
 - [ ] Hardware auto-detection bootloader
@@ -345,7 +345,8 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | esp_modem | Apache-2.0 | 4G PPP |
 | esp_lcd | Apache-2.0 | LCD display |
 | NimBLE | Apache-2.0 | BLE |
-| mbedtls | Apache-2.0 | Crypto |
+| Monocypher | BSD-2-Clause | Ed25519 signing |
+| mbedtls | Apache-2.0 | TLS, AES, hashing |
 | FreeRTOS | MIT | RTOS kernel |
 | SDL2 | zlib | Simulator |
 | libcurl | MIT | Simulator HTTP |

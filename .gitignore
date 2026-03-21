@@ -18,6 +18,11 @@ managed_components/
 .DS_Store
 .cache/
 
+# Signing keys (NEVER commit private keys)
+*.key
+tools/dev_private.key
+tools/dev_public.key
+
 # Claude Code
 .claude/
 simulator/build/

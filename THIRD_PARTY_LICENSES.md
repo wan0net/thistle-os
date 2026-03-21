@@ -188,11 +188,49 @@ Full text: https://github.com/apache/mynewt-nimble/blob/master/LICENSE
 
 ---
 
+## Monocypher
+
+**License:** BSD-2-Clause OR CC0-1.0 (public domain)
+**Version:** 4.x
+**Source:** https://monocypher.org/ / https://github.com/LoupVaillant/Monocypher
+**Used for:** Ed25519 signature verification for apps, drivers, and firmware.
+
+```
+Copyright (c) 2017-2023, Loup Vaillant
+Copyright (c) 2017-2019, Michael Savage
+Copyright (c) 2017-2023, Fabio Scotoni
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+Full text: https://github.com/LoupVaillant/Monocypher/blob/master/LICENCE.md
+
+---
+
 ## mbedTLS
 
 **License:** Apache License 2.0
 **Source:** https://github.com/Mbed-TLS/mbedtls
-**Used for:** TLS (HTTPS app store), HMAC-SHA256 app signing, AES-256-CBC + PBKDF2-SHA256 (Vault), SHA-256 OTA verification. Included via ESP-IDF.
+**Used for:** TLS (HTTPS app store), AES-256-CBC + PBKDF2-SHA256 (Vault), SHA-256 OTA verification. Included via ESP-IDF.
 
 ```
 Copyright The Mbed TLS Contributors
@@ -337,6 +375,7 @@ All dependencies are compatible with the ThistleOS BSD 3-Clause license:
 |---------|------------------------------|------------|
 | Apache-2.0 | Yes | ESP-IDF, esp_lvgl_port, esp_modem, elf_loader, NimBLE, mbedTLS |
 | MIT | Yes | LVGL, FreeRTOS, RadioLib, libcurl, Unity, esp-rs crates |
+| BSD-2-Clause | Yes | Monocypher |
 | zlib | Yes | SDL2 |
 | MIT OR Apache-2.0 | Yes | esp-idf-hal, esp-idf-svc, esp-idf-sys |
 

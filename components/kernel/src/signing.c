@@ -2,21 +2,16 @@
 // Copyright (c) ThistleOS contributors
 
 /*
- * signing.c — ELF app signature verification for ThistleOS
+ * signing.c — Ed25519 signature verification for ThistleOS
  *
- * Current scheme: SHA-256 hash + HMAC-SHA256 tag (64-byte signature file).
- *   sig[0..31]  = SHA-256 of ELF binary
- *   sig[32..63] = HMAC-SHA256(key, sha256_of_elf)
- *
- * NOTE: This is a placeholder for a full Ed25519 implementation. The public
- * API is Ed25519-compatible (32-byte key, 64-byte signature). Upgrade the
- * signing_verify() internals to use mbedtls PSA Crypto Ed25519 for production.
+ * Uses Monocypher's crypto_eddsa_check() for Ed25519 verification.
+ * Signature format: raw 64-byte Ed25519 signature in .sig file alongside ELF.
+ * Key format: raw 32-byte Ed25519 public key embedded in firmware.
  */
 
 #include "thistle/signing.h"
 #include "esp_log.h"
-#include "mbedtls/sha256.h"
-#include "mbedtls/md.h"
+#include "monocypher.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,9 +43,7 @@ esp_err_t signing_init(const uint8_t public_key[THISTLE_SIGN_KEY_SIZE])
 /* --------------------------------------------------------------------------
  * signing_verify
  *
- * Verifies a 64-byte signature over an arbitrary data buffer.
- *   signature[0..31]  must equal SHA-256(data)
- *   signature[32..63] must equal HMAC-SHA256(public_key, SHA-256(data))
+ * Verifies a 64-byte Ed25519 signature over an arbitrary data buffer.
  * -------------------------------------------------------------------------- */
 esp_err_t signing_verify(const uint8_t *data, size_t data_len,
                           const uint8_t signature[THISTLE_SIGN_SIG_SIZE])
@@ -58,25 +51,9 @@ esp_err_t signing_verify(const uint8_t *data, size_t data_len,
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (!data || !signature) return ESP_ERR_INVALID_ARG;
 
-    /* Step 1: Compute SHA-256 of the data */
-    uint8_t hash[32];
-    mbedtls_sha256(data, data_len, hash, 0 /* is224=0 => SHA-256 */);
-
-    /* Step 2: First 32 bytes of signature must match the hash */
-    if (memcmp(signature, hash, 32) != 0) {
-        ESP_LOGW(TAG, "Signature hash mismatch");
-        return ESP_ERR_INVALID_CRC;
-    }
-
-    /* Step 3: Verify HMAC-SHA256 tag (last 32 bytes of signature) */
-    uint8_t expected_hmac[32];
-    mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                    s_public_key, THISTLE_SIGN_KEY_SIZE,
-                    hash, 32,
-                    expected_hmac);
-
-    if (memcmp(signature + 32, expected_hmac, 32) != 0) {
-        ESP_LOGW(TAG, "Signature HMAC mismatch");
+    /* Ed25519 signature verification via Monocypher */
+    if (crypto_eddsa_check(signature, s_public_key, data, data_len) != 0) {
+        ESP_LOGW(TAG, "Ed25519 signature verification failed");
         return ESP_ERR_INVALID_CRC;
     }
 
