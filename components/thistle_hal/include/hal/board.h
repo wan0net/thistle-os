@@ -33,6 +33,11 @@ typedef struct {
     const hal_storage_driver_t *storage[HAL_MAX_STORAGE_DRIVERS];
     const void                 *storage_configs[HAL_MAX_STORAGE_DRIVERS];
     uint8_t                     storage_count;
+    /* Shared bus handles — initialized by kernel, queried by drivers */
+    void *spi_bus[2];          /* SPI host handles (HSPI, VSPI or SPI2, SPI3) */
+    uint8_t spi_bus_count;
+    void *i2c_bus[2];          /* I2C master bus handles */
+    uint8_t i2c_bus_count;
     const char                 *board_name;
 } hal_registry_t;
 
@@ -49,6 +54,18 @@ esp_err_t hal_power_register(const hal_power_driver_t *driver, const void *confi
 esp_err_t hal_imu_register(const hal_imu_driver_t *driver, const void *config);
 esp_err_t hal_storage_register(const hal_storage_driver_t *driver, const void *config);
 esp_err_t hal_set_board_name(const char *name);
+
+/* Register a shared SPI bus handle (called by kernel at boot) */
+esp_err_t hal_bus_register_spi(int host_id, void *bus_handle);
+
+/* Register a shared I2C bus handle (called by kernel at boot) */
+esp_err_t hal_bus_register_i2c(int port, void *bus_handle);
+
+/* Get a shared SPI bus handle by index */
+void *hal_bus_get_spi(int index);
+
+/* Get a shared I2C bus handle by index */
+void *hal_bus_get_i2c(int index);
 
 /* Board init — implemented by board_* component */
 esp_err_t board_init(void);

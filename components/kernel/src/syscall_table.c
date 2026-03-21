@@ -10,9 +10,14 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
+#include "driver/uart.h"
+#include "esp_timer.h"
+#include "driver/ledc.h"
+#include "esp_adc/adc_oneshot.h"
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -324,16 +329,59 @@ static syscall_entry_t s_table[] = {
     { "hal_get_registry",               (void *)hal_get_registry              },
 
 #ifndef SIMULATOR_BUILD
-    /* ESP-IDF functions drivers might need (not available in simulator) */
+    /* ESP-IDF — GPIO */
     { "esp_log_write",                  (void *)esp_log_write                 },
     { "gpio_config",                    (void *)gpio_config                   },
     { "gpio_set_level",                 (void *)gpio_set_level                },
     { "gpio_get_level",                 (void *)gpio_get_level                },
+    { "gpio_set_direction",             (void *)gpio_set_direction            },
+    { "gpio_set_pull_mode",             (void *)gpio_set_pull_mode            },
+    { "gpio_isr_handler_add",           (void *)gpio_isr_handler_add          },
+    { "gpio_isr_handler_remove",        (void *)gpio_isr_handler_remove       },
+    { "gpio_install_isr_service",       (void *)gpio_install_isr_service      },
+
+    /* ESP-IDF — SPI */
+    { "spi_bus_initialize",             (void *)spi_bus_initialize            },
     { "spi_bus_add_device",             (void *)spi_bus_add_device            },
+    { "spi_bus_remove_device",          (void *)spi_bus_remove_device         },
     { "spi_device_polling_transmit",    (void *)spi_device_polling_transmit   },
+    { "spi_device_transmit",            (void *)spi_device_transmit           },
+
+    /* ESP-IDF — I2C */
+    { "i2c_new_master_bus",             (void *)i2c_new_master_bus            },
     { "i2c_master_bus_add_device",      (void *)i2c_master_bus_add_device     },
+    { "i2c_master_bus_rm_device",       (void *)i2c_master_bus_rm_device      },
     { "i2c_master_transmit",            (void *)i2c_master_transmit           },
+    { "i2c_master_receive",             (void *)i2c_master_receive            },
     { "i2c_master_transmit_receive",    (void *)i2c_master_transmit_receive   },
+
+    /* ESP-IDF — UART */
+    { "uart_driver_install",            (void *)uart_driver_install           },
+    { "uart_param_config",              (void *)uart_param_config             },
+    { "uart_set_pin",                   (void *)uart_set_pin                  },
+    { "uart_read_bytes",                (void *)uart_read_bytes               },
+    { "uart_write_bytes",               (void *)uart_write_bytes              },
+
+    /* ESP-IDF — Timers */
+    { "esp_timer_create",               (void *)esp_timer_create              },
+    { "esp_timer_start_periodic",       (void *)esp_timer_start_periodic      },
+    { "esp_timer_start_once",           (void *)esp_timer_start_once          },
+    { "esp_timer_stop",                 (void *)esp_timer_stop                },
+    { "esp_timer_delete",               (void *)esp_timer_delete              },
+
+    /* ESP-IDF — FreeRTOS */
+    { "vTaskDelay",                     (void *)vTaskDelay                    },
+    { "xTaskCreate",                    (void *)xTaskCreate                   },
+    { "vTaskDelete",                    (void *)vTaskDelete                   },
+    { "xQueueCreate",                   (void *)xQueueCreate                  },
+    { "xQueueSend",                     (void *)xQueueSend                    },
+    { "xQueueReceive",                  (void *)xQueueReceive                 },
+
+    /* HAL bus handles — for runtime drivers to access shared buses */
+    { "hal_bus_register_spi",           (void *)hal_bus_register_spi          },
+    { "hal_bus_register_i2c",           (void *)hal_bus_register_i2c          },
+    { "hal_bus_get_spi",                (void *)hal_bus_get_spi               },
+    { "hal_bus_get_i2c",                (void *)hal_bus_get_i2c               },
 #endif
 };
 

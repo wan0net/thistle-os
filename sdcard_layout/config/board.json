@@ -1,0 +1,134 @@
+{
+    "board": {
+        "name": "LilyGo T-Deck Pro",
+        "arch": "esp32s3",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": 41,
+                "miso": 38,
+                "sclk": 40,
+                "max_transfer_bytes": 9600
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 18,
+                "scl": 8,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.epaper",
+            "hal": "display",
+            "entry": "epaper_gdeq031t10.drv.elf",
+            "config": {
+                "cs": 42,
+                "dc": 1,
+                "rst": 2,
+                "busy": 39,
+                "spi_bus": 0,
+                "width": 320,
+                "height": 240
+            }
+        },
+        {
+            "id": "com.thistle.drv.kbd",
+            "hal": "input",
+            "entry": "kbd_tca8418.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x34",
+                "int_pin": 46
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch",
+            "hal": "input",
+            "entry": "touch_cst328.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x1A",
+                "int_pin": 16,
+                "rst_pin": 48
+            }
+        },
+        {
+            "id": "com.thistle.drv.radio",
+            "hal": "radio",
+            "entry": "radio_sx1262.drv.elf",
+            "config": {
+                "cs": 9,
+                "rst": 5,
+                "busy": 36,
+                "dio1": 45,
+                "spi_bus": 0
+            }
+        },
+        {
+            "id": "com.thistle.drv.gps",
+            "hal": "gps",
+            "entry": "gps_mia_m10q.drv.elf",
+            "config": {
+                "uart_num": 1,
+                "tx": 17,
+                "rx": 15,
+                "baud": 9600
+            }
+        },
+        {
+            "id": "com.thistle.drv.audio",
+            "hal": "audio",
+            "entry": "audio_pcm5102a.drv.elf",
+            "config": {
+                "bck": 7,
+                "ws": 6,
+                "data": 3
+            }
+        },
+        {
+            "id": "com.thistle.drv.power",
+            "hal": "power",
+            "entry": "power_tp4065b.drv.elf",
+            "config": {
+                "adc_pin": 4,
+                "charge_pin": 10
+            }
+        },
+        {
+            "id": "com.thistle.drv.imu",
+            "hal": "imu",
+            "entry": "imu_bhi260ap.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x28",
+                "int_pin": 14
+            }
+        },
+        {
+            "id": "com.thistle.drv.light",
+            "hal": "sensor",
+            "entry": "light_ltr553als.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x23"
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "cs": 43,
+                "spi_bus": 0,
+                "mount_point": "/sdcard"
+            }
+        }
+    ]
+}

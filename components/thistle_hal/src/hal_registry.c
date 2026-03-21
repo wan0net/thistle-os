@@ -16,6 +16,10 @@ static hal_registry_t s_registry = {
     .imu           = NULL,
     .storage       = { NULL },
     .storage_count = 0,
+    .spi_bus       = { NULL },
+    .spi_bus_count = 0,
+    .i2c_bus       = { NULL },
+    .i2c_bus_count = 0,
     .board_name    = NULL,
 };
 
@@ -136,4 +140,44 @@ esp_err_t hal_set_board_name(const char *name)
     s_registry.board_name = name;
     ESP_LOGI(TAG, "board: %s", name);
     return ESP_OK;
+}
+
+esp_err_t hal_bus_register_spi(int host_id, void *bus_handle)
+{
+    if (!bus_handle) return ESP_ERR_INVALID_ARG;
+    if (s_registry.spi_bus_count >= 2) {
+        ESP_LOGE(TAG, "SPI bus registration failed: max 2 buses");
+        return ESP_ERR_NO_MEM;
+    }
+    uint8_t idx = s_registry.spi_bus_count;
+    s_registry.spi_bus[idx] = bus_handle;
+    s_registry.spi_bus_count++;
+    ESP_LOGI(TAG, "SPI bus %d registered (host %d)", idx, host_id);
+    return ESP_OK;
+}
+
+esp_err_t hal_bus_register_i2c(int port, void *bus_handle)
+{
+    if (!bus_handle) return ESP_ERR_INVALID_ARG;
+    if (s_registry.i2c_bus_count >= 2) {
+        ESP_LOGE(TAG, "I2C bus registration failed: max 2 buses");
+        return ESP_ERR_NO_MEM;
+    }
+    uint8_t idx = s_registry.i2c_bus_count;
+    s_registry.i2c_bus[idx] = bus_handle;
+    s_registry.i2c_bus_count++;
+    ESP_LOGI(TAG, "I2C bus %d registered (port %d)", idx, port);
+    return ESP_OK;
+}
+
+void *hal_bus_get_spi(int index)
+{
+    if (index < 0 || index >= s_registry.spi_bus_count) return NULL;
+    return s_registry.spi_bus[index];
+}
+
+void *hal_bus_get_i2c(int index)
+{
+    if (index < 0 || index >= s_registry.i2c_bus_count) return NULL;
+    return s_registry.i2c_bus[index];
 }
