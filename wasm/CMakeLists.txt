@@ -133,6 +133,7 @@ target_link_options(thistle_wasm PRIVATE
     -sEXPORTED_FUNCTIONS=['_main']
     -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']
     --preload-file ${THISTLE_DIR}/simulator/sdcard@/thistle_sdcard
+    --shell-file ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
 )
 
 target_link_libraries(thistle_wasm PRIVATE ${RUST_WASM_LIB})
