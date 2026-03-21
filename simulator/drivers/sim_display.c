@@ -1,5 +1,9 @@
 #include "sim_display.h"
+#ifdef __EMSCRIPTEN__
+#include <SDL/SDL.h>
+#else
 #include <SDL2/SDL.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -36,10 +40,15 @@ static esp_err_t sim_display_init(const void *config)
         return ESP_FAIL;
     }
 
+    /* Emscripten SDL2 works best with software renderer */
+#ifdef __EMSCRIPTEN__
+    s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_SOFTWARE);
+#else
     s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!s_renderer) {
         s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_SOFTWARE);
     }
+#endif
     if (!s_renderer) {
         printf("SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(s_window);

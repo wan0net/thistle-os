@@ -1,5 +1,9 @@
 #include "sim_input.h"
+#ifdef __EMSCRIPTEN__
+#include <SDL/SDL.h>
+#else
 #include <SDL2/SDL.h>
+#endif
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
