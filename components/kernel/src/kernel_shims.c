@@ -159,13 +159,37 @@ int wifi_ap_record_is_open(const wifi_ap_record_t *ap) {
 }
 
 // ── BLE C shims ─────────────────────────────────────────────────────
-// The Rust ble_manager calls these for NimBLE operations
+// The Rust ble_manager calls these for NimBLE operations.
+// These wrap the real NimBLE API so the Rust staticlib doesn't need
+// to directly link against the bt component.
+#include "host/ble_gap.h"
+#include "host/ble_gatt.h"
+#include "host/ble_hs.h"
+#include "host/ble_hs_mbuf.h"
+#include "services/gap/ble_svc_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+
 void ble_manager_do_advertise(void) {
-    // NimBLE advertising — implemented in ble C shim when needed
+    // TODO: configure and start BLE advertising
 }
 void ble_manager_register_gatt_services(void) {
-    // NimBLE GATT service registration — implemented in ble C shim when needed
+    // TODO: register GATT services
 }
+
+// NimBLE wrappers called by Rust ble_manager via extern "C"
+int ble_shim_gap_adv_stop(void) { return ble_gap_adv_stop(); }
+int ble_shim_gap_terminate(uint16_t conn, uint8_t reason) { return ble_gap_terminate(conn, reason); }
+int ble_shim_svc_gap_device_name_set(const char *name) { return ble_svc_gap_device_name_set(name); }
+void ble_shim_svc_gap_init(void) { ble_svc_gap_init(); }
+void ble_shim_svc_gatt_init(void) { ble_svc_gatt_init(); }
+int ble_shim_nimble_port_init(void) { return nimble_port_init(); }
+void ble_shim_nimble_port_freertos_init(void *fn) { nimble_port_freertos_init(fn); }
+void ble_shim_nimble_port_freertos_deinit(void) { nimble_port_freertos_deinit(); }
+void ble_shim_nimble_port_run(void) { nimble_port_run(); }
+struct os_mbuf *ble_shim_hs_mbuf_from_flat(const void *buf, uint16_t len) { return ble_hs_mbuf_from_flat(buf, len); }
+int ble_shim_gatts_notify_custom(uint16_t conn, uint16_t val, struct os_mbuf *om) { return ble_gatts_notify_custom(conn, val, om); }
 
 // ── Crypto HAL accessor ─────────────────────────────────────────────
 const void *hal_crypto_get(void) {
