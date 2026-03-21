@@ -127,15 +127,22 @@ char *permissions_to_string(permission_set_t perms, char *buf, size_t buf_len) {
 #include "esp_event.h"
 #include "esp_netif.h"
 
+static int s_wifi_hw_initialized = 0;
 int wifi_manager_init_hardware(void) {
+    if (s_wifi_hw_initialized) return 0;
     esp_err_t ret;
     ret = esp_netif_init();
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) return ret;
     ret = esp_event_loop_create_default();
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) return ret;
-    esp_netif_create_default_wifi_sta();
+    // Check if STA interface already exists before creating
+    esp_netif_t *existing = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_t *sta = existing ? existing : esp_netif_create_default_wifi_sta();
+    if (!sta) return -1;
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    return esp_wifi_init(&cfg);
+    ret = esp_wifi_init(&cfg);
+    if (ret == ESP_OK) s_wifi_hw_initialized = 1;
+    return ret;
 }
 
 int wifi_manager_do_ntp_sync(void) {

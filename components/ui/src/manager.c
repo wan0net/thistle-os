@@ -245,7 +245,7 @@ esp_err_t ui_manager_init(void)
     esp_timer_start_periodic(tick_timer, 1000); /* 1 ms */
 
     /* 6b. Start LVGL handler task */
-    BaseType_t ret = xTaskCreate(lvgl_task, "lvgl", 4096, NULL, 5, NULL);
+    BaseType_t ret = xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "failed to create LVGL task");
         return ESP_ERR_NO_MEM;
