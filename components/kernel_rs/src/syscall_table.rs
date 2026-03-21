@@ -1,0 +1,398 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// ThistleOS Kernel — syscall_table module
+//
+// Port of components/kernel/src/syscall_table.c
+// Provides a static table of (name, function-pointer) pairs that maps
+// kernel/HAL symbol names to their addresses for ELF dynamic linking.
+
+use std::ffi::CStr;
+use std::os::raw::{c_char, c_void};
+
+// ---------------------------------------------------------------------------
+// ESP-IDF error codes
+// ---------------------------------------------------------------------------
+
+const ESP_OK: i32 = 0x000;
+
+// ---------------------------------------------------------------------------
+// C functions exported in the syscall table
+//
+// Each extern "C" block declares one group of related symbols.
+// On simulator builds the ESP-IDF-specific ones are excluded.
+// ---------------------------------------------------------------------------
+
+extern "C" {
+    // Kernel subsystems (Rust)
+    fn kernel_uptime_ms() -> u32;
+
+    // IPC (Rust)
+    fn ipc_send(msg: *const c_void) -> i32;
+    fn ipc_recv(msg: *mut c_void, timeout_ms: u32) -> i32;
+
+    // Event bus (Rust)
+    fn event_subscribe(event_type: u32, handler: *const c_void, user_data: *mut c_void) -> i32;
+    fn event_publish(event: *const c_void) -> i32;
+
+    // HAL registry
+    fn hal_get_registry() -> *const c_void;
+    fn hal_display_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_input_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_radio_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_gps_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_audio_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_power_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_imu_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_storage_register(drv: *const c_void, cfg: *const c_void) -> i32;
+    fn hal_set_board_name(name: *const c_char);
+
+    // HAL bus
+    fn hal_bus_register_spi(bus: *const c_void) -> i32;
+    fn hal_bus_register_i2c(bus: *const c_void) -> i32;
+    fn hal_bus_get_spi(id: u32) -> *const c_void;
+    fn hal_bus_get_i2c(id: u32) -> *const c_void;
+
+    // Driver loader config (Rust)
+    fn driver_loader_get_config() -> *const c_char;
+
+    // Logging
+    fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
+}
+
+// FreeRTOS — stubs provided in simulator
+extern "C" {
+    fn vTaskDelay(ticks: u32);
+    fn xTaskCreatePinnedToCore(
+        task_fn: *const c_void,
+        name: *const c_char,
+        stack: u32,
+        param: *mut c_void,
+        prio: u32,
+        handle: *mut *mut c_void,
+        core: i32,
+    ) -> i32;
+    fn vTaskDelete(task: *mut c_void);
+    fn xQueueGenericCreate(length: u32, item_size: u32, queue_type: u8) -> *mut c_void;
+    fn xQueueGenericSend(
+        queue: *mut c_void,
+        item: *const c_void,
+        ticks_to_wait: u32,
+        copy_pos: i32,
+    ) -> i32;
+    fn xQueueReceive(queue: *mut c_void, buf: *mut c_void, ticks_to_wait: u32) -> i32;
+}
+
+// ---------------------------------------------------------------------------
+// ESP-IDF platform-specific symbols (hardware only)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "espidf")]
+extern "C" {
+    fn esp_timer_create(args: *const c_void, out: *mut *mut c_void) -> i32;
+    fn esp_timer_start_periodic(timer: *mut c_void, period_us: i64) -> i32;
+    fn esp_timer_start_once(timer: *mut c_void, timeout_us: i64) -> i32;
+    fn esp_timer_stop(timer: *mut c_void) -> i32;
+    fn esp_timer_delete(timer: *mut c_void) -> i32;
+
+    fn gpio_config(config: *const c_void) -> i32;
+    fn gpio_set_level(pin: u32, level: u32) -> i32;
+    fn gpio_get_level(pin: u32) -> i32;
+    fn gpio_set_direction(pin: u32, mode: u32) -> i32;
+    fn gpio_set_pull_mode(pin: u32, mode: u32) -> i32;
+    fn gpio_isr_handler_add(pin: u32, handler: *const c_void, arg: *mut c_void) -> i32;
+    fn gpio_isr_handler_remove(pin: u32) -> i32;
+    fn gpio_install_isr_service(flags: i32) -> i32;
+
+    fn spi_bus_initialize(host: u32, cfg: *const c_void, dma_chan: i32) -> i32;
+    fn spi_bus_add_device(host: u32, cfg: *const c_void, handle: *mut *mut c_void) -> i32;
+    fn spi_bus_remove_device(handle: *mut c_void) -> i32;
+    fn spi_device_polling_transmit(handle: *mut c_void, trans: *mut c_void) -> i32;
+    fn spi_device_transmit(handle: *mut c_void, trans: *mut c_void) -> i32;
+
+    fn i2c_new_master_bus(cfg: *const c_void, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const c_void, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
+    fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_receive(handle: *mut c_void, buf: *mut u8, len: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_transmit_receive(
+        handle: *mut c_void,
+        write_data: *const u8,
+        write_size: usize,
+        read_data: *mut u8,
+        read_size: usize,
+        timeout_ms: i32,
+    ) -> i32;
+
+    fn uart_driver_install(port: u32, rx_buf: i32, tx_buf: i32, queue_size: i32, queue: *mut *mut c_void, flags: i32) -> i32;
+    fn uart_param_config(port: u32, cfg: *const c_void) -> i32;
+    fn uart_set_pin(port: u32, tx: i32, rx: i32, rts: i32, cts: i32) -> i32;
+    fn uart_read_bytes(port: u32, buf: *mut u8, len: u32, timeout: u32) -> i32;
+    fn uart_write_bytes(port: u32, buf: *const u8, len: usize) -> i32;
+}
+
+// ---------------------------------------------------------------------------
+// Syscall entry type
+// ---------------------------------------------------------------------------
+
+#[repr(C)]
+pub struct SyscallEntry {
+    pub name: *const c_char,
+    pub func_ptr: *const c_void,
+}
+
+// SAFETY: All pointers are to static data and long-lived C function pointers.
+unsafe impl Send for SyscallEntry {}
+unsafe impl Sync for SyscallEntry {}
+
+// ---------------------------------------------------------------------------
+// Syscall implementations (thin wrappers calling kernel subsystems)
+// ---------------------------------------------------------------------------
+
+unsafe extern "C" fn thistle_log(tag: *const c_char, msg: *const c_char) {
+    let t = if tag.is_null() { b"app\0".as_ptr() } else { tag as *const u8 };
+    let m = if msg.is_null() { b"\0".as_ptr() } else { msg as *const u8 };
+    esp_log_write(3 /* INFO */, t, b"%s\0".as_ptr(), m);
+}
+
+unsafe extern "C" fn thistle_millis() -> u32 {
+    kernel_uptime_ms()
+}
+
+unsafe extern "C" fn thistle_delay(ms: u32) {
+    #[cfg(target_os = "espidf")]
+    {
+        // pdMS_TO_TICKS: on 100 Hz tick rate, 1 tick = 10 ms
+        vTaskDelay((ms + 9) / 10);
+    }
+    #[cfg(not(target_os = "espidf"))]
+    {
+        std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+    }
+}
+
+unsafe extern "C" fn thistle_malloc(size: usize) -> *mut c_void {
+    libc_malloc(size)
+}
+
+unsafe extern "C" fn thistle_free(ptr: *mut c_void) {
+    libc_free(ptr);
+}
+
+unsafe extern "C" fn thistle_realloc(ptr: *mut c_void, size: usize) -> *mut c_void {
+    libc_realloc(ptr, size)
+}
+
+unsafe extern "C" fn thistle_msg_send(msg: *const c_void) -> i32 {
+    ipc_send(msg)
+}
+
+unsafe extern "C" fn thistle_msg_recv(msg: *mut c_void, timeout_ms: u32) -> i32 {
+    ipc_recv(msg, timeout_ms)
+}
+
+unsafe extern "C" fn thistle_event_subscribe(
+    event_type: u32,
+    handler: *const c_void,
+    user_data: *mut c_void,
+) -> i32 {
+    event_subscribe(event_type, handler, user_data)
+}
+
+unsafe extern "C" fn thistle_event_publish(event: *const c_void) -> i32 {
+    event_publish(event)
+}
+
+// Display helpers — read from HAL registry
+unsafe extern "C" fn thistle_display_get_width() -> u16 {
+    // The display vtable's width field is at a known offset.
+    // We delegate to a C helper to avoid duplicating the struct layout.
+    hal_display_get_width_helper()
+}
+
+unsafe extern "C" fn thistle_display_get_height() -> u16 {
+    hal_display_get_height_helper()
+}
+
+extern "C" {
+    fn hal_display_get_width_helper() -> u16;
+    fn hal_display_get_height_helper() -> u16;
+
+    fn thistle_input_register_cb_impl(cb: *const c_void, user_data: *mut c_void) -> i32;
+    fn thistle_radio_send_impl(data: *const u8, len: usize) -> i32;
+    fn thistle_radio_start_rx_impl(cb: *const c_void, user_data: *mut c_void) -> i32;
+    fn thistle_radio_set_freq_impl(freq_hz: u32) -> i32;
+    fn thistle_gps_get_position_impl(pos: *mut c_void) -> i32;
+    fn thistle_gps_enable_impl() -> i32;
+    fn thistle_fs_open_impl(path: *const c_char, mode: *const c_char) -> *mut c_void;
+    fn thistle_fs_read_impl(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> i32;
+    fn thistle_fs_write_impl(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> i32;
+    fn thistle_fs_close_impl(stream: *mut c_void) -> i32;
+    fn thistle_power_get_battery_mv_impl() -> u16;
+    fn thistle_power_get_battery_pct_impl() -> u8;
+}
+
+// libc malloc/free/realloc — available in both espidf and simulator
+extern "C" {
+    fn libc_malloc(size: usize) -> *mut c_void;
+    fn libc_free(ptr: *mut c_void);
+    fn libc_realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+}
+
+// ---------------------------------------------------------------------------
+// Static syscall table
+//
+// All entries cast their function pointers to *const c_void.
+// The C code receives this as a `const syscall_entry_t *`.
+// ---------------------------------------------------------------------------
+
+macro_rules! entry {
+    ($name:literal, $fn:expr) => {
+        SyscallEntry {
+            name: concat!($name, "\0").as_ptr() as *const c_char,
+            func_ptr: $fn as *const c_void,
+        }
+    };
+}
+
+static SYSCALL_TABLE: &[SyscallEntry] = &[
+    // System
+    entry!("thistle_log",                   thistle_log                         as unsafe extern "C" fn(*const c_char, *const c_char)),
+    entry!("thistle_millis",                thistle_millis                      as unsafe extern "C" fn() -> u32),
+    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
+    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
+    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
+    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
+
+    // Display
+    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
+    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
+
+    // Input
+    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+
+    // Radio
+    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32),
+    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32),
+
+    // GPS
+    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32),
+
+    // Storage
+    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void),
+    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32),
+    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+
+    // IPC
+    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32),
+    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
+    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
+
+    // Power
+    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
+    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
+
+    // HAL registration
+    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
+    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
+
+    // HAL bus
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
+
+    // FreeRTOS
+    entry!("vTaskDelay",                    vTaskDelay                          as unsafe extern "C" fn(u32)),
+    entry!("xTaskCreatePinnedToCore",       xTaskCreatePinnedToCore             as unsafe extern "C" fn(*const c_void, *const c_char, u32, *mut c_void, u32, *mut *mut c_void, i32) -> i32),
+    entry!("vTaskDelete",                   vTaskDelete                         as unsafe extern "C" fn(*mut c_void)),
+    entry!("xQueueGenericCreate",           xQueueGenericCreate                 as unsafe extern "C" fn(u32, u32, u8) -> *mut c_void),
+    entry!("xQueueGenericSend",             xQueueGenericSend                   as unsafe extern "C" fn(*mut c_void, *const c_void, u32, i32) -> i32),
+    entry!("xQueueReceive",                 xQueueReceive                       as unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> i32),
+
+    // Driver config
+    entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
+
+    // Logging
+    entry!("esp_log_write",                 esp_log_write                       as unsafe extern "C" fn(i32, *const u8, *const u8, ...)),
+];
+
+// ---------------------------------------------------------------------------
+// FFI exports
+// ---------------------------------------------------------------------------
+
+/// Initialise the syscall table (logs count, no other work required).
+///
+/// # Safety
+/// May be called from C.
+#[no_mangle]
+pub extern "C" fn syscall_table_init() -> i32 {
+    unsafe {
+        esp_log_write(
+            3,
+            b"syscall\0".as_ptr(),
+            b"Syscall table initialized with %d entries\0".as_ptr(),
+            SYSCALL_TABLE.len() as i32,
+        );
+    }
+    ESP_OK
+}
+
+/// Return a pointer to the first entry in the syscall table.
+///
+/// # Safety
+/// Returns a pointer to static data. Do not free.
+#[no_mangle]
+pub extern "C" fn syscall_table_get() -> *const SyscallEntry {
+    SYSCALL_TABLE.as_ptr()
+}
+
+/// Return the number of entries in the syscall table.
+#[no_mangle]
+pub extern "C" fn syscall_table_count() -> usize {
+    SYSCALL_TABLE.len()
+}
+
+/// Look up a symbol by name. Returns its address or NULL if not found.
+///
+/// # Safety
+/// `name` must be a valid null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
+    if name.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let name_str = match CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    for entry in SYSCALL_TABLE {
+        let entry_name = match CStr::from_ptr(entry.name).to_str() {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if entry_name == name_str {
+            return entry.func_ptr as *mut c_void;
+        }
+    }
+
+    esp_log_write(
+        2, // WARN
+        b"syscall\0".as_ptr(),
+        b"syscall_resolve: unknown symbol '%s'\0".as_ptr(),
+        name,
+    );
+    std::ptr::null_mut()
+}

@@ -389,6 +389,7 @@ dependencies = [
  "ed25519-dalek",
  "embuild",
  "log",
+ "sha2",
 ]
 
 [[package]]

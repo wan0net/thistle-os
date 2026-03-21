@@ -19,13 +19,9 @@ file(GLOB_RECURSE LVGL_SRCS
 # ThistleOS source files (kernel, UI, HAL, apps)
 set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
-    # HAL
+    # HAL (C — vtable interfaces, stays C)
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
-    # Kernel — C thin wrappers only (core logic is Rust via libthistle_kernel.a)
-    ${THISTLE_DIR}/components/kernel/src/appstore_client.c
-    ${THISTLE_DIR}/components/kernel/src/driver_manager.c
-    ${THISTLE_DIR}/components/kernel/src/syscall_table.c
-    ${THISTLE_DIR}/components/kernel/src/net_manager.c
+    # Kernel is 100% Rust (libthistle_kernel.a) — no C kernel sources
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c
@@ -75,9 +71,8 @@ set(SIM_SRCS
     drivers/sim_display.c
     drivers/sim_input.c
     drivers/sim_storage.c
-    drivers/sim_wifi.c
-    drivers/sim_ble.c
     drivers/sim_network.c
+    # sim_wifi.c and sim_ble.c removed — Rust kernel provides wifi_manager + ble_manager
     board_simulator.c
 )
 
