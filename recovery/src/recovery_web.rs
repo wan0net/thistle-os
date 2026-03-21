@@ -130,7 +130,7 @@ function reboot() {
 
 pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     // Serve the main recovery page
-    server.fn_handler("/", esp_idf_svc::http::Method::Get, |req| {
+    server.fn_handler("/", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
         let mut resp = req.into_response(200, None, &[])?;
         resp.write(RECOVERY_HTML.as_bytes())?;
         Ok(())
@@ -138,7 +138,7 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
 
     // Captive portal redirect — iOS/Android check these
     for path in &["/generate_204", "/hotspot-detect.html", "/connecttest.txt"] {
-        server.fn_handler(path, esp_idf_svc::http::Method::Get, |req| {
+        server.fn_handler(path, esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
             let mut resp = req.into_response(302, None, &[("Location", "/")])?;
             resp.write(b"Redirecting to recovery portal...")?;
             Ok(())
@@ -146,7 +146,7 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     }
 
     // API: status
-    server.fn_handler("/api/status", esp_idf_svc::http::Method::Get, |req| {
+    server.fn_handler("/api/status", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
         let status = format!(
             r#"{{"version":"{}","mode":"recovery","ota1":"{:?}","sd_firmware":{}}}"#,
             super::VERSION,
@@ -159,7 +159,7 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     })?;
 
     // API: reboot
-    server.fn_handler("/api/reboot", esp_idf_svc::http::Method::Post, |req| {
+    server.fn_handler("/api/reboot", esp_idf_svc::http::Method::Post, |req| -> anyhow::Result<()> {
         let mut resp = req.into_response(200, None, &[])?;
         resp.write(b"{\"ok\":true}")?;
         info!("Reboot requested via web UI");

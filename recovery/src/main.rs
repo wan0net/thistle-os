@@ -21,7 +21,6 @@ use esp_idf_sys as _;
 
 use log::*;
 use std::io::{BufRead, Write};
-use std::net::Ipv4Addr;
 
 mod recovery_ota;
 mod recovery_web;
@@ -157,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                 wifi.scan().ok();
                 if let Ok(results) = wifi.scan() {
                     for (i, ap) in results.iter().enumerate().take(15) {
-                        let lock = if ap.auth_method == AuthMethod::None {
+                        let lock = if ap.auth_method == Some(AuthMethod::None) {
                             "[open]"
                         } else {
                             "[secured]"

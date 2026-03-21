@@ -4,8 +4,6 @@
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_sys::*;
 use log::*;
-use std::ffi::CString;
-use std::io::Read;
 
 const SD_FIRMWARE_PATH: &str = "/sdcard/update/thistle_os.bin";
 const MAX_FIRMWARE_SIZE: usize = 4 * 1024 * 1024; // 4MB
@@ -122,7 +120,7 @@ fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
         let mut written = 0;
         while written < total {
             let end = std::cmp::min(written + chunk_size, total);
-            let ret = esp_ota_write(handle, data[written..end].as_ptr() as *const _, (end - written) as u32);
+            let ret = esp_ota_write(handle, data[written..end].as_ptr() as *const _, end - written);
             if ret != ESP_OK as i32 {
                 esp_ota_abort(handle);
                 anyhow::bail!("esp_ota_write failed at offset {}: {}", written, ret);
