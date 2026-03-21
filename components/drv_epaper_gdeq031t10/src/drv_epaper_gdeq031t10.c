@@ -96,6 +96,11 @@ static struct {
 
 static void epaper_hw_reset(void)
 {
+    if (s_epd.cfg.pin_rst < 0) {
+        /* RST not connected — skip hardware reset, just wait */
+        vTaskDelay(pdMS_TO_TICKS(20));
+        return;
+    }
     gpio_set_level(s_epd.cfg.pin_rst, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(s_epd.cfg.pin_rst, 1);
@@ -186,7 +191,7 @@ static esp_err_t gdeq031t10_init(const void *config)
         .intr_type    = GPIO_INTR_DISABLE,
         .pin_bit_mask = (1ULL << s_epd.cfg.pin_cs)  |
                         (1ULL << s_epd.cfg.pin_dc)  |
-                        (1ULL << s_epd.cfg.pin_rst),
+                        ((s_epd.cfg.pin_rst >= 0) ? (1ULL << s_epd.cfg.pin_rst) : 0),
     };
     esp_err_t ret = gpio_config(&io_conf); if (ret != ESP_OK) goto fail;
 

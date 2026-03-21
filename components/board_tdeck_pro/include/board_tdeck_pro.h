@@ -6,15 +6,15 @@
 
 /* === SPI Bus (shared: display + radio + SD) === */
 #define BOARD_SPI_HOST       SPI2_HOST
-#define BOARD_SPI_MOSI       GPIO_NUM_41
-#define BOARD_SPI_MISO       GPIO_NUM_38
-#define BOARD_SPI_SCLK       GPIO_NUM_40
+#define BOARD_SPI_MOSI       GPIO_NUM_33
+#define BOARD_SPI_MISO       GPIO_NUM_47
+#define BOARD_SPI_SCLK       GPIO_NUM_36
 
 /* === E-Paper Display (GDEQ031T10) === */
-#define BOARD_EPAPER_CS      GPIO_NUM_42
-#define BOARD_EPAPER_DC      GPIO_NUM_1
-#define BOARD_EPAPER_RST     GPIO_NUM_2
-#define BOARD_EPAPER_BUSY    GPIO_NUM_39
+#define BOARD_EPAPER_CS      GPIO_NUM_34
+#define BOARD_EPAPER_DC      GPIO_NUM_35
+#define BOARD_EPAPER_RST     (-1)        /* Not connected on T-Deck Pro */
+#define BOARD_EPAPER_BUSY    GPIO_NUM_37
 
 /* === LoRa Radio (SX1262) === */
 #define BOARD_LORA_CS        GPIO_NUM_9
