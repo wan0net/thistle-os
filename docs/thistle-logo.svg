@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="ThistleOS logo">
+  <title>ThistleOS</title>
+
+  <!-- Stem -->
+  <line x1="100" y1="198" x2="100" y2="108" stroke="#166534" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Lower leaf pair -->
+  <path d="M100 175 C90 168 72 165 65 155" stroke="#166534" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M100 175 C110 168 128 165 135 155" stroke="#166534" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M65 155 L60 148" stroke="#166534" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M135 155 L140 148" stroke="#166534" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Upper leaf pair -->
+  <path d="M100 148 C88 140 70 138 62 128" stroke="#166534" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M100 148 C112 140 130 138 138 128" stroke="#166534" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M62 128 L56 120" stroke="#166534" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M138 128 L144 120" stroke="#166534" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Calyx (green base of flower head) -->
+  <ellipse cx="100" cy="106" rx="16" ry="7" fill="#166534"/>
+  <path d="M84 106 Q88 115 100 118 Q112 115 116 106" fill="#166534"/>
+
+  <!-- Thistle head: spiky crown of petals radiating outward -->
+  <!-- Central filled core -->
+  <ellipse cx="100" cy="75" rx="22" ry="25" fill="#7C3AED"/>
+
+  <!-- Outer spikes radiating from the crown — drawn as elongated triangular petals -->
+  <!-- Top center -->
+  <polygon points="100,28 96,58 104,58" fill="#6D28D9"/>
+  <!-- Top-left 1 -->
+  <polygon points="77,35 82,63 88,60" fill="#6D28D9"/>
+  <!-- Top-right 1 -->
+  <polygon points="123,35 112,60 118,63" fill="#6D28D9"/>
+  <!-- Top-left 2 -->
+  <polygon points="60,52 75,72 80,66" fill="#7C3AED"/>
+  <!-- Top-right 2 -->
+  <polygon points="140,52 120,66 125,72" fill="#7C3AED"/>
+  <!-- Left side -->
+  <polygon points="56,72 78,80 78,86" fill="#7C3AED"/>
+  <!-- Right side -->
+  <polygon points="144,72 122,80 122,86" fill="#7C3AED"/>
+  <!-- Lower-left -->
+  <polygon points="62,92 80,88 82,96" fill="#6D28D9"/>
+  <!-- Lower-right -->
+  <polygon points="138,92 118,88 120,96" fill="#6D28D9"/>
+
+  <!-- Inner petal overlay for volume -->
+  <ellipse cx="100" cy="73" rx="18" ry="21" fill="#8B5CF6"/>
+
+  <!-- Floret texture lines (stamens) -->
+  <line x1="100" y1="55" x2="100" y2="92" stroke="#C4B5FD" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="91"  y1="57" x2="93"  y2="93" stroke="#C4B5FD" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="109" y1="57" x2="107" y2="93" stroke="#C4B5FD" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="83"  y1="63" x2="87"  y2="94" stroke="#A78BFA" stroke-width="1"   stroke-linecap="round"/>
+  <line x1="117" y1="63" x2="113" y2="94" stroke="#A78BFA" stroke-width="1"   stroke-linecap="round"/>
+
+  <!-- Highlight dot at crown -->
+  <circle cx="100" cy="60" r="3.5" fill="#EDE9FE" opacity="0.7"/>
+</svg>
