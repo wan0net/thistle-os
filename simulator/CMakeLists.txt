@@ -21,7 +21,8 @@ set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
     # HAL (C — vtable interfaces, stays C)
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
-    # Kernel is 100% Rust (libthistle_kernel.a) — no C kernel sources
+    # Kernel is 100% Rust — only C shims for widget API dispatch
+    ${THISTLE_DIR}/components/kernel/src/widget_shims.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c
