@@ -113,6 +113,8 @@ body {
 .sidebar-logo img {
   width: 32px;
   height: 32px;
+  /* Logo uses currentColor — set to match dark bg so .b triangles blend */
+  color: var(--bg);
 }
 
 .sidebar-logo-text {

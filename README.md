@@ -1,7 +1,7 @@
 # ThistleOS
 
 <p align="center">
-  <img src="docs/thistle-logo-dark.svg" alt="ThistleOS Logo" width="200">
+  <img src="docs/thistle-logo.svg" alt="ThistleOS Logo" width="200">
 </p>
 
 <p align="center">
