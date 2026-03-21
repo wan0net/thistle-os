@@ -327,7 +327,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 ## Roadmap
 
 - [x] Ed25519 asymmetric signing (Monocypher, replaces HMAC-SHA256)
-- [ ] Recovery OS completion (Rust, 3 type errors remaining)
+- [x] Recovery OS completion (Rust, compiles clean)
 - [ ] Rust kernel migration (incremental, app_manager first)
 - [ ] Hardware auto-detection bootloader
 - [ ] Claude API integration in AI assistant
