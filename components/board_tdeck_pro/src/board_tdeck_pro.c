@@ -43,6 +43,46 @@ esp_err_t board_init(void) {
 
     ESP_LOGI(TAG, "Initializing T-Deck Pro board");
 
+    // 0. Power and GPIO pre-init (from LilyGO factory firmware)
+    // Disable deep sleep GPIO hold
+    gpio_deep_sleep_hold_dis();
+
+    // Power enables — must be HIGH before peripherals work
+    gpio_config_t pwr_conf = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+        .pin_bit_mask = (1ULL << BOARD_1V8_EN) |
+                        (1ULL << BOARD_GPS_EN) |
+                        (1ULL << BOARD_MODEM_EN) |
+                        (1ULL << BOARD_LORA_EN) |
+                        (1ULL << BOARD_MOTOR),
+    };
+    gpio_config(&pwr_conf);
+    gpio_set_level(BOARD_1V8_EN, 1);    // Enable 1.8V rail
+    gpio_set_level(BOARD_GPS_EN, 1);    // Enable GPS
+    gpio_set_level(BOARD_MODEM_EN, 1);  // Enable modem
+    gpio_set_level(BOARD_LORA_EN, 1);   // Enable LoRa
+    gpio_set_level(BOARD_MOTOR, 0);     // Motor OFF
+
+    // Pull all SPI chip selects HIGH before bus init (unselected)
+    gpio_config_t cs_conf = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+        .pin_bit_mask = (1ULL << BOARD_EPAPER_CS) |
+                        (1ULL << BOARD_LORA_CS) |
+                        (1ULL << BOARD_SD_CS),
+    };
+    gpio_config(&cs_conf);
+    gpio_set_level(BOARD_EPAPER_CS, 1);
+    gpio_set_level(BOARD_LORA_CS, 1);
+    gpio_set_level(BOARD_SD_CS, 1);
+
+    ESP_LOGI(TAG, "Power and GPIO pre-init done");
+
     // 1. Init SPI bus
     spi_bus_cfg = (spi_bus_config_t){
         .mosi_io_num = BOARD_SPI_MOSI,

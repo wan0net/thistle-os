@@ -224,11 +224,19 @@ static esp_err_t gdeq031t10_init(const void *config)
         return ret;
     }
 
-    /* ── Hardware reset ── */
-    epaper_hw_reset();
+    /* ── Reset ── */
+    epaper_hw_reset();  /* Skips if RST=-1 */
+
+    /* Software reset (0x12) — required when hardware RST is not connected */
+    ret = epaper_send_cmd(0x12);  /* SW_RESET */
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SW_RESET command failed: %s", esp_err_to_name(ret));
+        goto fail;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));  /* Wait for SW reset to complete */
 
     /* Wait for controller to come out of reset */
-    ret = epaper_wait_busy(3000);
+    ret = epaper_wait_busy(5000);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "display did not become ready after reset");
         goto fail;
