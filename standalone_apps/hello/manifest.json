@@ -1,0 +1,14 @@
+{
+    "type": "app",
+    "id": "com.example.hello",
+    "name": "Hello World",
+    "version": "1.0.0",
+    "author": "ThistleOS",
+    "description": "Minimal app demonstrating the ThistleOS app SDK",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "hello_app.app.elf",
+    "permissions": ["ipc"],
+    "background": false,
+    "min_memory_kb": 16
+}
