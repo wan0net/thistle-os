@@ -75,6 +75,40 @@ typedef struct {
     /* Input — WM gets first crack at input before apps */
     bool (*on_input)(const hal_input_event_t *event);  /* Return true to consume */
 
+    /* Widget API — the WM implements these for apps to build UI.
+     * Any function left NULL means that widget type is unsupported. */
+    uint32_t (*widget_get_app_root)(void);
+    uint32_t (*widget_create_container)(uint32_t parent);
+    uint32_t (*widget_create_label)(uint32_t parent, const char *text);
+    uint32_t (*widget_create_button)(uint32_t parent, const char *text);
+    uint32_t (*widget_create_text_input)(uint32_t parent, const char *placeholder);
+    void     (*widget_destroy)(uint32_t widget);
+    void     (*widget_set_text)(uint32_t widget, const char *text);
+    const char *(*widget_get_text)(uint32_t widget);
+    void     (*widget_set_size)(uint32_t widget, int w, int h);
+    void     (*widget_set_pos)(uint32_t widget, int x, int y);
+    void     (*widget_set_visible)(uint32_t widget, bool visible);
+    void     (*widget_set_bg_color)(uint32_t widget, uint32_t color);
+    void     (*widget_set_text_color)(uint32_t widget, uint32_t color);
+    void     (*widget_set_font_size)(uint32_t widget, int size);
+    void     (*widget_set_layout)(uint32_t widget, int layout);
+    void     (*widget_set_align)(uint32_t widget, int main_align, int cross_align);
+    void     (*widget_set_gap)(uint32_t widget, int gap);
+    void     (*widget_set_flex_grow)(uint32_t widget, int grow);
+    void     (*widget_set_scrollable)(uint32_t widget, bool scrollable);
+    void     (*widget_set_padding)(uint32_t widget, int t, int r, int b, int l);
+    void     (*widget_set_border_width)(uint32_t widget, int w);
+    void     (*widget_set_radius)(uint32_t widget, int r);
+    void     (*widget_on_event)(uint32_t widget, int event_type, void (*cb)(uint32_t, int, void*), void *ud);
+    void     (*widget_set_password_mode)(uint32_t widget, bool pw);
+    void     (*widget_set_one_line)(uint32_t widget, bool one_line);
+    void     (*widget_set_placeholder)(uint32_t widget, const char *text);
+    uint32_t (*widget_theme_primary)(void);
+    uint32_t (*widget_theme_bg)(void);
+    uint32_t (*widget_theme_surface)(void);
+    uint32_t (*widget_theme_text)(void);
+    uint32_t (*widget_theme_text_secondary)(void);
+
     /* Info */
     const char *name;          /* "lvgl-wm", "rust-wm", "terminal-wm" */
     const char *version;

@@ -67,3 +67,43 @@ extern int thistle_msg_recv(uint32_t *src_app, uint32_t *type, void *data, size_
 /* Power */
 extern uint16_t thistle_power_get_battery_mv(void);
 extern uint8_t  thistle_power_get_battery_pct(void);
+
+/* === Widget API (toolkit-agnostic UI — implemented by window manager) === */
+
+typedef uint32_t thistle_widget_t;
+#define THISTLE_WIDGET_NONE ((thistle_widget_t)0)
+
+extern thistle_widget_t thistle_ui_get_app_root(void);
+extern thistle_widget_t thistle_ui_create_container(thistle_widget_t parent);
+extern thistle_widget_t thistle_ui_create_label(thistle_widget_t parent, const char *text);
+extern thistle_widget_t thistle_ui_create_button(thistle_widget_t parent, const char *text);
+extern thistle_widget_t thistle_ui_create_text_input(thistle_widget_t parent, const char *placeholder);
+extern void thistle_ui_destroy(thistle_widget_t widget);
+extern void thistle_ui_set_text(thistle_widget_t widget, const char *text);
+extern const char *thistle_ui_get_text(thistle_widget_t widget);
+extern void thistle_ui_set_size(thistle_widget_t widget, int w, int h);
+extern void thistle_ui_set_pos(thistle_widget_t widget, int x, int y);
+extern void thistle_ui_set_visible(thistle_widget_t widget, _Bool visible);
+extern void thistle_ui_set_bg_color(thistle_widget_t widget, uint32_t color);
+extern void thistle_ui_set_text_color(thistle_widget_t widget, uint32_t color);
+extern void thistle_ui_set_font_size(thistle_widget_t widget, int size);
+extern void thistle_ui_set_layout(thistle_widget_t widget, int layout);
+extern void thistle_ui_set_gap(thistle_widget_t widget, int gap);
+extern void thistle_ui_set_flex_grow(thistle_widget_t widget, int grow);
+extern void thistle_ui_set_scrollable(thistle_widget_t widget, _Bool scrollable);
+extern void thistle_ui_set_padding(thistle_widget_t widget, int t, int r, int b, int l);
+
+#define THISTLE_LAYOUT_NONE        0
+#define THISTLE_LAYOUT_FLEX_COLUMN 1
+#define THISTLE_LAYOUT_FLEX_ROW    2
+#define THISTLE_EVENT_CLICK        0
+#define THISTLE_EVENT_VALUE_CHANGED 1
+#define THISTLE_EVENT_KEY          2
+typedef void (*thistle_event_cb_t)(thistle_widget_t widget, int event, void *user_data);
+extern void thistle_ui_on_event(thistle_widget_t widget, int event, thistle_event_cb_t cb, void *user_data);
+
+extern uint32_t thistle_ui_theme_primary(void);
+extern uint32_t thistle_ui_theme_bg(void);
+extern uint32_t thistle_ui_theme_surface(void);
+extern uint32_t thistle_ui_theme_text(void);
+extern uint32_t thistle_ui_theme_text_secondary(void);

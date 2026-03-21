@@ -24,4 +24,5 @@ pub mod ble_manager;
 pub mod net_manager;
 pub mod appstore_client;
 pub mod crypto;
+pub mod widget;
 mod ffi;
