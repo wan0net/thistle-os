@@ -15,7 +15,8 @@
 static SDL_Window   *s_window   = NULL;
 static SDL_Renderer *s_renderer = NULL;
 static SDL_Texture  *s_texture  = NULL;
-static uint16_t      s_fb[SIM_WIDTH * SIM_HEIGHT];  /* RGB565 framebuffer */
+static uint16_t      s_fb[SIM_WIDTH * SIM_HEIGHT];     /* RGB565 framebuffer (LVGL output) */
+static uint32_t      s_fb32[SIM_WIDTH * SIM_HEIGHT];   /* RGBA8888 for SDL texture */
 static bool          s_initialized = false;
 
 static esp_err_t sim_display_init(const void *config)
@@ -56,13 +57,22 @@ static esp_err_t sim_display_init(const void *config)
         return ESP_FAIL;
     }
 
-    /* RGB565 texture matching LVGL's 16-bit color output */
+    /* Emscripten SDL2 doesn't support RGB565 textures — use RGBA8888 and convert */
+#ifdef __EMSCRIPTEN__
+    s_texture = SDL_CreateTexture(
+        s_renderer,
+        SDL_PIXELFORMAT_ABGR8888,
+        SDL_TEXTUREACCESS_STREAMING,
+        SIM_WIDTH, SIM_HEIGHT
+    );
+#else
     s_texture = SDL_CreateTexture(
         s_renderer,
         SDL_PIXELFORMAT_RGB565,
         SDL_TEXTUREACCESS_STREAMING,
         SIM_WIDTH, SIM_HEIGHT
     );
+#endif
     if (!s_texture) {
         printf("SDL_CreateTexture failed: %s\n", SDL_GetError());
         SDL_DestroyRenderer(s_renderer);
@@ -76,7 +86,12 @@ static esp_err_t sim_display_init(const void *config)
     memset(s_fb, 0xFF, sizeof(s_fb));
 
     /* Initial render — white screen */
+#ifdef __EMSCRIPTEN__
+    memset(s_fb32, 0xFF, sizeof(s_fb32));
+    SDL_UpdateTexture(s_texture, NULL, s_fb32, SIM_WIDTH * sizeof(uint32_t));
+#else
     SDL_UpdateTexture(s_texture, NULL, s_fb, SIM_WIDTH * sizeof(uint16_t));
+#endif
     SDL_RenderClear(s_renderer);
     SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
     SDL_RenderPresent(s_renderer);
@@ -115,7 +130,19 @@ static esp_err_t sim_display_flush(const hal_area_t *area, const uint8_t *data)
     }
 
     /* Update SDL texture and render */
+#ifdef __EMSCRIPTEN__
+    /* Convert RGB565 → RGBA8888 for Emscripten */
+    for (int i = 0; i < SIM_WIDTH * SIM_HEIGHT; i++) {
+        uint16_t c = s_fb[i];
+        uint8_t r = ((c >> 11) & 0x1F) << 3;
+        uint8_t g = ((c >> 5) & 0x3F) << 2;
+        uint8_t b = (c & 0x1F) << 3;
+        s_fb32[i] = (0xFF << 24) | (b << 16) | (g << 8) | r; /* ABGR8888 */
+    }
+    SDL_UpdateTexture(s_texture, NULL, s_fb32, SIM_WIDTH * sizeof(uint32_t));
+#else
     SDL_UpdateTexture(s_texture, NULL, s_fb, SIM_WIDTH * sizeof(uint16_t));
+#endif
     SDL_RenderClear(s_renderer);
     SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
     SDL_RenderPresent(s_renderer);
