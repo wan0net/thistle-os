@@ -57,12 +57,21 @@ set(THISTLE_SRCS
 )
 
 # WASM-specific sources
+set(SIM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../simulator")
 set(WASM_SRCS
     main.c
     platform_stubs.c
+    # Simulator drivers (SDL2 display/input, board init)
+    ${SIM_DIR}/drivers/sim_display.c
+    ${SIM_DIR}/drivers/sim_input.c
+    ${SIM_DIR}/drivers/sim_storage.c
+    ${SIM_DIR}/drivers/sim_network.c
+    ${SIM_DIR}/board_simulator.c
+    ${SIM_DIR}/platform/sim_vfs.c
 )
 
 add_executable(thistle_wasm ${WASM_SRCS} ${THISTLE_SRCS} ${LVGL_SRCS})
+set_target_properties(thistle_wasm PROPERTIES SUFFIX ".html")
 
 # Emscripten SDL2 — auto-provided, no system install needed
 set(USE_FLAGS "-sUSE_SDL=2")
