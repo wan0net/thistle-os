@@ -1,0 +1,12 @@
+{
+    "type": "driver",
+    "id": "com.thistle.drv.kbd_tca8418",
+    "name": "TCA8418 I2C Keyboard",
+    "version": "1.0.0",
+    "author": "ThistleOS",
+    "description": "TCA8418 keyboard matrix scanner for T-Deck Pro",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "kbd_tca8418.drv.elf",
+    "hal_interface": "input"
+}
