@@ -53,8 +53,13 @@ static esp_err_t sim_input_poll(void)
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
+#ifdef __EMSCRIPTEN__
+            /* Don't exit in WASM — there's no window to close */
+            continue;
+#else
             printf("Window closed — exiting\n");
             exit(0);
+#endif
         }
 
         if ((e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) && s_cb) {
