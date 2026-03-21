@@ -263,6 +263,18 @@ pub extern "C" fn event_publish(event: *const CEvent) -> i32 {
     }
 }
 
+/// Publish a simple event with no data (convenience wrapper).
+#[no_mangle]
+pub extern "C" fn event_publish_simple(event_type: u32) -> i32 {
+    let ev = CEvent {
+        event_type,
+        timestamp: 0,
+        data: std::ptr::null_mut(),
+        data_len: 0,
+    };
+    unsafe { event_publish(&ev as *const CEvent) }
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

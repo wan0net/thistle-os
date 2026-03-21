@@ -23,12 +23,9 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
     # Kernel (except elf_loader which needs ESP-IDF elf component)
     ${THISTLE_DIR}/components/kernel/src/kernel.c
-    ${THISTLE_DIR}/components/kernel/src/app_manager.c
     ${THISTLE_DIR}/components/kernel/src/appstore_client.c
     ${THISTLE_DIR}/components/kernel/src/driver_manager.c
     ${THISTLE_DIR}/components/kernel/src/syscall_table.c
-    ${THISTLE_DIR}/components/kernel/src/ipc.c
-    ${THISTLE_DIR}/components/kernel/src/event.c
     ${THISTLE_DIR}/components/kernel/src/net_manager.c
     ${THISTLE_DIR}/components/kernel/src/board_config.c
     ${THISTLE_DIR}/components/kernel/src/display_server.c
@@ -124,8 +121,41 @@ target_compile_definitions(thistle_sim PRIVATE
     THISTLE_SDCARD_PATH="/tmp/thistle_sdcard"
 )
 
+# Build Rust kernel for host target
+set(KERNEL_RS_DIR "${THISTLE_DIR}/components/kernel_rs")
+execute_process(
+    COMMAND uname -m
+    OUTPUT_VARIABLE HOST_ARCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+# Rust uses "aarch64" not "arm64"
+if(HOST_ARCH STREQUAL "arm64")
+    set(HOST_ARCH "aarch64")
+endif()
+if(APPLE)
+    set(RUST_HOST_TARGET "${HOST_ARCH}-apple-darwin")
+else()
+    set(RUST_HOST_TARGET "${HOST_ARCH}-unknown-linux-gnu")
+endif()
+set(RUST_HOST_LIB "${KERNEL_RS_DIR}/target/${RUST_HOST_TARGET}/release/libthistle_kernel.a")
+
+add_custom_command(
+    OUTPUT ${RUST_HOST_LIB}
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}"
+        cargo build --release --target ${RUST_HOST_TARGET}
+    WORKING_DIRECTORY ${KERNEL_RS_DIR}
+    COMMENT "Building Rust kernel for simulator (${RUST_HOST_TARGET})"
+    VERBATIM
+)
+add_custom_target(kernel_rs_host_build DEPENDS ${RUST_HOST_LIB})
+add_dependencies(thistle_sim kernel_rs_host_build)
+
+target_include_directories(thistle_sim PRIVATE
+    ${KERNEL_RS_DIR}/include
+)
+
 target_link_directories(thistle_sim PRIVATE ${SDL2_LIBRARY_DIRS})
-target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} pthread m curl)
+target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} ${RUST_HOST_LIB} pthread m curl)
 
 # Suppress warnings from LVGL and external code
 target_compile_options(thistle_sim PRIVATE

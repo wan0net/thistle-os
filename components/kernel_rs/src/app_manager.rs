@@ -809,7 +809,7 @@ pub unsafe fn get_free_memory() -> usize {
 
 /// Initialise the Rust app manager. Safe to call multiple times.
 #[no_mangle]
-pub extern "C" fn rs_app_manager_init() -> i32 {
+pub extern "C" fn app_manager_init() -> i32 {
     init()
 }
 
@@ -819,7 +819,7 @@ pub extern "C" fn rs_app_manager_init() -> i32 {
 /// `app` must be a valid pointer to a static `CAppEntry` whose lifetime
 /// encompasses the entire kernel session.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_register(app: *const CAppEntry) -> i32 {
+pub unsafe extern "C" fn app_manager_register(app: *const CAppEntry) -> i32 {
     register(app)
 }
 
@@ -828,7 +828,7 @@ pub unsafe extern "C" fn rs_app_manager_register(app: *const CAppEntry) -> i32 {
 /// # Safety
 /// `app_id` must be a valid null-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_launch(app_id: *const c_char) -> i32 {
+pub unsafe extern "C" fn app_manager_launch(app_id: *const c_char) -> i32 {
     if app_id.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -841,37 +841,37 @@ pub unsafe extern "C" fn rs_app_manager_launch(app_id: *const c_char) -> i32 {
 
 /// Switch the foreground to `handle`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_switch_to(handle: i32) -> i32 {
+pub unsafe extern "C" fn app_manager_switch_to(handle: i32) -> i32 {
     switch_to(handle)
 }
 
 /// Return the handle of the foreground app, or `APP_HANDLE_INVALID` (-1).
 #[no_mangle]
-pub extern "C" fn rs_app_manager_get_foreground() -> i32 {
+pub extern "C" fn app_manager_get_foreground() -> i32 {
     get_foreground()
 }
 
 /// Return the state of `handle` as a `u32` (maps to `app_state_t`).
 #[no_mangle]
-pub extern "C" fn rs_app_manager_get_state(handle: i32) -> u32 {
+pub extern "C" fn app_manager_get_state(handle: i32) -> u32 {
     get_state(handle)
 }
 
 /// Suspend the app identified by `handle`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_suspend(handle: i32) -> i32 {
+pub unsafe extern "C" fn app_manager_suspend(handle: i32) -> i32 {
     suspend(handle)
 }
 
 /// Destroy the app identified by `handle`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_kill(handle: i32) -> i32 {
+pub unsafe extern "C" fn app_manager_kill(handle: i32) -> i32 {
     kill(handle)
 }
 
 /// Evict the LRU backgrounded/suspended app.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_evict_lru() -> i32 {
+pub unsafe extern "C" fn app_manager_evict_lru() -> i32 {
     evict_lru()
 }
 
@@ -880,8 +880,42 @@ pub unsafe extern "C" fn rs_app_manager_evict_lru() -> i32 {
 /// # Safety
 /// Calls the ESP-IDF `heap_caps_get_free_size` C function.
 #[no_mangle]
-pub unsafe extern "C" fn rs_app_manager_get_free_memory() -> usize {
+pub unsafe extern "C" fn app_manager_get_free_memory() -> usize {
     get_free_memory()
+}
+
+/// List all registered app manifests.
+/// Writes up to `max_count` manifest pointers into `out[]`.
+/// Returns the number written.
+///
+/// # Safety
+/// `out` must point to an array of at least `max_count` pointers.
+#[no_mangle]
+pub unsafe extern "C" fn app_manager_list_apps(
+    out: *mut *const CAppManifest,
+    max_count: i32,
+) -> i32 {
+    if out.is_null() || max_count <= 0 {
+        return 0;
+    }
+    let mgr = match APP_MANAGER.lock() {
+        Ok(m) => m,
+        Err(_) => return 0,
+    };
+    let mut count = 0i32;
+    for slot in mgr.slots.iter() {
+        if count >= max_count {
+            break;
+        }
+        if !slot.entry.is_null() {
+            let entry = &*slot.entry;
+            if !entry.manifest.is_null() {
+                *out.offset(count as isize) = entry.manifest;
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 // ---------------------------------------------------------------------------

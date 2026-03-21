@@ -54,7 +54,11 @@ const char *ota_get_current_version(void) { return "0.1.0"; }
 const char *ota_get_running_partition(void) { return "sim"; }
 esp_err_t ota_mark_valid(void) { return ESP_OK; }
 esp_err_t ota_rollback(void) { return ESP_ERR_NOT_SUPPORTED; }
-esp_err_t permissions_init(void) { return ESP_OK; }
+/* permissions, ipc, event, app_manager — provided by Rust kernel lib */
+
+/* ESP-IDF heap API stub for Rust app_manager */
+#include <stddef.h>
+size_t heap_caps_get_free_size(unsigned int caps) { (void)caps; return 4 * 1024 * 1024; }
 
 /* ELF loader stub */
 esp_err_t elf_loader_init(void) {
