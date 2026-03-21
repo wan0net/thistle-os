@@ -159,3 +159,108 @@ TEST_CASE("test_permissions_max_apps: 17th app registration returns ESP_ERR_NO_M
     esp_err_t ret = permissions_grant("app_overflow", PERM_RADIO);
     TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, ret);
 }
+
+/* --------------------------------------------------------------------------
+ * test_permissions_grant_multiple_flags
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_grant_multiple_flags: PERM_RADIO|PERM_GPS both pass check", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_grant("radio_gps_app", PERM_RADIO | PERM_GPS));
+
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_check("radio_gps_app", PERM_RADIO));
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_check("radio_gps_app", PERM_GPS));
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_revoke_single_flag
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_revoke_single_flag: revoke PERM_AUDIO only; PERM_RADIO still passes", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_grant("revoke_test_app", PERM_ALL));
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_revoke("revoke_test_app", PERM_AUDIO));
+
+    /* AUDIO must now be denied */
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_ALLOWED, permissions_check("revoke_test_app", PERM_AUDIO));
+
+    /* RADIO was not revoked, must still pass */
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_check("revoke_test_app", PERM_RADIO));
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_check_after_init
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_check_after_init: previously granted permissions gone after reinit", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_grant("stale_app", PERM_ALL));
+
+    /* Reinit wipes the table */
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    /* stale_app no longer exists in the table */
+    esp_err_t ret = permissions_check("stale_app", PERM_RADIO);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, ret);
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_grant_zero_flags
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_grant_zero_flags: granting 0 leaves app with no permissions", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_grant("zero_app", 0));
+
+    permission_set_t got = permissions_get("zero_app");
+    TEST_ASSERT_EQUAL_UINT32(0, got);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_ALLOWED, permissions_check("zero_app", PERM_RADIO));
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_check_null_app_id
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_check_null_app_id: NULL app_id returns error", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    esp_err_t ret = permissions_check(NULL, PERM_RADIO);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_get_unknown_app
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_get_unknown_app: get for unregistered app returns 0", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    permission_set_t got = permissions_get("never_registered");
+    TEST_ASSERT_EQUAL_UINT32(0, got);
+}
+
+/* --------------------------------------------------------------------------
+ * test_permissions_to_string_empty_set
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_permissions_to_string_empty_set: empty permission set produces valid output", "[permissions]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, permissions_init());
+
+    char buf[64];
+    char *result = permissions_to_string(0, buf, sizeof(buf));
+    TEST_ASSERT_NOT_NULL(result);
+    /* Must not contain any known permission name */
+    TEST_ASSERT_NULL(strstr(buf, "radio"));
+    TEST_ASSERT_NULL(strstr(buf, "gps"));
+}

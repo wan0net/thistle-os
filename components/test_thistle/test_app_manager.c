@@ -207,3 +207,126 @@ TEST_CASE("test_app_manager_get_free_memory", "[app]")
     size_t free = app_manager_get_free_memory();
     TEST_ASSERT_GREATER_THAN(0, free);
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+/* Third app for list tests */
+static const app_manifest_t s_manifest_c = {
+    .id               = "com.test.app_c",
+    .name             = "Test App C",
+    .version          = "1.0.0",
+    .allow_background = false,
+    .min_memory_kb    = 0,
+};
+
+static const app_entry_t s_app_c = {
+    .on_create  = mock_on_create,
+    .on_start   = mock_on_start,
+    .on_pause   = mock_on_pause,
+    .on_resume  = mock_on_resume,
+    .on_destroy = mock_on_destroy,
+    .manifest   = &s_manifest_c,
+};
+
+TEST_CASE("test_app_manager_list_apps: 3 registered apps all appear in list", "[app]")
+{
+    setup();
+
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_b));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_c));
+
+    const app_manifest_t *out[8];
+    int count = app_manager_list_apps(out, 8);
+    TEST_ASSERT_EQUAL_INT(3, count);
+}
+
+TEST_CASE("test_app_manager_list_apps_empty: no registered apps yields count 0", "[app]")
+{
+    setup();
+
+    const app_manifest_t *out[8];
+    int count = app_manager_list_apps(out, 8);
+    TEST_ASSERT_EQUAL_INT(0, count);
+}
+
+TEST_CASE("test_app_manager_list_apps_contents: listed manifests contain correct IDs", "[app]")
+{
+    setup();
+
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_b));
+
+    const app_manifest_t *out[8];
+    int count = app_manager_list_apps(out, 8);
+    TEST_ASSERT_EQUAL_INT(2, count);
+
+    /* Both IDs must appear (order unspecified) */
+    bool found_a = false, found_b = false;
+    for (int i = 0; i < count; i++) {
+        TEST_ASSERT_NOT_NULL(out[i]);
+        if (strcmp(out[i]->id, "com.test.app_a") == 0) found_a = true;
+        if (strcmp(out[i]->id, "com.test.app_b") == 0) found_b = true;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_a, "com.test.app_a not found in list");
+    TEST_ASSERT_TRUE_MESSAGE(found_b, "com.test.app_b not found in list");
+}
+
+TEST_CASE("test_app_manager_evict_lru: evict_lru after launching two apps does not crash", "[app]")
+{
+    setup();
+
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_b));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_launch("com.test.app_a"));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_launch("com.test.app_b"));
+
+    /* evict_lru must not crash — return value is implementation-defined when
+     * both apps are active (may return ESP_OK or ESP_ERR_NOT_FOUND) */
+    esp_err_t ret = app_manager_evict_lru();
+    (void)ret; /* any return value is acceptable; crash == fail */
+    TEST_PASS();
+}
+
+TEST_CASE("test_app_manager_free_memory: get_free_memory returns > 0", "[app]")
+{
+    size_t mem = app_manager_get_free_memory();
+    TEST_ASSERT_GREATER_THAN(0, mem);
+}
+
+TEST_CASE("test_app_manager_suspend_invalid_handle: suspend APP_HANDLE_INVALID returns error", "[app]")
+{
+    setup();
+
+    esp_err_t ret = app_manager_suspend(APP_HANDLE_INVALID);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_app_manager_kill_invalid_handle: kill APP_HANDLE_INVALID returns error", "[app]")
+{
+    setup();
+
+    esp_err_t ret = app_manager_kill(APP_HANDLE_INVALID);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_app_manager_get_state_invalid: get_state for invalid handle returns UNLOADED", "[app]")
+{
+    setup();
+
+    app_state_t state = app_manager_get_state(APP_HANDLE_INVALID);
+    TEST_ASSERT_EQUAL_INT(APP_STATE_UNLOADED, state);
+}
+
+TEST_CASE("test_app_manager_launch_sets_running_state: state is RUNNING after launch", "[app]")
+{
+    setup();
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_register(&s_app_a));
+    TEST_ASSERT_EQUAL(ESP_OK, app_manager_launch("com.test.app_a"));
+
+    app_handle_t fg = app_manager_get_foreground();
+    TEST_ASSERT_NOT_EQUAL(APP_HANDLE_INVALID, fg);
+    TEST_ASSERT_EQUAL_INT(APP_STATE_RUNNING, app_manager_get_state(fg));
+}

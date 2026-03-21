@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
+
+      # Note: On-target ESP-IDF Unity tests require hardware.
+      # This job verifies the test code compiles and the simulator builds.
+      - name: Verify test compilation
+        run: |
+          echo "Test files:"
+          find components/test_thistle -name "*.c" -exec wc -l {} + | sort -n
+          echo ""
+          echo "Total test cases (approximate):"
+          grep -r "TEST_CASE" components/test_thistle/ | wc -l

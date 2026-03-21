@@ -1,0 +1,9 @@
+# Ignore build artifacts and external code
+build/
+managed_components/
+recovery/.embuild/
+recovery/target/
+simulator/build/
+*.o
+*.a
+*.bin

@@ -1,0 +1,74 @@
+rules:
+  - id: thistle-use-after-free-lvgl
+    patterns:
+      - pattern: |
+          $PATH = (const char *)lv_obj_get_user_data($ROW);
+          ...
+          navigate_to($PATH);
+    message: >
+      Potential use-after-free: navigate_to() calls lv_obj_clean() which
+      fires LV_EVENT_DELETE, freeing the user_data that $PATH points to.
+      Copy the path to a stack buffer before calling navigate_to().
+    languages: [c]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-416
+
+  - id: thistle-hardcoded-sdcard-path
+    pattern: |
+      "/sdcard"
+    message: >
+      Hardcoded "/sdcard" path. Use THISTLE_SDCARD macro from
+      hal/sdcard_path.h for simulator compatibility.
+    languages: [c]
+    severity: WARNING
+    metadata:
+      category: correctness
+
+  - id: thistle-esp-error-check
+    pattern: |
+      ESP_ERROR_CHECK(...)
+    message: >
+      ESP_ERROR_CHECK aborts on failure. Use explicit error checking
+      with early return for recoverable operations.
+    languages: [c]
+    severity: WARNING
+    metadata:
+      category: reliability
+
+  - id: thistle-missing-null-check-hal
+    pattern: |
+      hal_get_registry()->$FIELD->$METHOD(...)
+    message: >
+      Missing NULL check on HAL registry field. The driver may not be
+      registered. Check hal_get_registry()->$FIELD before calling methods.
+    languages: [c]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-476
+
+  - id: thistle-format-string
+    patterns:
+      - pattern: fprintf($FP, $VAR)
+      - pattern-not: fprintf($FP, "...")
+    message: >
+      Potential format string vulnerability. Use fputs() for string
+      output or ensure the format string is a constant.
+    languages: [c]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-134
+
+  - id: thistle-unsigned-app-permissions
+    pattern: |
+      permissions_grant($APP, PERM_ALL)
+    message: >
+      Granting PERM_ALL. Verify this is a signed/built-in app.
+      Unsigned apps should only get PERM_IPC.
+    languages: [c]
+    severity: INFO
+    metadata:
+      category: security
