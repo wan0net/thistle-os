@@ -4,12 +4,12 @@
       <style>
         /* Purple accent triangles */
         .p { fill: #9D4EDD; stroke: transparent; stroke-width: 2.2; stroke-linejoin: round; }
-        /* Background-colored triangles — use currentColor so they match any bg */
-        .b { fill: currentColor; stroke: transparent; stroke-width: 2.2; stroke-linejoin: round; }
+        /* Background-colored triangles — transparent so only purple shows */
+        .b { fill: transparent; stroke: transparent; stroke-width: 2.2; stroke-linejoin: round; }
         /* Purple accent line */
         .line { fill: #9D4EDD; stroke: transparent; stroke-width: 2; stroke-linejoin: round; }
-        /* Monaspace Neon — inherits color from context */
-        .txt { font-family: 'Monaspace Neon', 'Monaspace', monospace; font-weight: 800; fill: currentColor; letter-spacing: -0.5px; }
+        /* Monaspace Neon — purple to work on any background */
+        .txt { font-family: 'Monaspace Neon', 'Monaspace', monospace; font-weight: 800; fill: #9D4EDD; letter-spacing: -0.5px; }
       </style>
     </defs>
 
