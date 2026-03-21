@@ -2,6 +2,7 @@
     "thistle_os": {
         "version": "0.1.0",
         "theme": "default",
+        "window_manager": "lvgl-wm",
         "display": {
             "refresh_mode": "partial",
             "brightness": 100

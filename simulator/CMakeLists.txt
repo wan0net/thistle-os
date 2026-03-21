@@ -31,6 +31,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/kernel/src/event.c
     ${THISTLE_DIR}/components/kernel/src/net_manager.c
     ${THISTLE_DIR}/components/kernel/src/board_config.c
+    ${THISTLE_DIR}/components/kernel/src/display_server.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/theme.c
