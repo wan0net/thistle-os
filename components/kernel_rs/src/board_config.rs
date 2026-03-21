@@ -52,8 +52,11 @@ fn load_config(config_path: &str) -> i32 {
     let json = match fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(_) => {
-            // Fall back to compiled board_init()
-            return unsafe { board_init() };
+            // Fall back to compiled board_init() + start all drivers
+            let ret = unsafe { board_init() };
+            if ret != ESP_OK { return ret; }
+            unsafe { crate::driver_manager::driver_manager_start_all(); }
+            return ESP_OK;
         }
     };
 
