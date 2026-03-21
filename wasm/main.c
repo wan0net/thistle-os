@@ -32,14 +32,24 @@
 #include "vault/vault_app.h"
 
 #include "lvgl.h"
+#include "hal/board.h"
 
-/* Emscripten main loop callback */
+/* Emscripten main loop callback — drives LVGL + input polling */
 static void main_loop(void)
 {
-    /* LVGL tick + render (driven by the LVGL timer task in manager.c,
-     * but in WASM we need to call it from the main loop) */
-    lv_timer_handler();
+    /* Poll all registered HAL input drivers (mouse/keyboard events) */
+    const hal_registry_t *reg = hal_get_registry();
+    if (reg) {
+        for (int i = 0; i < reg->input_count; i++) {
+            if (reg->inputs[i] && reg->inputs[i]->poll) {
+                reg->inputs[i]->poll();
+            }
+        }
+    }
+
+    /* LVGL tick + render */
     lv_tick_inc(16); /* ~60 FPS */
+    lv_timer_handler();
 }
 
 int main(void)
