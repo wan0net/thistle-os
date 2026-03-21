@@ -25,7 +25,7 @@ jobs:
           path: |
             build
             managed_components
-          key: espidf-build-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
+          key: espidf-v5.5-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
           restore-keys: |
             espidf-build-
 
