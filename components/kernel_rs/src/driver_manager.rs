@@ -27,8 +27,8 @@ extern "C" {
     // Per-driver init/deinit — called through the opaque registry by the
     // C-side helpers below.  These are thin wrappers that accept the opaque
     // registry pointer and dispatch into the vtable fields.
-    fn hal_registry_start_all(reg: *const c_void) -> i32;
-    fn hal_registry_stop_all(reg: *const c_void) -> i32;
+    fn hal_registry_start_all() -> i32;
+    fn hal_registry_stop_all() -> i32;
 
     // Logging helpers
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
@@ -91,7 +91,7 @@ pub extern "C" fn driver_manager_start_all() -> i32 {
             return ESP_OK; // Nothing registered yet
         }
 
-        let ret = hal_registry_start_all(reg);
+        let ret = hal_registry_start_all();
         if ret != ESP_OK {
             esp_log_write(
                 ESP_LOG_ERROR,
@@ -124,7 +124,7 @@ pub extern "C" fn driver_manager_stop_all() -> i32 {
             return ESP_OK;
         }
 
-        hal_registry_stop_all(reg);
+        hal_registry_stop_all();
 
         esp_log_write(
             ESP_LOG_INFO,
