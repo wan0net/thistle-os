@@ -31,26 +31,41 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 ## How It Works
 
 ```
-┌─────────────────────────────────────────┐
-│            APPS (ELF from SD card)      │
-│  Messenger • Reader • Navigator • ...   │
-├─────────────────────────────────────────┤
-│            KERNEL (hardware-agnostic)   │
-│  App Manager • Window Manager • IPC     │
-│  Permissions • Signing • Net Manager    │
-├─────────────────────────────────────────┤
-│            HAL (vtable interfaces)      │
-│  Display • Input • Radio • GPS • Audio  │
-│  Power • IMU • Storage • Network        │
-├─────────────────────────────────────────┤
-│       DRIVERS (compiled-in OR SD card)  │
-│  e-paper • LCD • SX1262 • TCA8418 ...  │
-├─────────────────────────────────────────┤
-│       ESP-IDF + FreeRTOS + Hardware     │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│         APPS (.app.elf from SPIFFS/SD)     │
+│  Messenger • Reader • Navigator • ...      │
+├─────────────────────────────────────────────┤
+│         WINDOW MANAGER (.wm.elf)           │
+│  Status bar • Launcher • Theme engine      │
+│  Widget toolkit (LVGL, Rust UI, terminal)  │
+├─────────────────────────────────────────────┤
+│         DISPLAY SERVER (kernel)            │
+│  Surfaces • Input routing • Compositor     │
+├─────────────────────────────────────────────┤
+│         KERNEL (Rust + C, immutable)       │
+│  App Manager • IPC • Permissions • Events  │
+│  Signing • Manifest • Syscall table        │
+├─────────────────────────────────────────────┤
+│         HAL (vtable interfaces)            │
+│  Display • Input • Radio • GPS • Audio     │
+│  Power • IMU • Storage • Network           │
+├─────────────────────────────────────────────┤
+│         DRIVERS (.drv.elf from SPIFFS/SD)  │
+│  e-paper • LCD • SX1262 • TCA8418 ...     │
+├─────────────────────────────────────────────┤
+│         ESP-IDF + FreeRTOS + Hardware      │
+└─────────────────────────────────────────────┘
 ```
 
-The kernel never talks to hardware directly. It talks through **HAL vtables** — C structs of function pointers. Any driver that fills in those function pointers works. Swap displays, radios, keyboards by swapping a driver file on the SD card. No recompilation.
+ThistleOS uses a three-tier immutable trust chain:
+
+1. **Recovery OS** (Rust, ota_0) — immutable root of trust. Verifies the kernel's Ed25519 signature before booting it.
+2. **Kernel** (Rust + C, ota_1) — immutable. Contains the display server, app/driver lifecycle, IPC, permissions, signing, and HAL. Reads `board.json` from SPIFFS to initialize hardware buses and load drivers.
+3. **Everything else** (SPIFFS + SD card) — updateable. Apps, drivers, window managers, and themes are all loaded at runtime. Update any component by replacing its file — no firmware reflash needed.
+
+The kernel never talks to hardware directly. It talks through **HAL vtables** — C structs of function pointers. Drivers are loaded from SPIFFS/SD as `.drv.elf` files and register themselves with the HAL at boot.
+
+**Window managers are swappable** — like Linux desktop environments. The default `lvgl-wm` uses LVGL 9, but you can install a Rust-based WM, a terminal-only WM, or build your own. The display server in the kernel manages surfaces and input routing; the WM draws the UI.
 
 ## The Driver Model
 
@@ -204,6 +219,22 @@ Apps don't call WiFi or 4G directly. They call `net_is_connected()` and `net_get
 | BLE tether | Planned | Phone relay |
 | Simulator host | Working | Desktop development |
 
+## Display Server
+
+ThistleOS includes a kernel-level display server that decouples the window manager from the hardware:
+
+```
+App → Window Manager → Display Server → HAL → Hardware
+```
+
+| Layer | Responsibility | Swappable? |
+|-------|---------------|------------|
+| **Display Server** | Surface allocation, dirty region tracking, compositor, input routing | No (kernel) |
+| **Window Manager** | Status bar, launcher, theme engine, widget toolkit | Yes (.wm.elf) |
+| **Apps** | Application UI built on WM's toolkit | Yes (.app.elf) |
+
+The WM is selected in Settings or during first-boot setup. Downloaded from the app store like any other module.
+
 ## Security & Chain of Trust
 
 Signing and verification at every level — from boot to apps:
@@ -313,7 +344,7 @@ cmake .. && make -j8 && ./thistle_sim
 | Board configs | 2 (T-Deck Pro, T-Deck) |
 | Unit tests | 80+ (C) + 28 (Rust) |
 | Firmware binary | ~1.6 MB |
-| Commits | 65+ |
+| Commits | 75+ |
 | License | BSD 3-Clause |
 | Dependencies | All BSD/MIT/Apache-2.0 (no GPL) |
 
@@ -329,16 +360,32 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 
 ## Roadmap
 
-- [x] Ed25519 asymmetric signing (Monocypher, replaces HMAC-SHA256)
-- [x] Recovery OS completion (Rust, compiles clean)
-- [x] Rust kernel migration — 6 modules ported (manifest, permissions, IPC, event bus, app manager, version)
-- [x] Unified manifest system for apps, drivers, and firmware
-- [ ] Hardware auto-detection bootloader
-- [ ] Claude API integration in AI assistant
-- [ ] More board support (T-Beam, M5Stack, Heltec, custom)
-- [ ] Switch C kernel calls to Rust implementations
-- [ ] Async event dispatch and per-app IPC queues
+### Completed
+- [x] Ed25519 asymmetric signing (Monocypher)
+- [x] Recovery OS (Rust, compiles clean)
+- [x] Rust kernel — 6 modules ported (manifest, permissions, IPC, events, app manager, version)
+- [x] Unified manifest system for apps, drivers, firmware
+- [x] Boot-from-JSON (board.json driven hardware init)
+- [x] Display server with swappable window managers
+- [x] Driver SDK (C and Rust templates)
+- [x] Expanded syscall table (45 ESP-IDF APIs for runtime drivers)
+
+### In Progress
+- [ ] Compile existing drivers as standalone .drv.elf files
+- [ ] Move built-in apps to .app.elf on SPIFFS
+- [ ] Switch kernel from C to Rust implementations
+- [ ] Wire display server into boot sequence
+
+### Planned
+- [ ] First-boot setup wizard (board detection, WM selection, WiFi)
+- [ ] LVGL window manager as loadable .wm.elf
+- [ ] Rust window manager (embedded-graphics based)
 - [ ] Permission enforcement at syscall boundary
+- [ ] Claude API integration in AI assistant
+- [ ] Hardware auto-detection bootloader
+- [ ] More board support (T-Beam, M5Stack, Heltec)
+- [ ] WASM web simulator with terminal + app store
+- [ ] Async event dispatch and per-app IPC queues
 
 ## Dependencies
 
