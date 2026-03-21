@@ -1,0 +1,19 @@
+[package]
+name = "thistle-kernel"
+version = "0.1.0"
+authors = ["ThistleOS Contributors"]
+edition = "2021"
+license = "BSD-3-Clause"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+lto = true

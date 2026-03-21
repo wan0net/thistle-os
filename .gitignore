@@ -23,6 +23,10 @@ managed_components/
 tools/dev_private.key
 tools/dev_public.key
 
+# Rust build artifacts
+components/kernel_rs/target/
+recovery/target/
+
 # Claude Code
 .claude/
 simulator/build/
