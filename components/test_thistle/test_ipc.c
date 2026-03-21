@@ -240,3 +240,148 @@ TEST_CASE("test_ipc_handler_wrong_type: handler for type 42 not called when type
 
     TEST_ASSERT_EQUAL_INT(0, s_type42_calls);
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+/* Handler tracking for send-to-self test */
+static volatile int s_self_handler_calls = 0;
+static volatile uint32_t s_self_received_type = 0;
+
+static void handler_self(const ipc_message_t *msg, void *user_data)
+{
+    s_self_handler_calls++;
+    s_self_received_type = msg->msg_type;
+}
+
+TEST_CASE("test_ipc_send_to_self: handler for type 99 called when type 99 is sent", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+    s_self_handler_calls = 0;
+    s_self_received_type = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_register_handler(99, handler_self, NULL));
+
+    ipc_message_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.src_app  = 1;
+    tx.dst_app  = 1;  /* self */
+    tx.msg_type = 99;
+    tx.data_len = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_send(&tx));
+
+    TEST_ASSERT_EQUAL_INT(1, s_self_handler_calls);
+    TEST_ASSERT_EQUAL_UINT32(99, s_self_received_type);
+}
+
+TEST_CASE("test_ipc_message_data_boundary: send with exactly IPC_MSG_MAX_DATA bytes succeeds", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+    reset_handler_state();
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_register_handler(77, capture_handler, NULL));
+
+    ipc_message_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.src_app  = 0;
+    tx.dst_app  = 0;
+    tx.msg_type = 77;
+    tx.data_len = IPC_MSG_MAX_DATA;
+
+    /* Fill with a deterministic pattern */
+    for (size_t i = 0; i < IPC_MSG_MAX_DATA; i++) {
+        tx.data[i] = (uint8_t)(i & 0xFF);
+    }
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_send(&tx));
+
+    TEST_ASSERT_EQUAL_INT(1, s_handler_calls);
+    TEST_ASSERT_EQUAL_size_t(IPC_MSG_MAX_DATA, s_handler_data_len);
+    TEST_ASSERT_EQUAL_UINT8(0x00, s_handler_data[0]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)((IPC_MSG_MAX_DATA - 1) & 0xFF),
+                             s_handler_data[IPC_MSG_MAX_DATA - 1]);
+}
+
+TEST_CASE("test_ipc_zero_data_len: send with data_len=0 delivers message with no data", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+    reset_handler_state();
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_register_handler(11, capture_handler, NULL));
+
+    ipc_message_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.msg_type = 11;
+    tx.data_len = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_send(&tx));
+
+    TEST_ASSERT_EQUAL_INT(1, s_handler_calls);
+    TEST_ASSERT_EQUAL_size_t(0, s_handler_data_len);
+}
+
+TEST_CASE("test_ipc_recv_timeout_zero: ipc_recv with 0ms timeout returns immediately when empty", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+
+    ipc_message_t rx;
+    memset(&rx, 0, sizeof(rx));
+
+    /* 0ms timeout: must return without blocking */
+    esp_err_t ret = ipc_recv(&rx, 0);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, ret);
+}
+
+/* File-scope state for user_data forwarding test */
+static volatile void *s_ipc_ud_received = NULL;
+static volatile int   s_ipc_ud_calls    = 0;
+
+static void ipc_ud_handler(const ipc_message_t *msg, void *user_data)
+{
+    s_ipc_ud_received = user_data;
+    s_ipc_ud_calls++;
+}
+
+TEST_CASE("test_ipc_handler_user_data_forwarded: user_data pointer reaches handler", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+
+    void *const sentinel = (void *)0xABCDABCD;
+    s_ipc_ud_received = NULL;
+    s_ipc_ud_calls    = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_register_handler(55, ipc_ud_handler, sentinel));
+
+    ipc_message_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.msg_type = 55;
+    tx.data_len = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_send(&tx));
+
+    TEST_ASSERT_EQUAL_INT(1, s_ipc_ud_calls);
+    TEST_ASSERT_EQUAL_PTR(sentinel, s_ipc_ud_received);
+}
+
+TEST_CASE("test_ipc_broadcast_dst_zero: message with dst_app=0 is broadcast and received", "[ipc]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_init());
+    reset_handler_state();
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_register_handler(33, capture_handler, NULL));
+
+    ipc_message_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.src_app  = 5;
+    tx.dst_app  = 0;   /* broadcast */
+    tx.msg_type = 33;
+    tx.data_len = 1;
+    tx.data[0]  = 0x42;
+
+    TEST_ASSERT_EQUAL(ESP_OK, ipc_send(&tx));
+
+    /* Handler must be invoked for broadcast messages */
+    TEST_ASSERT_EQUAL_INT(1, s_handler_calls);
+    TEST_ASSERT_EQUAL_UINT32(33, s_handler_msg_type);
+}

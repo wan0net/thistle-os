@@ -89,3 +89,86 @@ TEST_CASE("test_signing_verify_file_not_found: missing file returns ESP_ERR_NOT_
     esp_err_t ret = signing_verify_file("/nonexistent/path/app.elf");
     TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, ret);
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_signing_verify_null_data: signing_verify with NULL data returns error", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    static const uint8_t dummy_sig[THISTLE_SIGN_SIG_SIZE] = {0};
+    esp_err_t ret = signing_verify(NULL, 32, dummy_sig);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_signing_verify_null_signature: signing_verify with NULL signature returns error", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    static const uint8_t data[4] = {0x01, 0x02, 0x03, 0x04};
+    esp_err_t ret = signing_verify(data, sizeof(data), NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_signing_init_null_key: signing_init(NULL) returns ESP_ERR_INVALID_ARG", "[signing]")
+{
+    esp_err_t ret = signing_init(NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_signing_verify_zero_length: signing_verify with data_len=0 returns error", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    static const uint8_t dummy_sig[THISTLE_SIGN_SIG_SIZE] = {0};
+    static const uint8_t data[1] = {0};
+    esp_err_t ret = signing_verify(data, 0, dummy_sig);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_signing_verify_bad_signature: all-zero signature fails with ESP_ERR_INVALID_CRC", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    static const uint8_t data[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+    };
+    static const uint8_t bad_sig[THISTLE_SIGN_SIG_SIZE] = {0};
+
+    esp_err_t ret = signing_verify(data, sizeof(data), bad_sig);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_CRC, ret);
+}
+
+TEST_CASE("test_signing_public_key_hex_deterministic: same key produces same hex string", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+    const char *hex1 = signing_get_public_key_hex();
+    TEST_ASSERT_NOT_NULL(hex1);
+    size_t len1 = strlen(hex1);
+
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+    const char *hex2 = signing_get_public_key_hex();
+    TEST_ASSERT_NOT_NULL(hex2);
+
+    TEST_ASSERT_EQUAL_size_t(len1, strlen(hex2));
+    TEST_ASSERT_EQUAL_STRING(hex1, hex2);
+}
+
+TEST_CASE("test_signing_verify_file_null_path: NULL path returns error", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    esp_err_t ret = signing_verify_file(NULL);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_signing_has_signature_null_path: NULL path returns false without crash", "[signing]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, signing_init(s_test_key));
+
+    bool result = signing_has_signature(NULL);
+    TEST_ASSERT_FALSE(result);
+}

@@ -238,3 +238,167 @@ TEST_CASE("test_hal_display_config_preserved: display_config pointer matches wha
     const hal_registry_t *reg = hal_get_registry();
     TEST_ASSERT_EQUAL_PTR(&cfg_sentinel, reg->display_config);
 }
+
+/* --------------------------------------------------------------------------
+ * Mock radio driver
+ * -------------------------------------------------------------------------- */
+
+static esp_err_t mock_radio_init(const void *c)                              { return ESP_OK; }
+static void      mock_radio_deinit(void)                                     {}
+static esp_err_t mock_radio_set_freq(uint32_t f)                             { return ESP_OK; }
+static esp_err_t mock_radio_set_tx_power(int8_t d)                          { return ESP_OK; }
+static esp_err_t mock_radio_set_bw(uint32_t b)                               { return ESP_OK; }
+static esp_err_t mock_radio_set_sf(uint8_t s)                                { return ESP_OK; }
+static esp_err_t mock_radio_send(const uint8_t *d, size_t l)                 { return ESP_OK; }
+static esp_err_t mock_radio_start_rx(hal_radio_rx_cb_t cb, void *ud)         { return ESP_OK; }
+static esp_err_t mock_radio_stop_rx(void)                                    { return ESP_OK; }
+static int       mock_radio_get_rssi(void)                                   { return -70; }
+static esp_err_t mock_radio_sleep(bool e)                                    { return ESP_OK; }
+
+static const hal_radio_driver_t s_mock_radio = {
+    .init               = mock_radio_init,
+    .deinit             = mock_radio_deinit,
+    .set_frequency      = mock_radio_set_freq,
+    .set_tx_power       = mock_radio_set_tx_power,
+    .set_bandwidth      = mock_radio_set_bw,
+    .set_spreading_factor = mock_radio_set_sf,
+    .send               = mock_radio_send,
+    .start_receive      = mock_radio_start_rx,
+    .stop_receive       = mock_radio_stop_rx,
+    .get_rssi           = mock_radio_get_rssi,
+    .sleep              = mock_radio_sleep,
+    .name               = "mock_radio",
+};
+
+/* --------------------------------------------------------------------------
+ * Mock GPS driver
+ * -------------------------------------------------------------------------- */
+
+static esp_err_t mock_gps_init(const void *c)                                { return ESP_OK; }
+static void      mock_gps_deinit(void)                                       {}
+static esp_err_t mock_gps_enable(void)                                       { return ESP_OK; }
+static esp_err_t mock_gps_disable(void)                                      { return ESP_OK; }
+static esp_err_t mock_gps_get_position(hal_gps_position_t *p)                { return ESP_OK; }
+static esp_err_t mock_gps_register_callback(hal_gps_cb_t cb, void *ud)       { return ESP_OK; }
+static esp_err_t mock_gps_sleep(bool e)                                      { return ESP_OK; }
+
+static const hal_gps_driver_t s_mock_gps = {
+    .init              = mock_gps_init,
+    .deinit            = mock_gps_deinit,
+    .enable            = mock_gps_enable,
+    .disable           = mock_gps_disable,
+    .get_position      = mock_gps_get_position,
+    .register_callback = mock_gps_register_callback,
+    .sleep             = mock_gps_sleep,
+    .name              = "mock_gps",
+};
+
+/* --------------------------------------------------------------------------
+ * Mock audio driver
+ * -------------------------------------------------------------------------- */
+
+static esp_err_t mock_audio_init(const void *c)                              { return ESP_OK; }
+static void      mock_audio_deinit(void)                                     {}
+static esp_err_t mock_audio_play(const uint8_t *d, size_t l)                 { return ESP_OK; }
+static esp_err_t mock_audio_stop(void)                                       { return ESP_OK; }
+static esp_err_t mock_audio_set_volume(uint8_t pct)                          { return ESP_OK; }
+static esp_err_t mock_audio_configure(const hal_audio_config_t *cfg)         { return ESP_OK; }
+
+static const hal_audio_driver_t __attribute__((unused)) s_mock_audio = {
+    .init       = mock_audio_init,
+    .deinit     = mock_audio_deinit,
+    .play       = mock_audio_play,
+    .stop       = mock_audio_stop,
+    .set_volume = mock_audio_set_volume,
+    .configure  = mock_audio_configure,
+    .name       = "mock_audio",
+};
+
+/* --------------------------------------------------------------------------
+ * Mock power driver
+ * -------------------------------------------------------------------------- */
+
+static esp_err_t mock_power_init(const void *c)                              { return ESP_OK; }
+static void      mock_power_deinit(void)                                     {}
+static esp_err_t mock_power_get_info(hal_power_info_t *info)                 { return ESP_OK; }
+static uint16_t  mock_power_get_battery_mv(void)                             { return 3700; }
+static uint8_t   mock_power_get_battery_percent(void)                        { return 75; }
+static bool      mock_power_is_charging(void)                                { return false; }
+static esp_err_t mock_power_sleep(bool e)                                    { return ESP_OK; }
+
+static const hal_power_driver_t s_mock_power = {
+    .init                 = mock_power_init,
+    .deinit               = mock_power_deinit,
+    .get_info             = mock_power_get_info,
+    .get_battery_mv       = mock_power_get_battery_mv,
+    .get_battery_percent  = mock_power_get_battery_percent,
+    .is_charging          = mock_power_is_charging,
+    .sleep                = mock_power_sleep,
+    .name                 = "mock_power",
+};
+
+/* --------------------------------------------------------------------------
+ * Additional HAL registry tests
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_hal_radio_register: mock radio stored and registry field is non-NULL", "[hal]")
+{
+    esp_err_t ret = hal_radio_register(&s_mock_radio, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+
+    const hal_registry_t *reg = hal_get_registry();
+    TEST_ASSERT_NOT_NULL(reg->radio);
+}
+
+TEST_CASE("test_hal_gps_register: mock GPS name matches after registration", "[hal]")
+{
+    esp_err_t ret = hal_gps_register(&s_mock_gps, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+
+    const hal_registry_t *reg = hal_get_registry();
+    TEST_ASSERT_NOT_NULL(reg->gps);
+    TEST_ASSERT_EQUAL_STRING("mock_gps", reg->gps->name);
+}
+
+TEST_CASE("test_hal_audio_register_null_rejected: hal_audio_register(NULL, NULL) returns ESP_ERR_INVALID_ARG", "[hal]")
+{
+    esp_err_t ret = hal_audio_register(NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_hal_power_register: mock power driver is accessible via get_registry", "[hal]")
+{
+    esp_err_t ret = hal_power_register(&s_mock_power, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+
+    const hal_registry_t *reg = hal_get_registry();
+    TEST_ASSERT_NOT_NULL(reg->power);
+    TEST_ASSERT_EQUAL_STRING("mock_power", reg->power->name);
+}
+
+TEST_CASE("test_hal_radio_register_null_rejected: hal_radio_register(NULL, NULL) returns ESP_ERR_INVALID_ARG", "[hal]")
+{
+    esp_err_t ret = hal_radio_register(NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_hal_gps_register_null_rejected: hal_gps_register(NULL, NULL) returns ESP_ERR_INVALID_ARG", "[hal]")
+{
+    esp_err_t ret = hal_gps_register(NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_hal_power_register_null_rejected: hal_power_register(NULL, NULL) returns ESP_ERR_INVALID_ARG", "[hal]")
+{
+    esp_err_t ret = hal_power_register(NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}
+
+TEST_CASE("test_hal_radio_name_matches: registered radio name is 'mock_radio'", "[hal]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, hal_radio_register(&s_mock_radio, NULL));
+
+    const hal_registry_t *reg = hal_get_registry();
+    TEST_ASSERT_NOT_NULL(reg->radio);
+    TEST_ASSERT_EQUAL_STRING("mock_radio", reg->radio->name);
+}

@@ -261,3 +261,130 @@ TEST_CASE("test_event_unsubscribe_middle: A and C called but not B after B unsub
     TEST_ASSERT_EQUAL_INT(0, s_call_count_b);
     TEST_ASSERT_EQUAL_INT(1, s_call_count_c);
 }
+
+/* --------------------------------------------------------------------------
+ * Additional handler for NULL-data test
+ * -------------------------------------------------------------------------- */
+
+static volatile bool s_null_data_handler_called = false;
+static volatile void *s_null_data_ptr = (void *)0xDEAD; /* non-NULL sentinel */
+
+static void handler_null_data(const event_t *ev, void *user_data)
+{
+    s_null_data_handler_called = true;
+    s_null_data_ptr = ev->data;
+    s_call_count_a++;
+}
+
+TEST_CASE("test_event_publish_null_data: handler called with NULL data when data_len=0", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+    reset_counters();
+    s_null_data_handler_called = false;
+    s_null_data_ptr = (void *)0xDEAD;
+
+    TEST_ASSERT_EQUAL(ESP_OK, event_subscribe(EVENT_SYSTEM_SHUTDOWN, handler_null_data, NULL));
+
+    event_t ev = {
+        .type      = EVENT_SYSTEM_SHUTDOWN,
+        .timestamp = 0,
+        .data      = NULL,
+        .data_len  = 0,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, event_publish(&ev));
+
+    TEST_ASSERT_TRUE(s_null_data_handler_called);
+    TEST_ASSERT_NULL(s_null_data_ptr);
+    TEST_ASSERT_EQUAL_INT(1, s_call_count_a);
+}
+
+TEST_CASE("test_event_reinit_clears_subscribers: handler NOT called after reinit", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+    reset_counters();
+
+    TEST_ASSERT_EQUAL(ESP_OK, event_subscribe(EVENT_SD_MOUNTED, handler_a, NULL));
+
+    /* Reinit must wipe the subscriber table */
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+
+    event_t ev = { .type = EVENT_SD_MOUNTED };
+    TEST_ASSERT_EQUAL(ESP_OK, event_publish(&ev));
+
+    /* handler_a was subscribed before reinit — it must NOT be called */
+    TEST_ASSERT_EQUAL_INT(0, s_call_count_a);
+}
+
+TEST_CASE("test_event_publish_null_event: NULL event pointer returns error", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+
+    esp_err_t ret = event_publish(NULL);
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_event_publish_simple_no_subscribers: publish with no subscribers returns ESP_OK", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+
+    /* No subscribers registered — publish must still return ESP_OK */
+    esp_err_t ret = event_publish_simple(EVENT_BLE_CONNECTED);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+}
+
+TEST_CASE("test_event_subscribe_same_handler_twice: handler fires only once or twice (impl-defined), not zero", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+    reset_counters();
+
+    /* Register the same handler twice — some impls deduplicate, some allow it */
+    event_subscribe(EVENT_APP_SWITCHED, handler_a, NULL);
+    event_subscribe(EVENT_APP_SWITCHED, handler_a, NULL);
+
+    event_t ev = { .type = EVENT_APP_SWITCHED };
+    TEST_ASSERT_EQUAL(ESP_OK, event_publish(&ev));
+
+    /* Must be called at least once */
+    TEST_ASSERT_GREATER_OR_EQUAL(1, s_call_count_a);
+}
+
+TEST_CASE("test_event_unsubscribe_nonexistent: unsubscribing unregistered handler does not crash", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+
+    /* handler_b was never subscribed to EVENT_BLE_DISCONNECTED */
+    esp_err_t ret = event_unsubscribe(EVENT_BLE_DISCONNECTED, handler_b);
+    /* May return error or ESP_OK — must not crash */
+    (void)ret;
+    TEST_PASS();
+}
+
+/* --------------------------------------------------------------------------
+ * File-scope state for user_data forwarding test
+ * -------------------------------------------------------------------------- */
+
+static volatile void *s_received_ud  = NULL;
+static volatile int   s_ud_call_count = 0;
+
+static void handler_ud_capture(const event_t *ev, void *user_data)
+{
+    s_received_ud  = user_data;
+    s_ud_call_count++;
+}
+
+TEST_CASE("test_event_user_data_forwarded: user_data pointer passed to handler unchanged", "[event]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, event_bus_init());
+
+    void *const s_my_ud = (void *)0xCAFEBABE;
+    s_received_ud  = NULL;
+    s_ud_call_count = 0;
+
+    TEST_ASSERT_EQUAL(ESP_OK, event_subscribe(EVENT_BATTERY_CHARGING, handler_ud_capture, s_my_ud));
+
+    event_t ev = { .type = EVENT_BATTERY_CHARGING };
+    TEST_ASSERT_EQUAL(ESP_OK, event_publish(&ev));
+
+    TEST_ASSERT_EQUAL_INT(1, s_ud_call_count);
+    TEST_ASSERT_EQUAL_PTR(s_my_ud, s_received_ud);
+}

@@ -137,3 +137,107 @@ TEST_CASE("test_epaper_init_invalid_dimensions: init with 0x0 returns error", "[
     esp_err_t ret = epaper_refresh_init(0, 0);
     TEST_ASSERT_NOT_EQUAL(ESP_OK, ret);
 }
+
+/* --------------------------------------------------------------------------
+ * Additional edge-case tests
+ * -------------------------------------------------------------------------- */
+
+TEST_CASE("test_epaper_mark_dirty_overflow: area beyond display bounds is clamped", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    /*
+     * Mark an area that extends beyond the display edges. The implementation
+     * must clamp x2/y2 to (DISP_W-1) / (DISP_H-1) rather than storing
+     * out-of-range coordinates.
+     */
+    epaper_refresh_mark_dirty(0, 0, DISP_W + 100, DISP_H + 100);
+
+    TEST_ASSERT_TRUE(epaper_refresh_is_dirty());
+
+    uint16_t x1, y1, x2, y2;
+    epaper_refresh_get_bounds(&x1, &y1, &x2, &y2);
+
+    TEST_ASSERT_LESS_OR_EQUAL(DISP_W - 1, x2);
+    TEST_ASSERT_LESS_OR_EQUAL(DISP_H - 1, y2);
+}
+
+TEST_CASE("test_epaper_multiple_clear_cycles: counter increments by 2 after two dirty/clear cycles", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    uint32_t base = epaper_refresh_get_count();
+
+    /* Cycle 1 */
+    epaper_refresh_mark_dirty(0, 0, 10, 10);
+    epaper_refresh_clear();
+
+    /* Cycle 2 */
+    epaper_refresh_mark_dirty(50, 50, 100, 100);
+    epaper_refresh_clear();
+
+    TEST_ASSERT_EQUAL_UINT32(base + 2, epaper_refresh_get_count());
+    TEST_ASSERT_FALSE(epaper_refresh_is_dirty());
+}
+
+TEST_CASE("test_epaper_clear_without_dirty: clear on clean display increments counter", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    uint32_t before = epaper_refresh_get_count();
+    epaper_refresh_clear();
+
+    /* Counter must still increment even without a prior mark_dirty */
+    TEST_ASSERT_EQUAL_UINT32(before + 1, epaper_refresh_get_count());
+}
+
+TEST_CASE("test_epaper_mark_dirty_single_pixel: 1x1 area at origin sets correct bounds", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    epaper_refresh_mark_dirty(5, 7, 5, 7);
+
+    TEST_ASSERT_TRUE(epaper_refresh_is_dirty());
+
+    uint16_t x1, y1, x2, y2;
+    epaper_refresh_get_bounds(&x1, &y1, &x2, &y2);
+    TEST_ASSERT_EQUAL_UINT16(5, x1);
+    TEST_ASSERT_EQUAL_UINT16(7, y1);
+    TEST_ASSERT_EQUAL_UINT16(5, x2);
+    TEST_ASSERT_EQUAL_UINT16(7, y2);
+}
+
+TEST_CASE("test_epaper_mark_full_then_partial: partial mark after mark_full keeps full bounds", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    epaper_refresh_mark_full();
+    /* Marking a sub-region after full must not shrink the bounding box */
+    epaper_refresh_mark_dirty(10, 10, 50, 50);
+
+    uint16_t x1, y1, x2, y2;
+    epaper_refresh_get_bounds(&x1, &y1, &x2, &y2);
+
+    TEST_ASSERT_EQUAL_UINT16(0,         x1);
+    TEST_ASSERT_EQUAL_UINT16(0,         y1);
+    TEST_ASSERT_EQUAL_UINT16(DISP_W - 1, x2);
+    TEST_ASSERT_EQUAL_UINT16(DISP_H - 1, y2);
+}
+
+TEST_CASE("test_epaper_init_clears_counter: counter resets to 0 on re-init", "[epaper]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+
+    /* Accumulate some counts */
+    epaper_refresh_mark_dirty(0, 0, 10, 10);
+    epaper_refresh_clear();
+    epaper_refresh_mark_dirty(0, 0, 10, 10);
+    epaper_refresh_clear();
+
+    TEST_ASSERT_GREATER_OR_EQUAL(2, (int)epaper_refresh_get_count());
+
+    /* Re-init must reset the counter */
+    TEST_ASSERT_EQUAL(ESP_OK, epaper_refresh_init(DISP_W, DISP_H));
+    TEST_ASSERT_EQUAL_UINT32(0, epaper_refresh_get_count());
+    TEST_ASSERT_FALSE(epaper_refresh_is_dirty());
+}
