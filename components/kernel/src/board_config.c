@@ -266,8 +266,8 @@ static esp_err_t load_drivers_from_config(const char *json)
             continue;
         }
 
-        ESP_LOGI(TAG, "Loading driver: %s [%s] from %s", id, hal, path);
-        esp_err_t ret = driver_loader_load(path);
+        ESP_LOGI(TAG, "Loading driver: %s [%s] from %s (config: %zu bytes)", id, hal, path, strlen(config_json));
+        esp_err_t ret = driver_loader_load_with_config(path, config_json);
         if (ret == ESP_OK) {
             ESP_LOGI(TAG, "Driver '%s' loaded successfully", id);
         } else {

@@ -2,6 +2,7 @@
 #include "thistle/kernel.h"
 #include "thistle/ipc.h"
 #include "thistle/event.h"
+#include "thistle/driver_loader.h"
 
 #include "hal/board.h"
 
@@ -383,6 +384,9 @@ static syscall_entry_t s_table[] = {
     { "hal_bus_get_spi",                (void *)hal_bus_get_spi               },
     { "hal_bus_get_i2c",                (void *)hal_bus_get_i2c               },
 #endif
+
+    /* Driver config — available to all drivers (simulator + firmware) */
+    { "thistle_driver_get_config",      (void *)driver_loader_get_config      },
 };
 
 static const size_t s_table_count = sizeof(s_table) / sizeof(s_table[0]);

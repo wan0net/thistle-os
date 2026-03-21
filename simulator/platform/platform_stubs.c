@@ -67,7 +67,11 @@ esp_err_t elf_loader_init(void) {
 esp_err_t driver_loader_init(void) { return ESP_OK; }
 int driver_loader_scan_and_load(void) { return 0; }
 esp_err_t driver_loader_load(const char *path) { (void)path; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t driver_loader_load_with_config(const char *path, const char *config_json) {
+    (void)path; (void)config_json; return ESP_ERR_NOT_SUPPORTED;
+}
 int driver_loader_get_count(void) { return 0; }
+const char *driver_loader_get_config(void) { return "{}"; }
 
 /* Signing subsystem stubs (simulator build — no mbedtls) */
 #include "thistle/signing.h"

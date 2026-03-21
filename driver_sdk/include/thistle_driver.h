@@ -44,6 +44,11 @@ extern int hal_power_register(const void *driver, const void *config);
 extern int hal_imu_register(const void *driver, const void *config);
 extern int hal_storage_register(const void *driver, const void *config);
 
+/* ── Driver config (from board.json) ────────────────────────────── */
+/* Call during driver_init() to get the JSON config for this driver.
+ * Returns "{}" if no config was provided. */
+extern const char *thistle_driver_get_config(void);
+
 /* ── Bus handle access (initialized by kernel from board.json) ──── */
 extern void *hal_bus_get_spi(int index);
 extern void *hal_bus_get_i2c(int index);

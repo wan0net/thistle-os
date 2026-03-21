@@ -34,6 +34,10 @@ typedef struct {
 static loaded_driver_t s_drivers[MAX_LOADED_DRVS];
 static int             s_driver_count = 0;
 
+/* Config JSON passed to the currently-loading driver via board.json.
+ * Set before calling driver_init(), read by driver via thistle_driver_get_config(). */
+static const char *s_current_config = "{}";
+
 /* --------------------------------------------------------------------------
  * Custom symbol resolver — bridges esp_elf to the kernel syscall table,
  * which already exports all HAL registration functions and ESP-IDF basics.
@@ -234,4 +238,18 @@ int driver_loader_scan_and_load(void)
     closedir(dir);
     ESP_LOGI(TAG, "Scanned %s: %d driver(s) loaded", DRIVERS_DIR, loaded);
     return loaded;
+}
+
+esp_err_t driver_loader_load_with_config(const char *path, const char *config_json)
+{
+    /* Store config so the driver can retrieve it via thistle_driver_get_config() */
+    s_current_config = config_json ? config_json : "{}";
+    esp_err_t ret = driver_loader_load(path);
+    s_current_config = "{}";  /* Reset after load */
+    return ret;
+}
+
+const char *driver_loader_get_config(void)
+{
+    return s_current_config;
 }

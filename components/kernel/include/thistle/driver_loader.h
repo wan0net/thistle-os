@@ -17,5 +17,14 @@ int driver_loader_scan_and_load(void);
  * Returns ESP_OK if the driver was loaded and initialized successfully. */
 esp_err_t driver_loader_load(const char *path);
 
+/* Load a driver with JSON config (from board.json).
+ * The config is available to the driver via thistle_driver_get_config(). */
+esp_err_t driver_loader_load_with_config(const char *path, const char *config_json);
+
+/* Get the current driver config JSON string.
+ * Called by the driver during init to retrieve its board.json config.
+ * Returns "{}" if no config was provided. */
+const char *driver_loader_get_config(void);
+
 /* Return the number of runtime drivers currently loaded */
 int driver_loader_get_count(void);
