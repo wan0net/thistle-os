@@ -112,10 +112,18 @@ pub extern "C" fn kernel_init() -> i32 {
     ESP_OK
 }
 
+#[cfg(not(test))]
+extern "C" {
+    fn vTaskDelay(ticks: u32);
+}
+
 #[no_mangle]
 pub extern "C" fn kernel_run() {
     // LVGL tick is driven by ui component. This is the kernel heartbeat.
     loop {
+        #[cfg(target_os = "espidf")]
+        unsafe { vTaskDelay(1); } // 1 tick = 1ms at 1000Hz FreeRTOS
+        #[cfg(not(target_os = "espidf"))]
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
