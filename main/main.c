@@ -73,10 +73,18 @@ void app_main(void)
     ESP_LOGI(TAG, "ThistleOS v0.1.0 starting...");
 
     /* Start kernel services: board init, driver manager, app manager, event bus, IPC */
-    ESP_ERROR_CHECK(kernel_init());
+    esp_err_t ret = kernel_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "kernel_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
 
     /* Start LVGL and the ThistleOS window manager / UI */
-    ESP_ERROR_CHECK(ui_manager_init());
+    ret = ui_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ui_manager_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
 
     /* Subscribe to system events that warrant user-visible toasts */
     event_subscribe(EVENT_WIFI_CONNECTED,    system_event_toast, NULL);

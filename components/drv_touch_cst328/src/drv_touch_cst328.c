@@ -136,7 +136,8 @@ static esp_err_t cst328_init(const void *config)
             .intr_type    = GPIO_INTR_DISABLE,
             .pin_bit_mask = 1ULL << s_touch.cfg.pin_rst,
         };
-        ESP_ERROR_CHECK(gpio_config(&rst_cfg));
+        esp_err_t gpio_ret = gpio_config(&rst_cfg);
+        if (gpio_ret != ESP_OK) { return gpio_ret; }
         cst328_hw_reset();
     }
 

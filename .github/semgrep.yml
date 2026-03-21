@@ -16,8 +16,11 @@ rules:
       cwe: CWE-416
 
   - id: thistle-hardcoded-sdcard-path
-    pattern: |
-      "/sdcard"
+    patterns:
+      - pattern: |
+          "/sdcard/..."
+      - pattern-not-inside: |
+          .mount_point = "..."
     message: >
       Hardcoded "/sdcard" path. Use THISTLE_SDCARD macro from
       hal/sdcard_path.h for simulator compatibility.

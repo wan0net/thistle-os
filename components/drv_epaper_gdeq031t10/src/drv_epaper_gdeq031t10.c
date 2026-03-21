@@ -188,7 +188,7 @@ static esp_err_t gdeq031t10_init(const void *config)
                         (1ULL << s_epd.cfg.pin_dc)  |
                         (1ULL << s_epd.cfg.pin_rst),
     };
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    esp_err_t ret = gpio_config(&io_conf); if (ret != ESP_OK) goto fail;
 
     gpio_config_t busy_conf = {
         .mode         = GPIO_MODE_INPUT,
@@ -197,7 +197,7 @@ static esp_err_t gdeq031t10_init(const void *config)
         .intr_type    = GPIO_INTR_DISABLE,
         .pin_bit_mask = (1ULL << s_epd.cfg.pin_busy),
     };
-    ESP_ERROR_CHECK(gpio_config(&busy_conf));
+    ret = gpio_config(&busy_conf); if (ret != ESP_OK) goto fail;
 
     /* CS defaults high (SPI driver will drive it during transactions) */
     gpio_set_level(s_epd.cfg.pin_cs, 1);
@@ -211,7 +211,7 @@ static esp_err_t gdeq031t10_init(const void *config)
         .spics_io_num   = s_epd.cfg.pin_cs,
         .queue_size     = 1,
     };
-    esp_err_t ret = spi_bus_add_device(s_epd.cfg.spi_host, &dev_cfg, &s_epd.spi);
+    ret = spi_bus_add_device(s_epd.cfg.spi_host, &dev_cfg, &s_epd.spi);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
         free(s_epd.fb);
