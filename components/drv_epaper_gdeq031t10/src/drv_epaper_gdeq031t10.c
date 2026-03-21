@@ -225,22 +225,36 @@ static esp_err_t gdeq031t10_init(const void *config)
     }
 
     /* ── Reset ── */
+    ESP_LOGI(TAG, "EPD init: SPI host=%d CS=%d DC=%d BUSY=%d RST=%d clk=%luHz",
+             (int)s_epd.cfg.spi_host, (int)s_epd.cfg.pin_cs,
+             (int)s_epd.cfg.pin_dc, (int)s_epd.cfg.pin_busy,
+             (int)s_epd.cfg.pin_rst, (unsigned long)s_epd.cfg.spi_clock_hz);
+
+    ESP_LOGI(TAG, "BUSY pin state before reset: %d", gpio_get_level(s_epd.cfg.pin_busy));
+
     epaper_hw_reset();  /* Skips if RST=-1 */
+
+    ESP_LOGI(TAG, "BUSY pin state after HW reset: %d", gpio_get_level(s_epd.cfg.pin_busy));
 
     /* Software reset (0x12) — required when hardware RST is not connected */
     ret = epaper_send_cmd(0x12);  /* SW_RESET */
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SW_RESET command failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "SW_RESET SPI command failed: %s", esp_err_to_name(ret));
         goto fail;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));  /* Wait for SW reset to complete */
+    ESP_LOGI(TAG, "SW_RESET sent OK, waiting 100ms...");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    ESP_LOGI(TAG, "BUSY pin state after SW reset: %d", gpio_get_level(s_epd.cfg.pin_busy));
 
     /* Wait for controller to come out of reset */
     ret = epaper_wait_busy(5000);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "display did not become ready after reset");
+        ESP_LOGE(TAG, "display did not become ready after reset (BUSY still %d)",
+                 gpio_get_level(s_epd.cfg.pin_busy));
         goto fail;
     }
+    ESP_LOGI(TAG, "Display ready after reset");
 
     /* ── Power-on sequence ── */
     /* Power setting: VGH=20V, VGL=-20V, VDH=15V, VDL=-15V

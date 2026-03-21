@@ -81,6 +81,8 @@ esp_err_t board_init(void) {
     gpio_set_level(BOARD_LORA_CS, 1);
     gpio_set_level(BOARD_SD_CS, 1);
 
+    // Wait for power rails to stabilize
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP_LOGI(TAG, "Power and GPIO pre-init done");
 
     // 1. Init SPI bus
