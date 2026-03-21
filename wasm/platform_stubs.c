@@ -111,6 +111,9 @@ void elf_set_symbol_resolver(void *resolver) { (void)resolver; }
 /* ── Logging ───────────────────────────────────────────────────────── */
 void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)level;(void)tag;(void)fmt; }
 
+/* ── HAL crypto accessor (no hardware in WASM) ─────────────────────── */
+const void *hal_crypto_get(void) { return 0; }
+
 /* ── HAL helpers ───────────────────────────────────────────────────── */
 unsigned short hal_display_get_width_helper(void) { return 320; }
 unsigned short hal_display_get_height_helper(void) { return 240; }

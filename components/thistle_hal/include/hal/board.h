@@ -9,6 +9,7 @@
 #include "hal/power.h"
 #include "hal/imu.h"
 #include "hal/storage.h"
+#include "hal/crypto.h"
 
 #define HAL_MAX_INPUT_DRIVERS  4
 #define HAL_MAX_STORAGE_DRIVERS 2
@@ -38,6 +39,7 @@ typedef struct {
     uint8_t spi_bus_count;
     void *i2c_bus[2];          /* I2C master bus handles */
     uint8_t i2c_bus_count;
+    const hal_crypto_driver_t  *crypto;       /* Hardware crypto accelerator (NULL = software) */
     const char                 *board_name;
 } hal_registry_t;
 
@@ -53,6 +55,7 @@ esp_err_t hal_audio_register(const hal_audio_driver_t *driver, const void *confi
 esp_err_t hal_power_register(const hal_power_driver_t *driver, const void *config);
 esp_err_t hal_imu_register(const hal_imu_driver_t *driver, const void *config);
 esp_err_t hal_storage_register(const hal_storage_driver_t *driver, const void *config);
+esp_err_t hal_crypto_register(const hal_crypto_driver_t *driver);
 esp_err_t hal_set_board_name(const char *name);
 
 /* Register a shared SPI bus handle (called by kernel at boot) */

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // ThistleOS Kernel — crypto module
 //
-// Platform-independent cryptographic primitives available to all apps
-// via the syscall table. Uses pure Rust crates — works on ESP32, desktop,
-// and WASM without any platform-specific crypto library.
+// Cryptographic primitives with hardware acceleration support.
+// If a hardware crypto driver is registered via the HAL, it is used.
+// Otherwise, falls back to pure Rust software implementations.
 //
-// Primitives:
-//   SHA-256, HMAC-SHA256, AES-256-CBC, PBKDF2-SHA256, CSPRNG
+// Dispatch order per function:
+//   1. Check HAL registry for hardware crypto driver
+//   2. If driver has the function implemented (non-NULL), call it
+//   3. Otherwise, use Rust software fallback
+//
+// This means hardware can accelerate some primitives (e.g., SHA-256)
+// while software handles others (e.g., PBKDF2) — partial acceleration.
 
 use std::os::raw::c_char;
 
@@ -15,7 +20,6 @@ use pbkdf2::pbkdf2_hmac;
 use sha2::{Sha256, Digest};
 use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit, generic_array::GenericArray};
 
-// ESP error codes
 const ESP_OK: i32 = 0;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
 const ESP_ERR_INVALID_SIZE: i32 = 0x104;
@@ -23,111 +27,54 @@ const ESP_FAIL: i32 = -1;
 
 type HmacSha256 = Hmac<Sha256>;
 
-// ── SHA-256 ─────────────────────────────────────────────────────────
+// ── HAL crypto driver vtable (matches hal/crypto.h) ─────────────────
 
-/// Compute SHA-256 hash of `data` (len bytes), write 32 bytes to `hash_out`.
-#[no_mangle]
-pub unsafe extern "C" fn thistle_crypto_sha256(
-    data: *const u8,
-    len: usize,
-    hash_out: *mut u8,
-) -> i32 {
-    if data.is_null() || hash_out.is_null() {
-        return ESP_ERR_INVALID_ARG;
-    }
-    let input = std::slice::from_raw_parts(data, len);
-    let result = Sha256::digest(input);
-    std::ptr::copy_nonoverlapping(result.as_ptr(), hash_out, 32);
-    ESP_OK
+#[repr(C)]
+struct HalCryptoDriver {
+    sha256: Option<unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32>,
+    aes256_cbc_encrypt: Option<unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32>,
+    aes256_cbc_decrypt: Option<unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32>,
+    hmac_sha256: Option<unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32>,
+    random: Option<unsafe extern "C" fn(*mut u8, usize) -> i32>,
+    name: *const u8,
 }
 
-// ── HMAC-SHA256 ─────────────────────────────────────────────────────
+// HAL crypto driver access — not available in test builds
+#[cfg(not(test))]
+extern "C" {
+    fn hal_crypto_get() -> *const std::os::raw::c_void;
+}
 
-/// Compute HMAC-SHA256. Key is `key_len` bytes, data is `data_len` bytes.
-/// Writes 32 bytes to `mac_out`.
-#[no_mangle]
-pub unsafe extern "C" fn thistle_crypto_hmac_sha256(
-    key: *const u8,
-    key_len: usize,
-    data: *const u8,
-    data_len: usize,
-    mac_out: *mut u8,
-) -> i32 {
-    if key.is_null() || data.is_null() || mac_out.is_null() {
-        return ESP_ERR_INVALID_ARG;
-    }
-    let key_slice = std::slice::from_raw_parts(key, key_len);
-    let data_slice = std::slice::from_raw_parts(data, data_len);
+#[cfg(not(test))]
+unsafe fn get_hw_crypto() -> Option<&'static HalCryptoDriver> {
+    let crypto_ptr = hal_crypto_get();
+    if crypto_ptr.is_null() { return None; }
+    Some(&*(crypto_ptr as *const HalCryptoDriver))
+}
 
-    let mut mac = match <HmacSha256 as Mac>::new_from_slice(key_slice) {
-        Ok(m) => m,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
-    mac.update(data_slice);
+#[cfg(test)]
+unsafe fn get_hw_crypto() -> Option<&'static HalCryptoDriver> {
+    None // Tests always use software fallback
+}
+
+// ── Software implementations (pure Rust) ────────────────────────────
+
+fn sw_sha256(data: &[u8], hash_out: &mut [u8; 32]) {
+    let result = Sha256::digest(data);
+    hash_out.copy_from_slice(&result);
+}
+
+fn sw_hmac_sha256(key: &[u8], data: &[u8], mac_out: &mut [u8; 32]) {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).unwrap();
+    mac.update(data);
     let result = mac.finalize().into_bytes();
-    std::ptr::copy_nonoverlapping(result.as_ptr(), mac_out, 32);
-    ESP_OK
+    mac_out.copy_from_slice(&result);
 }
 
-/// Constant-time HMAC comparison. Returns 0 if equal, non-zero if different.
-#[no_mangle]
-pub unsafe extern "C" fn thistle_crypto_hmac_verify(
-    key: *const u8,
-    key_len: usize,
-    data: *const u8,
-    data_len: usize,
-    expected_mac: *const u8,
-) -> i32 {
-    if key.is_null() || data.is_null() || expected_mac.is_null() {
-        return ESP_ERR_INVALID_ARG;
-    }
-    let key_slice = std::slice::from_raw_parts(key, key_len);
-    let data_slice = std::slice::from_raw_parts(data, data_len);
-    let expected = std::slice::from_raw_parts(expected_mac, 32);
-
-    let mut mac = match <HmacSha256 as Mac>::new_from_slice(key_slice) {
-        Ok(m) => m,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
-    mac.update(data_slice);
-
-    // verify() is constant-time
-    match mac.verify_slice(expected) {
-        Ok(()) => 0,  // match
-        Err(_) => 1,  // mismatch
-    }
-}
-
-// ── AES-256-CBC ─────────────────────────────────────────────────────
-
-/// AES-256-CBC encrypt. `len` must be a multiple of 16 (caller pads).
-/// `key` is 32 bytes, `iv` is 16 bytes.
-/// Writes `len` bytes to `ciphertext_out`.
-#[no_mangle]
-pub unsafe extern "C" fn thistle_crypto_aes256_cbc_encrypt(
-    key: *const u8,
-    iv: *const u8,
-    plaintext: *const u8,
-    len: usize,
-    ciphertext_out: *mut u8,
-) -> i32 {
-    if key.is_null() || iv.is_null() || plaintext.is_null() || ciphertext_out.is_null() {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if len == 0 || len % 16 != 0 {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    let key_arr: &[u8; 32] = &*(key as *const [u8; 32]);
-    let iv_arr: &[u8; 16] = &*(iv as *const [u8; 16]);
-
-    let pt = std::slice::from_raw_parts(plaintext, len);
-    let ct = std::slice::from_raw_parts_mut(ciphertext_out, len);
-    let cipher = aes::Aes256::new(GenericArray::from_slice(key_arr));
-
-    // CBC encrypt: ct[i] = AES(pt[i] XOR ct[i-1]), ct[-1] = IV
-    let mut prev = *iv_arr;
-    for i in (0..len).step_by(16) {
+fn sw_aes256_cbc_encrypt(key: &[u8; 32], iv: &[u8; 16], pt: &[u8], ct: &mut [u8]) {
+    let cipher = aes::Aes256::new(GenericArray::from_slice(key));
+    let mut prev = *iv;
+    for i in (0..pt.len()).step_by(16) {
         let mut block = [0u8; 16];
         for j in 0..16 { block[j] = pt[i + j] ^ prev[j]; }
         let mut ga = GenericArray::clone_from_slice(&block);
@@ -135,90 +82,167 @@ pub unsafe extern "C" fn thistle_crypto_aes256_cbc_encrypt(
         ct[i..i+16].copy_from_slice(ga.as_slice());
         prev.copy_from_slice(&ct[i..i+16]);
     }
+}
+
+fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]) {
+    let cipher = aes::Aes256::new(GenericArray::from_slice(key));
+    let mut prev = *iv;
+    for i in (0..ct.len()).step_by(16) {
+        let mut ga = GenericArray::clone_from_slice(&ct[i..i+16]);
+        cipher.decrypt_block(&mut ga);
+        for j in 0..16 { pt[i + j] = ga[j] ^ prev[j]; }
+        prev.copy_from_slice(&ct[i..i+16]);
+    }
+}
+
+fn sw_random(buf: &mut [u8]) -> bool {
+    getrandom::getrandom(buf).is_ok()
+}
+
+// ── FFI exports (dispatch: hardware first, software fallback) ───────
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_sha256(
+    data: *const u8, len: usize, hash_out: *mut u8,
+) -> i32 {
+    if data.is_null() || hash_out.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    // Try hardware
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.sha256 {
+            return f(data, len, hash_out);
+        }
+    }
+
+    // Software fallback
+    let input = std::slice::from_raw_parts(data, len);
+    let mut hash = [0u8; 32];
+    sw_sha256(input, &mut hash);
+    std::ptr::copy_nonoverlapping(hash.as_ptr(), hash_out, 32);
     ESP_OK
 }
 
-/// AES-256-CBC decrypt. `len` must be a multiple of 16.
-/// `key` is 32 bytes, `iv` is 16 bytes.
-/// Writes `len` bytes to `plaintext_out`.
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_hmac_sha256(
+    key: *const u8, key_len: usize,
+    data: *const u8, data_len: usize,
+    mac_out: *mut u8,
+) -> i32 {
+    if key.is_null() || data.is_null() || mac_out.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.hmac_sha256 {
+            return f(key, key_len, data, data_len, mac_out);
+        }
+    }
+
+    let key_slice = std::slice::from_raw_parts(key, key_len);
+    let data_slice = std::slice::from_raw_parts(data, data_len);
+    let mut mac = [0u8; 32];
+    sw_hmac_sha256(key_slice, data_slice, &mut mac);
+    std::ptr::copy_nonoverlapping(mac.as_ptr(), mac_out, 32);
+    ESP_OK
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_hmac_verify(
+    key: *const u8, key_len: usize,
+    data: *const u8, data_len: usize,
+    expected_mac: *const u8,
+) -> i32 {
+    if key.is_null() || data.is_null() || expected_mac.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    let key_slice = std::slice::from_raw_parts(key, key_len);
+    let data_slice = std::slice::from_raw_parts(data, data_len);
+    let expected = std::slice::from_raw_parts(expected_mac, 32);
+
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key_slice).unwrap();
+    mac.update(data_slice);
+    match mac.verify_slice(expected) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_aes256_cbc_encrypt(
+    key: *const u8, iv: *const u8,
+    plaintext: *const u8, len: usize,
+    ciphertext_out: *mut u8,
+) -> i32 {
+    if key.is_null() || iv.is_null() || plaintext.is_null() || ciphertext_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.aes256_cbc_encrypt {
+            return f(key, iv, plaintext, len, ciphertext_out);
+        }
+    }
+
+    let k = &*(key as *const [u8; 32]);
+    let i = &*(iv as *const [u8; 16]);
+    let pt = std::slice::from_raw_parts(plaintext, len);
+    let ct = std::slice::from_raw_parts_mut(ciphertext_out, len);
+    sw_aes256_cbc_encrypt(k, i, pt, ct);
+    ESP_OK
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_aes256_cbc_decrypt(
-    key: *const u8,
-    iv: *const u8,
-    ciphertext: *const u8,
-    len: usize,
+    key: *const u8, iv: *const u8,
+    ciphertext: *const u8, len: usize,
     plaintext_out: *mut u8,
 ) -> i32 {
     if key.is_null() || iv.is_null() || ciphertext.is_null() || plaintext_out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    if len == 0 || len % 16 != 0 {
-        return ESP_ERR_INVALID_SIZE;
+    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.aes256_cbc_decrypt {
+            return f(key, iv, ciphertext, len, plaintext_out);
+        }
     }
 
-    let key_arr: &[u8; 32] = &*(key as *const [u8; 32]);
-    let iv_arr: &[u8; 16] = &*(iv as *const [u8; 16]);
-
-    let ct_slice = std::slice::from_raw_parts(ciphertext, len);
+    let k = &*(key as *const [u8; 32]);
+    let i = &*(iv as *const [u8; 16]);
+    let ct = std::slice::from_raw_parts(ciphertext, len);
     let pt = std::slice::from_raw_parts_mut(plaintext_out, len);
-    let cipher = aes::Aes256::new(GenericArray::from_slice(key_arr));
-
-    // CBC decrypt: pt[i] = AES_dec(ct[i]) XOR ct[i-1], ct[-1] = IV
-    let mut prev = *iv_arr;
-    for i in (0..len).step_by(16) {
-        let mut ga = GenericArray::clone_from_slice(&ct_slice[i..i+16]);
-        cipher.decrypt_block(&mut ga);
-        for j in 0..16 { pt[i + j] = ga[j] ^ prev[j]; }
-        prev.copy_from_slice(&ct_slice[i..i+16]);
-    }
+    sw_aes256_cbc_decrypt(k, i, ct, pt);
     ESP_OK
 }
 
-// ── PBKDF2-SHA256 ───────────────────────────────────────────────────
-
-/// Derive a key using PBKDF2-HMAC-SHA256.
-/// `password` is a C string, `salt` is `salt_len` bytes.
-/// Writes `key_len` bytes to `key_out`.
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_pbkdf2_sha256(
-    password: *const c_char,
-    salt: *const u8,
-    salt_len: usize,
-    iterations: u32,
-    key_out: *mut u8,
-    key_len: usize,
+    password: *const c_char, salt: *const u8, salt_len: usize,
+    iterations: u32, key_out: *mut u8, key_len: usize,
 ) -> i32 {
-    if password.is_null() || salt.is_null() || key_out.is_null() {
-        return ESP_ERR_INVALID_ARG;
-    }
+    if password.is_null() || salt.is_null() || key_out.is_null() { return ESP_ERR_INVALID_ARG; }
 
+    // PBKDF2 is always software — no hardware accelerator provides it directly.
+    // It uses HMAC-SHA256 internally, which may be hardware-accelerated.
     let pw = std::ffi::CStr::from_ptr(password).to_bytes();
     let salt_slice = std::slice::from_raw_parts(salt, salt_len);
     let mut dk = vec![0u8; key_len];
-
     pbkdf2_hmac::<Sha256>(pw, salt_slice, iterations, &mut dk);
-
     std::ptr::copy_nonoverlapping(dk.as_ptr(), key_out, key_len);
     ESP_OK
 }
 
-// ── CSPRNG ──────────────────────────────────────────────────────────
-
-/// Fill `buf` with `len` cryptographically secure random bytes.
-/// Uses OS entropy source (ESP-IDF hw RNG, /dev/urandom, or Web Crypto).
 #[no_mangle]
-pub unsafe extern "C" fn thistle_crypto_random(
-    buf: *mut u8,
-    len: usize,
-) -> i32 {
-    if buf.is_null() {
-        return ESP_ERR_INVALID_ARG;
+pub unsafe extern "C" fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32 {
+    if buf.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.random {
+            return f(buf, len);
+        }
     }
+
     let slice = std::slice::from_raw_parts_mut(buf, len);
-    match getrandom::getrandom(slice) {
-        Ok(()) => ESP_OK,
-        Err(_) => ESP_FAIL,
-    }
+    if sw_random(slice) { ESP_OK } else { ESP_FAIL }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -233,7 +257,6 @@ mod tests {
         let mut hash = [0u8; 32];
         let ret = unsafe { thistle_crypto_sha256(data.as_ptr(), data.len(), hash.as_mut_ptr()) };
         assert_eq!(ret, ESP_OK);
-        // SHA-256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
         assert_eq!(hash[0], 0x2c);
         assert_eq!(hash[1], 0xf2);
     }
@@ -244,36 +267,22 @@ mod tests {
         let data = b"message";
         let mut mac = [0u8; 32];
         let ret = unsafe {
-            thistle_crypto_hmac_sha256(
-                key.as_ptr(), key.len(),
-                data.as_ptr(), data.len(),
-                mac.as_mut_ptr(),
-            )
+            thistle_crypto_hmac_sha256(key.as_ptr(), key.len(), data.as_ptr(), data.len(), mac.as_mut_ptr())
         };
         assert_eq!(ret, ESP_OK);
-        assert_ne!(mac, [0u8; 32]); // non-zero
+        assert_ne!(mac, [0u8; 32]);
 
-        // Verify passes
         let ret = unsafe {
-            thistle_crypto_hmac_verify(
-                key.as_ptr(), key.len(),
-                data.as_ptr(), data.len(),
-                mac.as_ptr(),
-            )
+            thistle_crypto_hmac_verify(key.as_ptr(), key.len(), data.as_ptr(), data.len(), mac.as_ptr())
         };
-        assert_eq!(ret, 0); // match
+        assert_eq!(ret, 0);
 
-        // Tamper → verify fails
         let mut bad_mac = mac;
         bad_mac[0] ^= 0xFF;
         let ret = unsafe {
-            thistle_crypto_hmac_verify(
-                key.as_ptr(), key.len(),
-                data.as_ptr(), data.len(),
-                bad_mac.as_ptr(),
-            )
+            thistle_crypto_hmac_verify(key.as_ptr(), key.len(), data.as_ptr(), data.len(), bad_mac.as_ptr())
         };
-        assert_eq!(ret, 1); // mismatch
+        assert_eq!(ret, 1);
     }
 
     #[test]
@@ -283,10 +292,7 @@ mod tests {
         let mut key = [0u8; 32];
         let ret = unsafe {
             thistle_crypto_pbkdf2_sha256(
-                password.as_ptr() as *const c_char,
-                salt.as_ptr(), salt.len(),
-                1000,
-                key.as_mut_ptr(), 32,
+                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000, key.as_mut_ptr(), 32,
             )
         };
         assert_eq!(ret, ESP_OK);
@@ -297,29 +303,21 @@ mod tests {
     fn test_aes256_cbc_roundtrip() {
         let key = [0x42u8; 32];
         let iv = [0x13u8; 16];
-        let plaintext = [0xABu8; 32]; // 2 blocks
+        let plaintext = [0xABu8; 32];
         let mut ciphertext = [0u8; 32];
         let mut decrypted = [0u8; 32];
 
         let ret = unsafe {
-            thistle_crypto_aes256_cbc_encrypt(
-                key.as_ptr(), iv.as_ptr(),
-                plaintext.as_ptr(), 32,
-                ciphertext.as_mut_ptr(),
-            )
+            thistle_crypto_aes256_cbc_encrypt(key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 32, ciphertext.as_mut_ptr())
         };
         assert_eq!(ret, ESP_OK);
-        assert_ne!(ciphertext, plaintext); // encrypted is different
+        assert_ne!(ciphertext, plaintext);
 
         let ret = unsafe {
-            thistle_crypto_aes256_cbc_decrypt(
-                key.as_ptr(), iv.as_ptr(),
-                ciphertext.as_ptr(), 32,
-                decrypted.as_mut_ptr(),
-            )
+            thistle_crypto_aes256_cbc_decrypt(key.as_ptr(), iv.as_ptr(), ciphertext.as_ptr(), 32, decrypted.as_mut_ptr())
         };
         assert_eq!(ret, ESP_OK);
-        assert_eq!(decrypted, plaintext); // roundtrip
+        assert_eq!(decrypted, plaintext);
     }
 
     #[test]
@@ -327,6 +325,6 @@ mod tests {
         let mut buf = [0u8; 32];
         let ret = unsafe { thistle_crypto_random(buf.as_mut_ptr(), 32) };
         assert_eq!(ret, ESP_OK);
-        assert_ne!(buf, [0u8; 32]); // extremely unlikely to be all zeros
+        assert_ne!(buf, [0u8; 32]);
     }
 }

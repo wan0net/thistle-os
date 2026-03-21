@@ -163,6 +163,12 @@ void ble_manager_register_gatt_services(void) {
     // NimBLE GATT service registration — implemented in ble C shim when needed
 }
 
+// ── Crypto HAL accessor ─────────────────────────────────────────────
+const void *hal_crypto_get(void) {
+    const hal_registry_t *reg = hal_get_registry();
+    return reg ? (const void *)reg->crypto : NULL;
+}
+
 // ── OTA helper ──────────────────────────────────────────────────────
 #include "esp_ota_ops.h"
 int esp_ota_img_pending_verify(void) {

@@ -20,6 +20,7 @@ static hal_registry_t s_registry = {
     .spi_bus_count = 0,
     .i2c_bus       = { NULL },
     .i2c_bus_count = 0,
+    .crypto        = NULL,
     .board_name    = NULL,
 };
 
@@ -181,6 +182,14 @@ esp_err_t hal_registry_stop_all(void)
         if (s_registry.inputs[i] && s_registry.inputs[i]->deinit)
             s_registry.inputs[i]->deinit();
     if (s_registry.display && s_registry.display->deinit) s_registry.display->deinit();
+    return ESP_OK;
+}
+
+esp_err_t hal_crypto_register(const hal_crypto_driver_t *driver)
+{
+    if (driver == NULL) return ESP_ERR_INVALID_ARG;
+    s_registry.crypto = driver;
+    ESP_LOGI(TAG, "crypto driver registered: %s", driver->name ? driver->name : "(unnamed)");
     return ESP_OK;
 }
 
