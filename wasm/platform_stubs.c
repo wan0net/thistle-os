@@ -11,23 +11,72 @@
 #include <string.h>
 #include <stddef.h>
 #include <emscripten.h>
+#include <emscripten/eventloop.h>
 
-/* ── esp_timer ─────────────────────────────────────────────────────── */
-struct esp_timer { int dummy; };
+/* ── esp_timer (real implementation using Emscripten) ──────────────── */
+struct esp_timer {
+    esp_timer_cb_t callback;
+    void *arg;
+    int em_id;       /* emscripten_set_timeout ID for cancellation */
+    int periodic;
+    uint64_t period_us;
+};
 
 int64_t esp_timer_get_time(void) {
-    return (int64_t)(emscripten_get_now() * 1000.0); /* ms → us */
+    return (int64_t)(emscripten_get_now() * 1000.0); /* ms to us */
+}
+
+static void timer_trampoline(void *user_data) {
+    struct esp_timer *t = (struct esp_timer *)user_data;
+    if (t && t->callback) {
+        t->callback(t->arg);
+        if (t->periodic) {
+            t->em_id = emscripten_set_timeout(timer_trampoline, (double)t->period_us / 1000.0, t);
+        }
+    }
 }
 
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *handle) {
-    (void)args;
-    *handle = (esp_timer_handle_t)calloc(1, sizeof(struct esp_timer));
+    struct esp_timer *t = calloc(1, sizeof(struct esp_timer));
+    if (!t) return ESP_ERR_NO_MEM;
+    t->callback = args->callback;
+    t->arg = args->arg;
+    t->em_id = 0;
+    t->periodic = 0;
+    *handle = t;
     return ESP_OK;
 }
-esp_err_t esp_timer_start_periodic(esp_timer_handle_t h, uint64_t p) { (void)h;(void)p; return ESP_OK; }
-esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t t) { (void)h;(void)t; return ESP_OK; }
-esp_err_t esp_timer_delete(esp_timer_handle_t h) { free(h); return ESP_OK; }
-esp_err_t esp_timer_stop(esp_timer_handle_t h) { (void)h; return ESP_OK; }
+
+esp_err_t esp_timer_start_periodic(esp_timer_handle_t h, uint64_t period_us) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->periodic = 1;
+    h->period_us = period_us;
+    h->em_id = emscripten_set_timeout(timer_trampoline, (double)period_us / 1000.0, h);
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t timeout_us) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->periodic = 0;
+    h->em_id = emscripten_set_timeout(timer_trampoline, (double)timeout_us / 1000.0, h);
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_stop(esp_timer_handle_t h) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    if (h->em_id) {
+        emscripten_clear_timeout(h->em_id);
+        h->em_id = 0;
+    }
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_delete(esp_timer_handle_t h) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    esp_timer_stop(h);
+    free(h);
+    return ESP_OK;
+}
 
 /* ── Heap ──────────────────────────────────────────────────────────── */
 size_t heap_caps_get_free_size(unsigned int caps) { (void)caps; return 4 * 1024 * 1024; }
