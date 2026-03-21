@@ -21,14 +21,11 @@ set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
     # HAL
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
-    # Kernel (except elf_loader which needs ESP-IDF elf component)
-    ${THISTLE_DIR}/components/kernel/src/kernel.c
+    # Kernel — C thin wrappers only (core logic is Rust via libthistle_kernel.a)
     ${THISTLE_DIR}/components/kernel/src/appstore_client.c
     ${THISTLE_DIR}/components/kernel/src/driver_manager.c
     ${THISTLE_DIR}/components/kernel/src/syscall_table.c
     ${THISTLE_DIR}/components/kernel/src/net_manager.c
-    ${THISTLE_DIR}/components/kernel/src/board_config.c
-    ${THISTLE_DIR}/components/kernel/src/display_server.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c

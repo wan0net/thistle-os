@@ -54,7 +54,16 @@ const char *ota_get_current_version(void) { return "0.1.0"; }
 const char *ota_get_running_partition(void) { return "sim"; }
 esp_err_t ota_mark_valid(void) { return ESP_OK; }
 esp_err_t ota_rollback(void) { return ESP_ERR_NOT_SUPPORTED; }
-/* permissions, ipc, event, app_manager — provided by Rust kernel lib */
+/* permissions, ipc, event, app_manager, kernel, signing, display_server,
+ * board_config — all provided by Rust kernel lib (libthistle_kernel.a) */
+
+/* esp_timer_get_time — Rust kernel_boot needs a real symbol, not an inline */
+#include <sys/time.h>
+int64_t esp_timer_get_time(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
+}
 
 /* ESP-IDF heap API stub for Rust app_manager */
 #include <stddef.h>
@@ -77,29 +86,7 @@ esp_err_t driver_loader_load_with_config(const char *path, const char *config_js
 int driver_loader_get_count(void) { return 0; }
 const char *driver_loader_get_config(void) { return "{}"; }
 
-/* Signing subsystem stubs (simulator build — no mbedtls) */
-#include "thistle/signing.h"
-static char s_sim_key_hex[THISTLE_SIGN_KEY_SIZE * 2 + 1] = "(simulator)";
-esp_err_t signing_init(const uint8_t public_key[THISTLE_SIGN_KEY_SIZE]) {
-    (void)public_key;
-    return ESP_OK;
-}
-esp_err_t signing_verify(const uint8_t *data, size_t data_len,
-                          const uint8_t signature[THISTLE_SIGN_SIG_SIZE]) {
-    (void)data; (void)data_len; (void)signature;
-    return ESP_ERR_NOT_FOUND; /* unsigned in sim */
-}
-esp_err_t signing_verify_file(const char *elf_path) {
-    (void)elf_path;
-    return ESP_ERR_NOT_FOUND; /* unsigned in sim */
-}
-bool signing_has_signature(const char *elf_path) {
-    (void)elf_path;
-    return false;
-}
-const char *signing_get_public_key_hex(void) {
-    return s_sim_key_hex;
-}
+/* Signing — provided by Rust kernel lib (ed25519-dalek) */
 
 /* A7682E modem PPP stubs */
 esp_err_t drv_a7682e_start_ppp(void) { return ESP_ERR_NOT_SUPPORTED; }

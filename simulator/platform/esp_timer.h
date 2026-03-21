@@ -18,11 +18,7 @@ typedef struct esp_timer *esp_timer_handle_t;
 
 #define ESP_TIMER_TASK 0
 
-static inline int64_t esp_timer_get_time(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (int64_t)tv.tv_sec * 1000000LL + tv.tv_usec;
-}
+int64_t esp_timer_get_time(void);
 
 /* Timer create/start are stubs — LVGL tick is driven by main loop */
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *handle);

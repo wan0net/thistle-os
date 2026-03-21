@@ -1,0 +1,271 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// ThistleOS Kernel — signing module
+//
+// Replaces signing.c / Monocypher with ed25519-dalek (BSD-3-Clause).
+// Exposes a C-compatible FFI with the same symbol names as the original C API.
+
+use core::ffi::c_char;
+use std::ffi::CStr;
+use std::fs;
+use std::path::Path;
+use std::sync::Mutex;
+
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+// ---------------------------------------------------------------------------
+// ESP-IDF error codes
+// ---------------------------------------------------------------------------
+
+const ESP_OK: i32 = 0x000;
+const ESP_ERR_NO_MEM: i32 = 0x101;
+const ESP_ERR_INVALID_ARG: i32 = 0x102;
+const ESP_ERR_INVALID_STATE: i32 = 0x103;
+const ESP_ERR_INVALID_SIZE: i32 = 0x104;
+const ESP_ERR_NOT_FOUND: i32 = 0x105;
+const ESP_ERR_INVALID_CRC: i32 = 0x109;
+
+// ---------------------------------------------------------------------------
+// Global state
+// ---------------------------------------------------------------------------
+
+static VERIFYING_KEY: Mutex<Option<VerifyingKey>> = Mutex::new(None);
+
+/// 64 hex chars + NUL terminator.
+static HEX_BUF: Mutex<[u8; 65]> = Mutex::new([0u8; 65]);
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn bytes_to_hex(bytes: &[u8], out: &mut [u8]) {
+    const HEX: &[u8] = b"0123456789abcdef";
+    for (i, &b) in bytes.iter().enumerate() {
+        out[i * 2] = HEX[(b >> 4) as usize];
+        out[i * 2 + 1] = HEX[(b & 0x0f) as usize];
+    }
+}
+
+fn sig_path_for(elf_path: &str) -> String {
+    format!("{}.sig", elf_path)
+}
+
+// ---------------------------------------------------------------------------
+// FFI exports
+// ---------------------------------------------------------------------------
+
+/// Initialise the signing subsystem with a 32-byte Ed25519 public key.
+///
+/// # Safety
+/// `key` must point to at least 32 valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn signing_init(key: *const u8) -> i32 {
+    if key.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let key_bytes: [u8; 32] = match std::slice::from_raw_parts(key, 32).try_into() {
+        Ok(b) => b,
+        Err(_) => return ESP_ERR_INVALID_SIZE,
+    };
+
+    let verifying_key = match VerifyingKey::from_bytes(&key_bytes) {
+        Ok(k) => k,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+
+    // Build hex representation while we have the bytes.
+    let mut hex = [0u8; 65];
+    bytes_to_hex(&key_bytes, &mut hex[..64]);
+    hex[64] = 0;
+
+    match HEX_BUF.lock() {
+        Ok(mut guard) => *guard = hex,
+        Err(_) => return ESP_ERR_NO_MEM,
+    }
+
+    match VERIFYING_KEY.lock() {
+        Ok(mut guard) => *guard = Some(verifying_key),
+        Err(_) => return ESP_ERR_NO_MEM,
+    }
+
+    ESP_OK
+}
+
+/// Verify `data_len` bytes at `data` against the 64-byte `signature`.
+///
+/// Returns `ESP_ERR_INVALID_STATE` if the module has not been initialised.
+/// Returns `ESP_ERR_INVALID_CRC` if the signature does not verify.
+///
+/// # Safety
+/// `data` must point to at least `data_len` valid bytes.
+/// `signature` must point to at least 64 valid bytes.
+#[no_mangle]
+pub unsafe extern "C" fn signing_verify(
+    data: *const u8,
+    data_len: usize,
+    signature: *const u8,
+) -> i32 {
+    if data.is_null() || signature.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let key_guard = match VERIFYING_KEY.lock() {
+        Ok(g) => g,
+        Err(_) => return ESP_ERR_NO_MEM,
+    };
+
+    let verifying_key = match key_guard.as_ref() {
+        Some(k) => k,
+        None => return ESP_ERR_INVALID_STATE,
+    };
+
+    let data_slice = std::slice::from_raw_parts(data, data_len);
+
+    let sig_bytes: [u8; 64] = match std::slice::from_raw_parts(signature, 64).try_into() {
+        Ok(b) => b,
+        Err(_) => return ESP_ERR_INVALID_SIZE,
+    };
+    let sig = Signature::from_bytes(&sig_bytes);
+
+    match verifying_key.verify(data_slice, &sig) {
+        Ok(()) => ESP_OK,
+        Err(_) => ESP_ERR_INVALID_CRC,
+    }
+}
+
+/// Read `<elf_path>.sig` and the ELF file, then verify the signature.
+///
+/// # Safety
+/// `elf_path` must be a valid, NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn signing_verify_file(elf_path: *const c_char) -> i32 {
+    if elf_path.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let path_str = match CStr::from_ptr(elf_path).to_str() {
+        Ok(s) => s,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+
+    let sig_path = sig_path_for(path_str);
+
+    let sig_bytes = match fs::read(&sig_path) {
+        Ok(b) => b,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+
+    if sig_bytes.len() != 64 {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    let elf_bytes = match fs::read(path_str) {
+        Ok(b) => b,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+
+    signing_verify(elf_bytes.as_ptr(), elf_bytes.len(), sig_bytes.as_ptr())
+}
+
+/// Return `true` if `<elf_path>.sig` exists on the filesystem.
+///
+/// # Safety
+/// `elf_path` must be a valid, NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn signing_has_signature(elf_path: *const c_char) -> bool {
+    if elf_path.is_null() {
+        return false;
+    }
+
+    let path_str = match CStr::from_ptr(elf_path).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    Path::new(&sig_path_for(path_str)).exists()
+}
+
+/// Return a pointer to a static NUL-terminated hex string of the stored public key.
+///
+/// Returns a pointer to an empty string if the module has not been initialised.
+/// The returned pointer remains valid for the lifetime of the process.
+#[no_mangle]
+pub extern "C" fn signing_get_public_key_hex() -> *const c_char {
+    match HEX_BUF.lock() {
+        Ok(guard) => guard.as_ptr() as *const c_char,
+        // Safety: this is a valid empty C string literal.
+        Err(_) => b"\0".as_ptr() as *const c_char,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+
+    /// Reset global state between tests so they are independent.
+    fn reset() {
+        if let Ok(mut g) = VERIFYING_KEY.lock() {
+            *g = None;
+        }
+        if let Ok(mut g) = HEX_BUF.lock() {
+            *g = [0u8; 65];
+        }
+    }
+
+    fn fresh_verifying_key_bytes() -> [u8; 32] {
+        // Use a deterministic key derived from a fixed seed so tests are
+        // reproducible without a CSPRNG dependency in the test suite.
+        let seed = [0x42u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        signing_key.verifying_key().to_bytes()
+    }
+
+    #[test]
+    fn test_init() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        let result = unsafe { signing_init(key_bytes.as_ptr()) };
+        assert_eq!(result, ESP_OK);
+    }
+
+    #[test]
+    fn test_verify_rejects_bad_sig() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+
+        let data = b"hello thistle";
+        let zero_sig = [0u8; 64];
+        let result =
+            unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
+        assert_eq!(result, ESP_ERR_INVALID_CRC);
+    }
+
+    #[test]
+    fn test_hex_output() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+
+        let ptr = signing_get_public_key_hex();
+        assert!(!ptr.is_null());
+        let hex_str = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(hex_str.len(), 64);
+        assert!(hex_str.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_not_initialized() {
+        reset();
+        let data = b"some data";
+        let zero_sig = [0u8; 64];
+        let result =
+            unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
+        assert_eq!(result, ESP_ERR_INVALID_STATE);
+    }
+}

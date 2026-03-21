@@ -199,7 +199,7 @@ impl Manifest {
 // ── Simple JSON helpers (no serde dependency) ──────────────────────────
 
 /// Extract a string value for a given key from JSON text.
-fn json_get_string(json: &str, key: &str) -> Option<String> {
+pub fn json_get_string(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{}\"", key);
     let start = json.find(&pattern)?;
     let after_key = &json[start + pattern.len()..];
@@ -218,7 +218,7 @@ fn json_get_string(json: &str, key: &str) -> Option<String> {
 }
 
 /// Extract a boolean value for a given key.
-fn json_get_bool(json: &str, key: &str) -> Option<bool> {
+pub fn json_get_bool(json: &str, key: &str) -> Option<bool> {
     let pattern = format!("\"{}\"", key);
     let start = json.find(&pattern)?;
     let after_key = &json[start + pattern.len()..];
@@ -235,7 +235,7 @@ fn json_get_bool(json: &str, key: &str) -> Option<bool> {
 }
 
 /// Extract an integer value for a given key.
-fn json_get_int(json: &str, key: &str) -> Option<i64> {
+pub fn json_get_int(json: &str, key: &str) -> Option<i64> {
     let pattern = format!("\"{}\"", key);
     let start = json.find(&pattern)?;
     let after_key = &json[start + pattern.len()..];
