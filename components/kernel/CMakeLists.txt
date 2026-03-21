@@ -16,7 +16,8 @@ idf_component_register(
         "src/appstore_client.c"
         "src/net_manager.c"
         "src/manifest.c"
+        "src/board_config.c"
     INCLUDE_DIRS "include"
-    REQUIRES thistle_hal crypto_ed25519 esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event bt mbedtls esp_http_client driver
+    REQUIRES thistle_hal crypto_ed25519 esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event bt mbedtls esp_http_client driver esp_spiffs
     PRIV_REQUIRES board_tdeck_pro
 )

@@ -11,6 +11,7 @@
 #include "thistle/signing.h"
 #include "thistle/net_manager.h"
 #include "thistle/wifi_manager.h"
+#include "thistle/board_config.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -49,20 +50,6 @@ esp_err_t kernel_init(void)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Initializing driver manager");
-    ret = driver_manager_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "driver_manager_init failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    ESP_LOGI(TAG, "Starting all drivers");
-    ret = driver_manager_start_all();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "driver_manager_start_all failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
     ESP_LOGI(TAG, "Initializing syscall table");
     ret = syscall_table_init();
     if (ret != ESP_OK) {
@@ -70,11 +57,18 @@ esp_err_t kernel_init(void)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Scanning for runtime drivers on SD card");
-    driver_loader_init();
-    int loaded_drv_count = driver_loader_scan_and_load();
-    if (loaded_drv_count > 0) {
-        ESP_LOGI(TAG, "Loaded %d runtime driver(s) from SD card", loaded_drv_count);
+    /* Board config: reads board.json from SPIFFS, inits buses, loads drivers.
+     * Falls back to compiled board_init() + driver_manager if no board.json. */
+    ESP_LOGI(TAG, "Initializing board from config");
+    ret = board_config_init(NULL);  /* NULL = default /spiffs/config/board.json */
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "board_config_init failed: %s — trying compiled board_init()",
+                 esp_err_to_name(ret));
+        /* Fallback: use the old compiled-in driver path */
+        driver_manager_init();
+        driver_manager_start_all();
+        driver_loader_init();
+        driver_loader_scan_and_load();
     }
 
     ESP_LOGI(TAG, "Initializing app manager");

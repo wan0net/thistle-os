@@ -30,6 +30,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/kernel/src/ipc.c
     ${THISTLE_DIR}/components/kernel/src/event.c
     ${THISTLE_DIR}/components/kernel/src/net_manager.c
+    ${THISTLE_DIR}/components/kernel/src/board_config.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/theme.c
