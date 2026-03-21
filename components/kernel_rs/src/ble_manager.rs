@@ -50,7 +50,7 @@ const ESP_LOG_ERROR: i32 = 1;
 #[cfg(target_os = "espidf")]
 extern "C" {
     #[link_name = "ble_shim_nimble_port_init"]
-    fn nimble_port_init();
+    fn nimble_port_init() -> i32;
     #[link_name = "ble_shim_nimble_port_freertos_init"]
     fn nimble_port_freertos_init(task_fn: *const c_void);
     #[link_name = "ble_shim_nimble_port_run"]
