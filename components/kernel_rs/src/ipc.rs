@@ -411,4 +411,56 @@ mod tests {
         let result = recv_from(&g, 1);
         assert_eq!(result.unwrap_err(), ESP_ERR_TIMEOUT);
     }
+
+    // ── test_send_recv_multiple ──────────────────────────────────────────────
+
+    #[test]
+    fn test_send_recv_multiple() {
+        let g = make_global();
+
+        // Send 3 messages with distinct msg_type values
+        for i in 0..3u32 {
+            let mut msg = CIpcMessage::default();
+            msg.msg_type = i + 10;
+            msg.src_app = i;
+            assert_eq!(send_to(&g, msg), ESP_OK, "send #{} should succeed", i);
+        }
+
+        // Receive in FIFO order
+        for i in 0..3u32 {
+            let received = recv_from(&g, 50).expect("expected message");
+            assert_eq!(received.msg_type, i + 10, "FIFO order violated at position {}", i);
+            assert_eq!(received.src_app, i);
+        }
+
+        // Queue should now be empty
+        assert_eq!(recv_from(&g, 1).unwrap_err(), ESP_ERR_TIMEOUT);
+    }
+
+    // ── test_message_fields ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_message_fields() {
+        let g = make_global();
+
+        let mut msg = CIpcMessage::default();
+        msg.src_app = 0xDEAD;
+        msg.dst_app = 0xBEEF;
+        msg.msg_type = 0x42;
+        msg.data[0] = 0x11;
+        msg.data[1] = 0x22;
+        msg.data_len = 2;
+        msg.timestamp = 0xCAFE;
+
+        assert_eq!(send_to(&g, msg), ESP_OK);
+
+        let received = recv_from(&g, 50).expect("expected message");
+        assert_eq!(received.src_app, 0xDEAD, "src_app not preserved");
+        assert_eq!(received.dst_app, 0xBEEF, "dst_app not preserved");
+        assert_eq!(received.msg_type, 0x42, "msg_type not preserved");
+        assert_eq!(received.data[0], 0x11, "data[0] not preserved");
+        assert_eq!(received.data[1], 0x22, "data[1] not preserved");
+        assert_eq!(received.data_len, 2, "data_len not preserved");
+        assert_eq!(received.timestamp, 0xCAFE, "timestamp not preserved");
+    }
 }

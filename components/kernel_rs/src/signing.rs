@@ -273,4 +273,102 @@ mod tests {
             unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
         assert_eq!(result, ESP_ERR_INVALID_STATE);
     }
+
+    #[test]
+    fn test_verify_valid_signature() {
+        use ed25519_dalek::Signer;
+
+        reset();
+        let seed = [0x11u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key_bytes = signing_key.verifying_key().to_bytes();
+
+        let init_result = unsafe { signing_init(verifying_key_bytes.as_ptr()) };
+        assert_eq!(init_result, ESP_OK);
+
+        let data = b"thistleos payload";
+        let sig: ed25519_dalek::Signature = signing_key.sign(data);
+        let sig_bytes = sig.to_bytes();
+
+        let result = unsafe { signing_verify(data.as_ptr(), data.len(), sig_bytes.as_ptr()) };
+        assert_eq!(result, ESP_OK, "valid signature must verify successfully");
+    }
+
+    #[test]
+    fn test_verify_wrong_key() {
+        use ed25519_dalek::Signer;
+
+        reset();
+        // Sign with key A
+        let seed_a = [0x22u8; 32];
+        let signing_key_a = SigningKey::from_bytes(&seed_a);
+        let data = b"hello from key a";
+        let sig: ed25519_dalek::Signature = signing_key_a.sign(data);
+        let sig_bytes = sig.to_bytes();
+
+        // Init with key B (different)
+        let seed_b = [0x33u8; 32];
+        let signing_key_b = SigningKey::from_bytes(&seed_b);
+        let verifying_key_b = signing_key_b.verifying_key().to_bytes();
+
+        unsafe { signing_init(verifying_key_b.as_ptr()) };
+
+        let result = unsafe { signing_verify(data.as_ptr(), data.len(), sig_bytes.as_ptr()) };
+        assert_eq!(result, ESP_ERR_INVALID_CRC, "signature from wrong key must fail");
+    }
+
+    #[test]
+    fn test_verify_tampered_data() {
+        use ed25519_dalek::Signer;
+
+        reset();
+        let seed = [0x44u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key_bytes = signing_key.verifying_key().to_bytes();
+
+        unsafe { signing_init(verifying_key_bytes.as_ptr()) };
+
+        let original_data = b"original data";
+        let sig: ed25519_dalek::Signature = signing_key.sign(original_data);
+        let sig_bytes = sig.to_bytes();
+
+        // Tamper: use different data with the original signature
+        let tampered_data = b"tampered data!!";
+        let result =
+            unsafe { signing_verify(tampered_data.as_ptr(), tampered_data.len(), sig_bytes.as_ptr()) };
+        assert_eq!(result, ESP_ERR_INVALID_CRC, "tampered data must not verify");
+    }
+
+    #[test]
+    fn test_init_twice() {
+        reset();
+        // First init with key A
+        let seed_a = [0x55u8; 32];
+        let vk_a = SigningKey::from_bytes(&seed_a).verifying_key().to_bytes();
+        let r1 = unsafe { signing_init(vk_a.as_ptr()) };
+        assert_eq!(r1, ESP_OK);
+
+        // Second init with key B — must also succeed (replaces stored key)
+        let seed_b = [0x66u8; 32];
+        let vk_b = SigningKey::from_bytes(&seed_b).verifying_key().to_bytes();
+        let r2 = unsafe { signing_init(vk_b.as_ptr()) };
+        assert_eq!(r2, ESP_OK, "calling signing_init a second time must succeed");
+    }
+
+    #[test]
+    fn test_null_data() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+
+        let zero_sig = [0u8; 64];
+        // null data pointer
+        let result = unsafe { signing_verify(std::ptr::null(), 10, zero_sig.as_ptr()) };
+        assert_eq!(result, ESP_ERR_INVALID_ARG, "null data must return ESP_ERR_INVALID_ARG");
+
+        // null signature pointer
+        let data = b"some data";
+        let result = unsafe { signing_verify(data.as_ptr(), data.len(), std::ptr::null()) };
+        assert_eq!(result, ESP_ERR_INVALID_ARG, "null signature must return ESP_ERR_INVALID_ARG");
+    }
 }

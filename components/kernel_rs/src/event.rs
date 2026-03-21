@@ -431,4 +431,95 @@ mod tests {
         let rc = event_publish(&ev as *const CEvent);
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "publish with invalid type must fail");
     }
+
+    // -----------------------------------------------------------------------
+    // test_max_subscribers
+    // -----------------------------------------------------------------------
+
+    // 8 distinct handler functions — one per subscriber slot
+    extern "C" fn handler_ms0(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms1(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms2(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms3(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms4(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms5(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms6(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms7(_: *const CEvent, _: *mut c_void) {}
+    extern "C" fn handler_ms8(_: *const CEvent, _: *mut c_void) {} // 9th — must fail
+
+    #[test]
+    fn test_max_subscribers() {
+        let etype = EventType::GpsFix as u32;
+        let handlers: [extern "C" fn(*const CEvent, *mut c_void); 8] = [
+            handler_ms0, handler_ms1, handler_ms2, handler_ms3,
+            handler_ms4, handler_ms5, handler_ms6, handler_ms7,
+        ];
+
+        for (i, &h) in handlers.iter().enumerate() {
+            let rc = event_subscribe(etype, h, std::ptr::null_mut());
+            assert_eq!(rc, ESP_OK, "subscribe #{} should succeed", i);
+        }
+
+        // 9th registration must be rejected
+        let rc = event_subscribe(etype, handler_ms8, std::ptr::null_mut());
+        assert_eq!(rc, ESP_ERR_NO_MEM, "9th subscriber must return ESP_ERR_NO_MEM");
+
+        // Clean up all 8 registered handlers
+        for &h in &handlers {
+            event_unsubscribe(etype, h);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // test_publish_no_subscribers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_publish_no_subscribers() {
+        // BleConnected is not subscribed in any other test — publish should succeed silently
+        let ev = make_event(EventType::BleConnected);
+        let rc = event_publish(&ev as *const CEvent);
+        assert_eq!(rc, ESP_OK, "publish with no subscribers must return ESP_OK");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_different_event_types
+    // -----------------------------------------------------------------------
+
+    static COUNTER_DT_WIFI: AtomicU32 = AtomicU32::new(0);
+    static COUNTER_DT_BLE: AtomicU32 = AtomicU32::new(0);
+
+    extern "C" fn handler_dt_wifi(_: *const CEvent, _: *mut c_void) {
+        COUNTER_DT_WIFI.fetch_add(1, Ordering::SeqCst);
+    }
+    extern "C" fn handler_dt_ble(_: *const CEvent, _: *mut c_void) {
+        COUNTER_DT_BLE.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_different_event_types() {
+        COUNTER_DT_WIFI.store(0, Ordering::SeqCst);
+        COUNTER_DT_BLE.store(0, Ordering::SeqCst);
+
+        event_subscribe(EventType::WifiConnected as u32, handler_dt_wifi, std::ptr::null_mut());
+        event_subscribe(EventType::BleDisconnected as u32, handler_dt_ble, std::ptr::null_mut());
+
+        // Publish only WifiConnected
+        let ev = make_event(EventType::WifiConnected);
+        event_publish(&ev as *const CEvent);
+
+        assert_eq!(COUNTER_DT_WIFI.load(Ordering::SeqCst), 1, "wifi handler should fire");
+        assert_eq!(COUNTER_DT_BLE.load(Ordering::SeqCst), 0, "ble handler must not fire for wifi event");
+
+        // Publish only BleDisconnected
+        let ev2 = make_event(EventType::BleDisconnected);
+        event_publish(&ev2 as *const CEvent);
+
+        assert_eq!(COUNTER_DT_WIFI.load(Ordering::SeqCst), 1, "wifi handler must not fire for ble event");
+        assert_eq!(COUNTER_DT_BLE.load(Ordering::SeqCst), 1, "ble handler should fire");
+
+        // Clean up
+        event_unsubscribe(EventType::WifiConnected as u32, handler_dt_wifi);
+        event_unsubscribe(EventType::BleDisconnected as u32, handler_dt_ble);
+    }
 }

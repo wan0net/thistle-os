@@ -405,4 +405,72 @@ mod tests {
         assert!(crate::version::satisfies("0.0.1"));
         assert!(!crate::version::satisfies("1.0.0"));
     }
+
+    #[test]
+    fn test_permissions_array() {
+        let json = r#"{"type": "app", "id": "x", "permissions": ["radio", "gps", "storage"]}"#;
+        let m = Manifest::from_json(json).unwrap();
+        assert_eq!(m.permissions, perm::RADIO | perm::GPS | perm::STORAGE);
+    }
+
+    #[test]
+    fn test_permissions_string() {
+        let json = r#"{"type": "app", "id": "x", "permissions": "radio,gps"}"#;
+        let m = Manifest::from_json(json).unwrap();
+        assert_eq!(m.permissions, perm::RADIO | perm::GPS);
+    }
+
+    #[test]
+    fn test_empty_manifest() {
+        let json = r#"{}"#;
+        let result = Manifest::from_json(json);
+        assert!(result.is_err(), "empty manifest must fail with missing 'type'");
+        if let Err(ManifestError::ParseError(msg)) = result {
+            assert!(msg.contains("type"), "error should mention missing type field");
+        }
+    }
+
+    #[test]
+    fn test_large_values() {
+        // Build a description of exactly 200 characters
+        let long_desc: String = "x".repeat(200);
+        let json = format!(
+            r#"{{"type": "app", "id": "x", "description": "{}"}}"#,
+            long_desc
+        );
+        let m = Manifest::from_json(&json).unwrap();
+        // The parser stores whatever the JSON contains; verify we get 200 chars back
+        // (no silent truncation at the Rust level — truncation is the caller's responsibility)
+        assert_eq!(m.description.len(), 200);
+    }
+
+    #[test]
+    fn test_min_os_too_high() {
+        let m = Manifest {
+            manifest_type: ManifestType::App,
+            id: "x".into(),
+            min_os: "99.0.0".into(),
+            arch: "esp32s3".into(),
+            ..Default::default()
+        };
+        assert!(
+            !m.is_compatible("esp32s3"),
+            "min_os 99.0.0 must not be satisfied by current kernel 0.1.0"
+        );
+    }
+
+    #[test]
+    fn test_arch_mismatch() {
+        let m = Manifest {
+            manifest_type: ManifestType::App,
+            id: "x".into(),
+            min_os: "0.1.0".into(),
+            arch: "riscv".into(),
+            ..Default::default()
+        };
+        assert!(
+            !m.is_compatible("esp32s3"),
+            "arch riscv must not be compatible with esp32s3"
+        );
+    }
 }

@@ -53,12 +53,12 @@ int thistle_radio_send_impl(const void *data, unsigned int len) {
 }
 int thistle_radio_start_rx_impl(void) {
     const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->radio && reg->radio->start_rx) return reg->radio->start_rx();
+    if (reg && reg->radio && reg->radio->start_receive) return reg->radio->start_receive(NULL, NULL);
     return -1;
 }
 int thistle_radio_set_freq_impl(float freq) {
     const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->radio && reg->radio->set_frequency) return reg->radio->set_frequency(freq);
+    if (reg && reg->radio && reg->radio->set_frequency) return reg->radio->set_frequency((uint32_t)(freq * 1000000.0f));
     return -1;
 }
 int thistle_gps_get_position_impl(void *pos) {
@@ -68,7 +68,11 @@ int thistle_gps_get_position_impl(void *pos) {
 }
 int thistle_gps_enable_impl(int enable) {
     const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->gps && reg->gps->enable) return reg->gps->enable(enable);
+    if (enable) {
+        if (reg && reg->gps && reg->gps->enable) return reg->gps->enable();
+    } else {
+        if (reg && reg->gps && reg->gps->disable) return reg->gps->disable();
+    }
     return -1;
 }
 int thistle_power_get_battery_mv_impl(void) {
@@ -78,7 +82,7 @@ int thistle_power_get_battery_mv_impl(void) {
 }
 int thistle_power_get_battery_pct_impl(void) {
     const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->power && reg->power->get_battery_pct) return reg->power->get_battery_pct();
+    if (reg && reg->power && reg->power->get_battery_percent) return reg->power->get_battery_percent();
     return 0;
 }
 

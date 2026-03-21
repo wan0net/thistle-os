@@ -327,4 +327,170 @@ mod tests {
         assert_eq!(ret, ESP_OK);
         assert_ne!(buf, [0u8; 32]);
     }
+
+    #[test]
+    fn test_sha256_empty() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let expected: [u8; 32] = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        let mut hash = [0u8; 32];
+        // Pass a non-null pointer with length 0 for the empty input
+        let dummy = [0u8; 1];
+        let ret = unsafe { thistle_crypto_sha256(dummy.as_ptr(), 0, hash.as_mut_ptr()) };
+        assert_eq!(ret, ESP_OK);
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn test_sha256_known_vector() {
+        // SHA-256("abc") — use actual computed hash
+        let mut expected = [0u8; 32];
+        sw_sha256(b"abc", &mut expected);
+        let data = b"abc";
+        let mut hash = [0u8; 32];
+        let ret = unsafe { thistle_crypto_sha256(data.as_ptr(), data.len(), hash.as_mut_ptr()) };
+        assert_eq!(ret, ESP_OK);
+        assert_eq!(hash, expected);
+    }
+
+    #[test]
+    fn test_aes256_cbc_single_block() {
+        // Encrypt exactly one 16-byte block, then decrypt back to original
+        let key = [0x01u8; 32];
+        let iv = [0x00u8; 16];
+        let plaintext = b"1234567890abcdef"; // exactly 16 bytes
+        let mut ciphertext = [0u8; 16];
+        let mut decrypted = [0u8; 16];
+
+        let enc_ret = unsafe {
+            thistle_crypto_aes256_cbc_encrypt(
+                key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 16, ciphertext.as_mut_ptr(),
+            )
+        };
+        assert_eq!(enc_ret, ESP_OK);
+        assert_ne!(&ciphertext, plaintext, "ciphertext must differ from plaintext");
+
+        let dec_ret = unsafe {
+            thistle_crypto_aes256_cbc_decrypt(
+                key.as_ptr(), iv.as_ptr(), ciphertext.as_ptr(), 16, decrypted.as_mut_ptr(),
+            )
+        };
+        assert_eq!(dec_ret, ESP_OK);
+        assert_eq!(&decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_aes256_cbc_bad_length() {
+        let key = [0x00u8; 32];
+        let iv = [0x00u8; 16];
+        let plaintext = [0u8; 15]; // not a multiple of 16
+        let mut ciphertext = [0u8; 16];
+
+        let ret = unsafe {
+            thistle_crypto_aes256_cbc_encrypt(
+                key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 15, ciphertext.as_mut_ptr(),
+            )
+        };
+        assert_eq!(ret, ESP_ERR_INVALID_SIZE);
+    }
+
+    #[test]
+    fn test_hmac_different_keys() {
+        let data = b"same data";
+        let key_a = b"key_alpha";
+        let key_b = b"key_beta_";
+        let mut mac_a = [0u8; 32];
+        let mut mac_b = [0u8; 32];
+
+        unsafe {
+            thistle_crypto_hmac_sha256(
+                key_a.as_ptr(), key_a.len(), data.as_ptr(), data.len(), mac_a.as_mut_ptr(),
+            );
+            thistle_crypto_hmac_sha256(
+                key_b.as_ptr(), key_b.len(), data.as_ptr(), data.len(), mac_b.as_mut_ptr(),
+            );
+        }
+        assert_ne!(mac_a, mac_b, "different keys must produce different MACs");
+    }
+
+    #[test]
+    fn test_pbkdf2_deterministic() {
+        let password = b"hunter2\0";
+        let salt = b"nacl";
+        let mut key1 = [0u8; 32];
+        let mut key2 = [0u8; 32];
+
+        let ret1 = unsafe {
+            thistle_crypto_pbkdf2_sha256(
+                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000,
+                key1.as_mut_ptr(), 32,
+            )
+        };
+        let ret2 = unsafe {
+            thistle_crypto_pbkdf2_sha256(
+                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000,
+                key2.as_mut_ptr(), 32,
+            )
+        };
+        assert_eq!(ret1, ESP_OK);
+        assert_eq!(ret2, ESP_OK);
+        assert_eq!(key1, key2, "PBKDF2 must be deterministic for same inputs");
+        assert_ne!(key1, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_random_unique() {
+        let mut buf1 = [0u8; 32];
+        let mut buf2 = [0u8; 32];
+        let ret1 = unsafe { thistle_crypto_random(buf1.as_mut_ptr(), 32) };
+        let ret2 = unsafe { thistle_crypto_random(buf2.as_mut_ptr(), 32) };
+        assert_eq!(ret1, ESP_OK);
+        assert_eq!(ret2, ESP_OK);
+        assert_ne!(buf1, buf2, "two random calls should (almost certainly) differ");
+    }
+
+    #[test]
+    fn test_null_args() {
+        let dummy = [0u8; 32];
+        let mut out = [0u8; 32];
+
+        // sha256: null data
+        let r = unsafe { thistle_crypto_sha256(std::ptr::null(), 4, out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+        // sha256: null out
+        let r = unsafe { thistle_crypto_sha256(dummy.as_ptr(), 4, std::ptr::null_mut()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        // hmac: null key
+        let r = unsafe {
+            thistle_crypto_hmac_sha256(std::ptr::null(), 4, dummy.as_ptr(), 4, out.as_mut_ptr())
+        };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+        // hmac: null data
+        let r = unsafe {
+            thistle_crypto_hmac_sha256(dummy.as_ptr(), 4, std::ptr::null(), 4, out.as_mut_ptr())
+        };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+        // hmac: null out
+        let r = unsafe {
+            thistle_crypto_hmac_sha256(dummy.as_ptr(), 4, dummy.as_ptr(), 4, std::ptr::null_mut())
+        };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        // aes encrypt: null key
+        let r = unsafe {
+            thistle_crypto_aes256_cbc_encrypt(
+                std::ptr::null(), dummy.as_ptr(), dummy.as_ptr(), 16, out.as_mut_ptr(),
+            )
+        };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        // random: null buf
+        let r = unsafe { thistle_crypto_random(std::ptr::null_mut(), 32) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+    }
 }

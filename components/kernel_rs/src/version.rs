@@ -22,3 +22,38 @@ pub fn satisfies(requirement: &str) -> bool {
     }
     VERSION_PATCH >= req_patch
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_satisfies_exact() {
+        // "0.1.0" should be satisfied by the current kernel 0.1.0
+        assert!(satisfies("0.1.0"));
+    }
+
+    #[test]
+    fn test_satisfies_lower() {
+        // A requirement lower than the current version must be satisfied
+        assert!(satisfies("0.0.1"));
+    }
+
+    #[test]
+    fn test_satisfies_higher_major() {
+        // Requires a higher major version than the kernel provides
+        assert!(!satisfies("1.0.0"));
+    }
+
+    #[test]
+    fn test_satisfies_higher_minor() {
+        // Requires a higher minor version within the same major
+        assert!(!satisfies("0.2.0"));
+    }
+
+    #[test]
+    fn test_satisfies_empty() {
+        // An empty requirement string parses as 0.0.0 — always satisfied
+        assert!(satisfies(""));
+    }
+}
