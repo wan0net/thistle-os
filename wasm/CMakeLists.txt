@@ -112,16 +112,15 @@ set(KERNEL_RS_DIR "${THISTLE_DIR}/components/kernel_rs")
 set(RUST_WASM_TARGET "wasm32-unknown-emscripten")
 set(RUST_WASM_LIB "${KERNEL_RS_DIR}/target/${RUST_WASM_TARGET}/release/libthistle_kernel.a")
 
-# Build Rust kernel for WASM
+# Build Rust kernel for WASM via script
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_rust_wasm.sh"
+"#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\ncd \"${KERNEL_RS_DIR}\"\ncargo build --release --target ${RUST_WASM_TARGET}\n")
+
 add_custom_command(
     OUTPUT ${RUST_WASM_LIB}
-    COMMAND bash -c "
-        export PATH=\"$ENV{HOME}/.cargo/bin:$$PATH\"
-        cargo build --release --target ${RUST_WASM_TARGET}
-    "
+    COMMAND bash "${CMAKE_CURRENT_BINARY_DIR}/build_rust_wasm.sh"
     WORKING_DIRECTORY ${KERNEL_RS_DIR}
     COMMENT "Building Rust kernel for WASM (${RUST_WASM_TARGET})"
-    VERBATIM
 )
 add_custom_target(kernel_rs_wasm_build DEPENDS ${RUST_WASM_LIB})
 add_dependencies(thistle_wasm kernel_rs_wasm_build)

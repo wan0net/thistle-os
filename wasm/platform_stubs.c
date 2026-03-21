@@ -67,6 +67,7 @@ unsigned short hal_display_get_width_helper(void) { return 320; }
 unsigned short hal_display_get_height_helper(void) { return 240; }
 int hal_registry_start_all(void) { return 0; }
 int hal_registry_stop_all(void) { return 0; }
+int board_init(void) { return 0; }
 
 /* ── C stdlib wrappers ─────────────────────────────────────────────── */
 void *libc_malloc(unsigned int sz) { return malloc(sz); }
