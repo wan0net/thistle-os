@@ -26,7 +26,9 @@ jobs:
           . "$HOME/.cargo/env"
           cargo install espup
           espup install
-          . "$HOME/export-esp.sh" 2>/dev/null || true
+          # NOTE: Do NOT source export-esp.sh here — it overrides ESP-IDF's
+          # GCC with an incompatible version. The kernel_rs CMakeLists.txt
+          # adds cargo to PATH when invoking the Rust build.
 
       - name: Cache ESP-IDF + Rust builds
         uses: actions/cache@v4
@@ -43,8 +45,7 @@ jobs:
         shell: bash
         run: |
           . $IDF_PATH/export.sh
-          . "$HOME/.cargo/env"
-          . "$HOME/export-esp.sh" 2>/dev/null || true
+          export PATH="$HOME/.cargo/bin:$PATH"
           idf.py set-target esp32s3
           idf.py build
 
