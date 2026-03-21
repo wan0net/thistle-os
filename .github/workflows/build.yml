@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   firmware-build:
     name: Build Firmware (ESP-IDF)
@@ -14,6 +18,16 @@ jobs:
       image: espressif/idf:v5.5
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache ESP-IDF build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            managed_components
+          key: espidf-build-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
+          restore-keys: |
+            espidf-build-
 
       - name: Build firmware
         shell: bash
