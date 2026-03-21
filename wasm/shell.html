@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThistleOS — Browser Simulator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #111110;
+    color: #ededed;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 { color: #9D4EDD; margin-bottom: 4px; font-size: 24px; }
+  .subtitle { color: #a09f9b; font-size: 14px; margin-bottom: 20px; }
+  #canvas-container {
+    border: 2px solid #282826;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+  }
+  .status {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #a09f9b;
+  }
+  .status.loading { color: #eab308; }
+  .status.ready { color: #22c55e; }
+  .status.error { color: #ef4444; }
+  .info {
+    margin-top: 20px;
+    font-size: 13px;
+    color: #6b7280;
+    text-align: center;
+    max-width: 500px;
+    line-height: 1.6;
+  }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+<h1>ThistleOS</h1>
+<p class="subtitle">Browser Simulator</p>
+
+<div id="canvas-container">
+  <canvas id="canvas" width="640" height="480" oncontextmenu="event.preventDefault()"></canvas>
+</div>
+
+<p id="status" class="status loading">Loading ThistleOS...</p>
+
+<p class="info">
+  This is a real ThistleOS kernel running in your browser via WebAssembly.<br>
+  Use keyboard and mouse to interact. 320×240 display scaled 2×.<br>
+  <a href="https://github.com/wan0net/thistle-os">GitHub</a> •
+  <a href="https://wan0net.github.io/thistle-os/">Documentation</a>
+</p>
+
+<script>
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    onRuntimeInitialized: function() {
+      document.getElementById('status').textContent = 'ThistleOS running';
+      document.getElementById('status').className = 'status ready';
+    },
+    print: function(text) {
+      console.log('[ThistleOS]', text);
+    },
+    printErr: function(text) {
+      console.error('[ThistleOS]', text);
+    },
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
