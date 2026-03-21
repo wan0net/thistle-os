@@ -90,6 +90,7 @@ jobs:
             --config auto \
             --config p/c-audit \
             --config p/security-audit \
+            --config .github/semgrep.yml \
             --sarif --output semgrep-results.sarif \
             components/ main/ simulator/platform/ simulator/drivers/ \
             || true
