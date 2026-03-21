@@ -227,6 +227,12 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         );
         return ESP_ERR_INVALID_CRC;
     } else if sig_ret == ESP_ERR_NOT_FOUND {
+        #[cfg(not(debug_assertions))]
+        {
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Driver unsigned: %s (REFUSED - production)\0".as_ptr(), path);
+            return ESP_ERR_INVALID_CRC;
+        }
+        #[cfg(debug_assertions)]
         esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"Driver unsigned (dev mode): %s\0".as_ptr(), path);
     } else if sig_ret == ESP_OK {
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver signature verified: %s\0".as_ptr(), path);

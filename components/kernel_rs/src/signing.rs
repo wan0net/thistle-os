@@ -30,8 +30,9 @@ const ESP_ERR_INVALID_CRC: i32 = 0x109;
 
 static VERIFYING_KEY: Mutex<Option<VerifyingKey>> = Mutex::new(None);
 
-/// 64 hex chars + NUL terminator.
-static HEX_BUF: Mutex<[u8; 65]> = Mutex::new([0u8; 65]);
+/// 64 hex chars + NUL terminator. Written once during signing_init(),
+/// never modified after. Safe to return a pointer without holding a lock.
+static mut HEX_BUF: [u8; 65] = [0u8; 65];
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -78,9 +79,9 @@ pub unsafe extern "C" fn signing_init(key: *const u8) -> i32 {
     bytes_to_hex(&key_bytes, &mut hex[..64]);
     hex[64] = 0;
 
-    match HEX_BUF.lock() {
-        Ok(mut guard) => *guard = hex,
-        Err(_) => return ESP_ERR_NO_MEM,
+    // Write hex buf once — safe because signing_init is called once at boot
+    {
+        HEX_BUF = hex;
     }
 
     match VERIFYING_KEY.lock() {
@@ -191,11 +192,9 @@ pub unsafe extern "C" fn signing_has_signature(elf_path: *const c_char) -> bool 
 /// The returned pointer remains valid for the lifetime of the process.
 #[no_mangle]
 pub extern "C" fn signing_get_public_key_hex() -> *const c_char {
-    match HEX_BUF.lock() {
-        Ok(guard) => guard.as_ptr() as *const c_char,
-        // Safety: this is a valid empty C string literal.
-        Err(_) => b"\0".as_ptr() as *const c_char,
-    }
+    // Safety: HEX_BUF is written once during signing_init() and never modified after.
+    // The returned pointer is valid for the lifetime of the process.
+    unsafe { HEX_BUF.as_ptr() as *const c_char }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,9 +211,7 @@ mod tests {
         if let Ok(mut g) = VERIFYING_KEY.lock() {
             *g = None;
         }
-        if let Ok(mut g) = HEX_BUF.lock() {
-            *g = [0u8; 65];
-        }
+        unsafe { HEX_BUF = [0u8; 65]; }
     }
 
     fn fresh_verifying_key_bytes() -> [u8; 32] {

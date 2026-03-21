@@ -302,15 +302,54 @@ pub unsafe extern "C" fn elf_app_load(
     std::ptr::copy_nonoverlapping(file_data.as_ptr(), buf as *mut u8, size);
     drop(file_data);
 
-    // 3. Verify signature and set permissions
+    // 3. Parse manifest FIRST to get the app ID for permission identity
+    let mut app_id_buf = [0u8; 64];
+    let mut has_manifest_id = false;
+    {
+        let mut manifest_path_buf = [0u8; 280];
+        manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
+        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
+        if !manifest_buf.is_null() {
+            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
+                // Extract the "id" field from the parsed manifest
+                let id_ptr = (manifest_buf as *const u8).add(1); // type is first byte, id starts at offset 1
+                // The CManifest struct has id at offset 1 (after u8 type), as [u8; 64]
+                let id_bytes = std::slice::from_raw_parts(id_ptr, 64);
+                let id_len = id_bytes.iter().position(|&b| b == 0).unwrap_or(64);
+                if id_len > 0 {
+                    app_id_buf[..id_len].copy_from_slice(&id_bytes[..id_len]);
+                    has_manifest_id = true;
+                }
+            }
+            free(manifest_buf);
+        }
+    }
+
+    // Use manifest ID for permissions if available, otherwise fall back to path
+    let perm_id = if has_manifest_id {
+        app_id_buf.as_ptr() as *const c_char
+    } else {
+        path
+    };
+
+    // 4. Verify signature and set permissions using the correct identity
     let sig_ret = signing_verify_file(path);
     if sig_ret == ESP_OK {
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF signature verified: %s\0".as_ptr(), path);
-        // Grant all perms — will be refined once we have app ID from manifest
-        permissions_grant(path, PERM_ALL);
+        permissions_grant(perm_id, PERM_ALL);
     } else if sig_ret == ESP_ERR_NOT_FOUND {
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF unsigned: %s (restricted)\0".as_ptr(), path);
-        permissions_grant(path, PERM_IPC);
+        // Unsigned ELF — refuse in production, allow with zero permissions in debug
+        #[cfg(not(debug_assertions))]
+        {
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF unsigned: %s (REFUSED - production)\0".as_ptr(), path);
+            free(buf);
+            return ESP_ERR_INVALID_CRC;
+        }
+        #[cfg(debug_assertions)]
+        {
+            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF unsigned: %s (dev mode, no permissions)\0".as_ptr(), path);
+            // Zero permissions — unsigned apps cannot access any resources
+        }
     } else {
         esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF signature INVALID: %s\0".as_ptr(), path);
         free(buf);
