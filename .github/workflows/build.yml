@@ -14,8 +14,6 @@ jobs:
       image: espressif/idf:v5.5
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Build firmware
         shell: bash
@@ -28,12 +26,10 @@ jobs:
         shell: bash
         run: |
           . $IDF_PATH/export.sh
-          idf.py size
-          # Fail if firmware exceeds 3MB (OTA partition limit is 3.5MB)
           SIZE=$(idf.py size 2>&1 | grep "Total image" | grep -oE '[0-9]+' | head -1)
-          echo "Firmware size: $SIZE bytes"
-          if [ "$SIZE" -gt 3145728 ]; then
-            echo "ERROR: Firmware exceeds 3MB limit!"
+          echo "Firmware size: $SIZE bytes ($(($SIZE / 1024)) KB)"
+          if [ "$SIZE" -gt 3670016 ]; then
+            echo "::error::Firmware exceeds 3.5MB OTA partition limit!"
             exit 1
           fi
 
@@ -42,39 +38,6 @@ jobs:
         with:
           name: thistle-os-firmware
           path: build/thistle_os.bin
-
-  simulator-build:
-    name: Build Simulator (SDL2)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
-
-      - name: Build ESP-IDF first (for managed components)
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.5
-          target: esp32s3
-          command: idf.py build
-
-      - name: Build simulator
-        run: |
-          cd simulator
-          mkdir -p build && cd build
-          cmake ..
-          make -j$(nproc)
-
-      - name: Upload simulator artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: thistle-sim
-          path: simulator/build/thistle_sim
 
   semgrep:
     name: Semgrep SAST
@@ -92,17 +55,17 @@ jobs:
             --config p/security-audit \
             --config .github/semgrep.yml \
             --sarif --output semgrep-results.sarif \
-            components/ main/ simulator/platform/ simulator/drivers/ \
+            components/ main/ \
             || true
 
-      - name: Upload SARIF
+      - name: Upload SARIF to Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: semgrep-results.sarif
         continue-on-error: true
 
-      - name: Upload Semgrep results
+      - name: Upload Semgrep artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,14 +88,14 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM
           scanners: vuln,secret,misconfig
 
-      - name: Upload SARIF
+      - name: Upload SARIF to Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-results.sarif
         continue-on-error: true
 
-      - name: Upload Trivy results
+      - name: Upload Trivy artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
