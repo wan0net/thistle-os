@@ -10,7 +10,9 @@
 #include "thistle/permissions.h"
 #include "thistle/event.h"
 #include "thistle/ota.h"
+#include "thistle/display_server.h"
 #include "ui/manager.h"
+#include "ui/lvgl_wm.h"
 #include "ui/toast.h"
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
@@ -79,10 +81,16 @@ void app_main(void)
         return;
     }
 
-    /* Start LVGL and the ThistleOS window manager / UI */
-    ret = ui_manager_init();
+    /* Initialize display server and register the LVGL window manager */
+    ret = display_server_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ui_manager_init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "display_server_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = display_server_register_wm(lvgl_wm_get());
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register LVGL window manager: %s", esp_err_to_name(ret));
         return;
     }
 

@@ -13,7 +13,9 @@
 #include "hal/board.h"
 #include "thistle/kernel.h"
 #include "thistle/app_manager.h"
+#include "thistle/display_server.h"
 #include "ui/manager.h"
+#include "ui/lvgl_wm.h"
 #include "sim_input.h"
 #include "sim_vfs.h"
 #include "launcher/launcher_app.h"
@@ -47,9 +49,13 @@ int main(int argc, char **argv)
     printf("kernel_init: %d\n", err);
     fflush(stdout);
 
-    /* Initialize UI (LVGL display, status bar, theme, splash) */
-    err = ui_manager_init();
-    printf("ui_manager_init: %d\n", err);
+    /* Initialize display server and register the LVGL window manager */
+    err = display_server_init();
+    printf("display_server_init: %d\n", err);
+    fflush(stdout);
+
+    err = display_server_register_wm(lvgl_wm_get());
+    printf("display_server_register_wm: %d\n", err);
     fflush(stdout);
 
     /* Register and launch built-in apps */

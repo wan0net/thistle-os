@@ -34,6 +34,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/kernel/src/display_server.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
+    ${THISTLE_DIR}/components/ui/src/lvgl_wm.c
     ${THISTLE_DIR}/components/ui/src/theme.c
     ${THISTLE_DIR}/components/ui/src/statusbar.c
     ${THISTLE_DIR}/components/ui/src/app_switcher.c
