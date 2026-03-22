@@ -14,6 +14,8 @@ extern "C" {
 
 // Subsystem init functions (some Rust, some still C)
 extern "C" {
+    fn nvs_flash_init_safe() -> i32;
+    fn spiffs_mount() -> i32;
     fn net_manager_init() -> i32;
     fn driver_manager_init() -> i32;
     fn driver_manager_start_all() -> i32;
@@ -36,6 +38,16 @@ static BOOT_TIME_US: Mutex<i64> = Mutex::new(0);
 pub extern "C" fn kernel_init() -> i32 {
     if let Ok(mut t) = BOOT_TIME_US.lock() {
         *t = unsafe { esp_timer_get_time() };
+    }
+
+    // NVS flash — required by WiFi, BLE, and other ESP-IDF subsystems
+    let ret = unsafe { nvs_flash_init_safe() };
+    if ret != ESP_OK { return ret; }
+
+    // Mount SPIFFS — apps, drivers, config, themes live here
+    let ret = unsafe { spiffs_mount() };
+    if ret != ESP_OK {
+        // Non-fatal: SD card can still provide apps/config
     }
 
     // Event bus (Rust)

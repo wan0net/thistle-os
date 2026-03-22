@@ -19,12 +19,12 @@ static i2c_master_bus_handle_t i2c_bus;
 
 // Static driver configs — populated before registration
 static const epaper_gdeq031t10_config_t epaper_config = {
-    .spi_host    = BOARD_SPI_HOST,
+    .spi_host    = BOARD_SPI_HOST,  /* SPI2 — shared bus, MOSI=33 */
     .pin_cs      = BOARD_EPAPER_CS,
     .pin_dc      = BOARD_EPAPER_DC,
     .pin_rst     = BOARD_EPAPER_RST,
     .pin_busy    = BOARD_EPAPER_BUSY,
-    .spi_clock_hz = 4000000,
+    .spi_clock_hz = 2000000,
 };
 
 static const sdcard_config_t sd_config = {
@@ -85,14 +85,17 @@ esp_err_t board_init(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_LOGI(TAG, "Power and GPIO pre-init done");
 
-    // 1. Init SPI bus
+    // 1. Init shared SPI bus: MOSI=33, MISO=47, SCLK=36
+    // All three peripherals (e-paper, LoRa, SD) share this bus
+    // LilyGO official: BOARD_EPD_MOSI = BOARD_SPI_MOSI = GPIO 33
+    ESP_LOGI(TAG, "BUILD_V9: SPI2 MOSI=33 MISO=47 SCLK=36 (shared bus)");
     spi_bus_cfg = (spi_bus_config_t){
-        .mosi_io_num = BOARD_SPI_MOSI,
-        .miso_io_num = BOARD_SPI_MISO,
-        .sclk_io_num = BOARD_SPI_SCLK,
+        .mosi_io_num = BOARD_SPI_MOSI,   /* GPIO 33 */
+        .miso_io_num = BOARD_SPI_MISO,   /* GPIO 47 */
+        .sclk_io_num = BOARD_SPI_SCLK,   /* GPIO 36 */
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 320 * 240 / 8, // e-paper buffer size
+        .max_transfer_sz = 320 * 240 / 8,
     };
     ret = spi_bus_initialize(BOARD_SPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK) {

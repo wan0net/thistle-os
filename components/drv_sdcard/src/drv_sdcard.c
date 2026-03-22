@@ -70,6 +70,7 @@ static esp_err_t sdcard_mount(const char *mount_point)
     };
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = 4000;  /* 4 MHz — conservative for shared SPI bus */
 
     sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_cfg.gpio_cs = s_sd.cfg.pin_cs;

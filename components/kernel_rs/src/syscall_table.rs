@@ -237,6 +237,41 @@ extern "C" {
     fn libc_realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
 }
 
+// Widget API (Rust, defined in widget.rs)
+extern "C" {
+    fn thistle_ui_get_app_root() -> u32;
+    fn thistle_ui_create_container(parent: u32) -> u32;
+    fn thistle_ui_create_label(parent: u32, text: *const c_char) -> u32;
+    fn thistle_ui_create_button(parent: u32, text: *const c_char) -> u32;
+    fn thistle_ui_create_text_input(parent: u32, placeholder: *const c_char) -> u32;
+    fn thistle_ui_destroy(widget: u32);
+    fn thistle_ui_set_text(widget: u32, text: *const c_char);
+    fn thistle_ui_get_text(widget: u32) -> *const c_char;
+    fn thistle_ui_set_size(widget: u32, w: i32, h: i32);
+    fn thistle_ui_set_pos(widget: u32, x: i32, y: i32);
+    fn thistle_ui_set_visible(widget: u32, visible: bool);
+    fn thistle_ui_set_bg_color(widget: u32, color: u32);
+    fn thistle_ui_set_text_color(widget: u32, color: u32);
+    fn thistle_ui_set_font_size(widget: u32, size: i32);
+    fn thistle_ui_set_layout(widget: u32, layout: i32);
+    fn thistle_ui_set_align(widget: u32, main_a: i32, cross_a: i32);
+    fn thistle_ui_set_gap(widget: u32, gap: i32);
+    fn thistle_ui_set_flex_grow(widget: u32, grow: i32);
+    fn thistle_ui_set_scrollable(widget: u32, scrollable: bool);
+    fn thistle_ui_set_padding(widget: u32, t: i32, r: i32, b: i32, l: i32);
+    fn thistle_ui_set_border_width(widget: u32, w: i32);
+    fn thistle_ui_set_radius(widget: u32, r: i32);
+    fn thistle_ui_on_event(widget: u32, event_type: i32, cb: *const c_void, ud: *mut c_void);
+    fn thistle_ui_set_password_mode(widget: u32, pw: bool);
+    fn thistle_ui_set_one_line(widget: u32, one_line: bool);
+    fn thistle_ui_set_placeholder(widget: u32, text: *const c_char);
+    fn thistle_ui_theme_primary() -> u32;
+    fn thistle_ui_theme_bg() -> u32;
+    fn thistle_ui_theme_surface() -> u32;
+    fn thistle_ui_theme_text() -> u32;
+    fn thistle_ui_theme_text_secondary() -> u32;
+}
+
 // ---------------------------------------------------------------------------
 // Static syscall table
 //
@@ -322,6 +357,39 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
 
     // Driver config
     entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
+
+    // Widget API
+    entry!("thistle_ui_get_app_root",       thistle_ui_get_app_root             as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_create_container",   thistle_ui_create_container         as unsafe extern "C" fn(u32) -> u32),
+    entry!("thistle_ui_create_label",       thistle_ui_create_label             as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_create_button",      thistle_ui_create_button            as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_create_text_input",  thistle_ui_create_text_input        as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_destroy",            thistle_ui_destroy                  as unsafe extern "C" fn(u32)),
+    entry!("thistle_ui_set_text",           thistle_ui_set_text                 as unsafe extern "C" fn(u32, *const c_char)),
+    entry!("thistle_ui_get_text",           thistle_ui_get_text                 as unsafe extern "C" fn(u32) -> *const c_char),
+    entry!("thistle_ui_set_size",           thistle_ui_set_size                 as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_pos",            thistle_ui_set_pos                  as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_visible",        thistle_ui_set_visible              as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_bg_color",       thistle_ui_set_bg_color             as unsafe extern "C" fn(u32, u32)),
+    entry!("thistle_ui_set_text_color",     thistle_ui_set_text_color           as unsafe extern "C" fn(u32, u32)),
+    entry!("thistle_ui_set_font_size",      thistle_ui_set_font_size            as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_layout",         thistle_ui_set_layout               as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_align",          thistle_ui_set_align                as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_gap",            thistle_ui_set_gap                  as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_flex_grow",      thistle_ui_set_flex_grow            as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_scrollable",     thistle_ui_set_scrollable           as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_padding",        thistle_ui_set_padding              as unsafe extern "C" fn(u32, i32, i32, i32, i32)),
+    entry!("thistle_ui_set_border_width",   thistle_ui_set_border_width         as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_radius",         thistle_ui_set_radius               as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_on_event",           thistle_ui_on_event                 as unsafe extern "C" fn(u32, i32, *const c_void, *mut c_void)),
+    entry!("thistle_ui_set_password_mode",  thistle_ui_set_password_mode        as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_one_line",       thistle_ui_set_one_line             as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_placeholder",    thistle_ui_set_placeholder          as unsafe extern "C" fn(u32, *const c_char)),
+    entry!("thistle_ui_theme_primary",      thistle_ui_theme_primary            as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_bg",           thistle_ui_theme_bg                 as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_surface",      thistle_ui_theme_surface            as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_text",         thistle_ui_theme_text               as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_text_secondary", thistle_ui_theme_text_secondary   as unsafe extern "C" fn() -> u32),
 
     // Logging
     entry!("esp_log_write",                 esp_log_write                       as unsafe extern "C" fn(i32, *const u8, *const u8, ...)),

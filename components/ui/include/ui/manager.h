@@ -6,6 +6,9 @@
 /* Initialize LVGL, create display driver, set up screen layout */
 esp_err_t ui_manager_init(void);
 
+/* Start the LVGL render loop. Call AFTER all UI objects are created. */
+esp_err_t ui_manager_start(void);
+
 /* Get the app content area (apps create their UI as children of this) */
 lv_obj_t *ui_manager_get_app_area(void);
 

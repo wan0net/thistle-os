@@ -6,7 +6,9 @@
 
 // Pin map from: github.com/Xinyuan-LilyGO/T-Deck-Pro/examples/factory/utilities.h
 
-/* === SPI Bus (shared: display + LoRa + SD) === */
+/* === SPI Bus (shared: e-paper + LoRa + SD) === */
+/* All three peripherals share ONE SPI bus. E-paper is write-only (no MISO).
+ * Confirmed from LilyGO factory firmware: SPI.begin(36, 47, 33) */
 #define BOARD_SPI_HOST       SPI2_HOST
 #define BOARD_SPI_MOSI       GPIO_NUM_33
 #define BOARD_SPI_MISO       GPIO_NUM_47

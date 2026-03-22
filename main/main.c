@@ -11,6 +11,7 @@
 #include "thistle/event.h"
 #include "thistle/ota.h"
 #include "thistle/display_server.h"
+#include "thistle/elf_loader.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
 #include "ui/toast.h"
@@ -117,6 +118,10 @@ void app_main(void)
     terminal_app_register();
     vault_app_register();
 
+    /* Scan SPIFFS and SD card for standalone .app.elf files.
+     * This function is #[no_mangle] in Rust (elf_loader.rs). */
+    elf_app_scan_and_register();
+
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.launcher",   PERM_ALL);
     permissions_grant("com.thistle.settings",   PERM_ALL);
@@ -134,6 +139,10 @@ void app_main(void)
     permissions_grant("com.thistle.vault",       PERM_STORAGE | PERM_SYSTEM);
 
     app_manager_launch("com.thistle.launcher");
+
+    /* Start LVGL render loop AFTER all UI objects are created.
+     * This prevents race conditions with e-paper's slow flush. */
+    ui_manager_start();
 
     /* Check for SD card firmware update */
     if (ota_sd_update_available()) {

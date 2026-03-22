@@ -22,4 +22,7 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-target_link_libraries(${COMPONENT_LIB} INTERFACE ${RUST_LIB})
+# Wrap Rust lib in start-group/end-group to resolve circular deps
+# between kernel_rs (Rust) ↔ widget_shims.c (ui component)
+target_link_libraries(${COMPONENT_LIB} INTERFACE
+    -Wl,--start-group ${RUST_LIB} -Wl,--end-group)

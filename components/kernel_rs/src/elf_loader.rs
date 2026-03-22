@@ -9,6 +9,9 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::Mutex;
 
+use crate::app_manager::{CAppEntry, CAppManifest};
+use crate::ffi::CManifest;
+
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
@@ -23,7 +26,7 @@ const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_ERR_INVALID_CRC: i32 = 0x109;
 const ESP_FAIL: i32 = -1;
 
-const MAX_LOADED_APPS: usize = 4;
+const MAX_LOADED_APPS: usize = 16;
 const ELF_MAX_SIZE_BYTES: usize = 1024 * 1024; // 1 MB
 const ELF_APP_TASK_STACK: u32 = 8192;
 const ELF_APP_TASK_PRIO: u32 = 5;
@@ -34,6 +37,9 @@ const MALLOC_CAP_SPIRAM: u32 = 1 << 9;
 // Permission flags (must match permissions.h)
 const PERM_ALL: u32 = 0x7F;
 const PERM_IPC: u32 = 1 << 6;
+
+// Current architecture string for manifest compatibility checks
+static CURRENT_ARCH: &[u8] = b"xtensa-esp32s3\0";
 
 // ---------------------------------------------------------------------------
 // C FFI declarations
@@ -52,13 +58,14 @@ extern "C" {
     fn free(ptr: *mut c_void);
 
     // FreeRTOS
-    fn xTaskCreate(
+    fn xTaskCreatePinnedToCore(
         task_fn: unsafe extern "C" fn(*mut c_void),
         name: *const c_char,
         stack_depth: u32,
         param: *mut c_void,
         priority: u32,
         task_handle: *mut *mut c_void,
+        core_id: i32,
     ) -> i32;
     fn vTaskDelete(task: *mut c_void);
 
@@ -70,7 +77,7 @@ extern "C" {
 
     // Manifest (C/Rust)
     fn manifest_parse_file(path: *const c_char, out: *mut c_void) -> i32;
-    fn manifest_is_compatible(manifest: *const c_void) -> bool;
+    fn manifest_is_compatible(manifest: *const c_void, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table
@@ -137,10 +144,14 @@ impl ElfLoaderState {
     const fn new() -> Self {
         ElfLoaderState {
             apps: [
-                ElfAppHandle::empty(),
-                ElfAppHandle::empty(),
-                ElfAppHandle::empty(),
-                ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
             ],
         }
     }
@@ -402,7 +413,7 @@ pub unsafe extern "C" fn elf_app_load(
         let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
         if !manifest_buf.is_null() {
             if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                if !manifest_is_compatible(manifest_buf as *const c_void) {
+                if !manifest_is_compatible(manifest_buf as *const c_void, CURRENT_ARCH.as_ptr() as *const c_char) {
                     esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
                     esp_elf_deinit(elf_ptr);
                     free(manifest_buf);
@@ -449,13 +460,14 @@ pub unsafe extern "C" fn elf_app_start(handle: *mut ElfAppHandle) -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
 
-    let rc = xTaskCreate(
+    let rc = xTaskCreatePinnedToCore(
         elf_app_task,
         b"elf_app\0".as_ptr() as *const c_char,
         ELF_APP_TASK_STACK,
         handle as *mut c_void,
         ELF_APP_TASK_PRIO,
         &mut app.task,
+        -1,  // tskNO_AFFINITY
     );
 
     if rc != PD_PASS {
@@ -525,4 +537,389 @@ pub unsafe extern "C" fn elf_app_get_manifest(handle: *const ElfAppHandle) -> *c
     // is embedded in the ELF's .thistle_app section — the caller already has
     // that after elf_app_load returns successfully.
     app.path.as_ptr() as *const c_void
+}
+
+// ---------------------------------------------------------------------------
+// Scan & Register — wires ELF apps into the app manager
+// ---------------------------------------------------------------------------
+
+/// Static storage for app registration metadata.
+/// The app manager holds raw pointers into these, so they must be 'static.
+struct ElfAppRegistration {
+    manifest: CAppManifest,
+    entry: CAppEntry,
+    handle: *mut ElfAppHandle,
+    used: bool,
+}
+
+impl ElfAppRegistration {
+    const fn empty() -> Self {
+        ElfAppRegistration {
+            manifest: CAppManifest {
+                id:               std::ptr::null(),
+                name:             std::ptr::null(),
+                version:          b"0.0.0\0".as_ptr() as *const c_char,
+                allow_background: false,
+                min_memory_kb:    0,
+            },
+            entry: CAppEntry {
+                on_create:  None,
+                on_start:   None,
+                on_pause:   None,
+                on_resume:  None,
+                on_destroy: None,
+                manifest:   std::ptr::null(),
+            },
+            handle: std::ptr::null_mut(),
+            used: false,
+        }
+    }
+}
+
+// SAFETY: Only accessed under REG_MUTEX.
+unsafe impl Send for ElfAppRegistration {}
+
+static REG_MUTEX: Mutex<[ElfAppRegistration; MAX_LOADED_APPS]> = Mutex::new([
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+]);
+
+/// Static string storage for manifest id/name fields.
+/// Each registration slot gets its own id and name buffer that lives forever.
+struct RegStrings {
+    id:   [u8; 64],
+    name: [u8; 32],
+}
+
+impl RegStrings {
+    const fn empty() -> Self {
+        RegStrings {
+            id:   [0u8; 64],
+            name: [0u8; 32],
+        }
+    }
+}
+
+// SAFETY: Only accessed under REG_STR_MUTEX.
+unsafe impl Send for RegStrings {}
+
+static REG_STR_MUTEX: Mutex<[RegStrings; MAX_LOADED_APPS]> = Mutex::new([
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+    RegStrings::empty(), RegStrings::empty(),
+]);
+
+/// Per-slot on_create callbacks. We generate one per slot so the app manager
+/// can invoke it without arguments and we know which ELF handle to start.
+macro_rules! make_on_create {
+    ($fn_name:ident, $slot:expr) => {
+        unsafe extern "C" fn $fn_name() -> i32 {
+            let handle = {
+                match REG_MUTEX.lock() {
+                    Ok(regs) => regs[$slot].handle,
+                    Err(_) => return ESP_FAIL,
+                }
+            };
+            if handle.is_null() {
+                return ESP_ERR_INVALID_STATE;
+            }
+            elf_app_start(handle)
+        }
+    };
+}
+
+make_on_create!(on_create_slot_0,  0);
+make_on_create!(on_create_slot_1,  1);
+make_on_create!(on_create_slot_2,  2);
+make_on_create!(on_create_slot_3,  3);
+make_on_create!(on_create_slot_4,  4);
+make_on_create!(on_create_slot_5,  5);
+make_on_create!(on_create_slot_6,  6);
+make_on_create!(on_create_slot_7,  7);
+make_on_create!(on_create_slot_8,  8);
+make_on_create!(on_create_slot_9,  9);
+make_on_create!(on_create_slot_10, 10);
+make_on_create!(on_create_slot_11, 11);
+make_on_create!(on_create_slot_12, 12);
+make_on_create!(on_create_slot_13, 13);
+make_on_create!(on_create_slot_14, 14);
+make_on_create!(on_create_slot_15, 15);
+
+/// Per-slot on_destroy callbacks — unload the ELF when the app is killed.
+macro_rules! make_on_destroy {
+    ($fn_name:ident, $slot:expr) => {
+        unsafe extern "C" fn $fn_name() {
+            let handle = {
+                match REG_MUTEX.lock() {
+                    Ok(regs) => regs[$slot].handle,
+                    Err(_) => return,
+                }
+            };
+            if !handle.is_null() {
+                elf_app_unload(handle);
+            }
+        }
+    };
+}
+
+make_on_destroy!(on_destroy_slot_0,  0);
+make_on_destroy!(on_destroy_slot_1,  1);
+make_on_destroy!(on_destroy_slot_2,  2);
+make_on_destroy!(on_destroy_slot_3,  3);
+make_on_destroy!(on_destroy_slot_4,  4);
+make_on_destroy!(on_destroy_slot_5,  5);
+make_on_destroy!(on_destroy_slot_6,  6);
+make_on_destroy!(on_destroy_slot_7,  7);
+make_on_destroy!(on_destroy_slot_8,  8);
+make_on_destroy!(on_destroy_slot_9,  9);
+make_on_destroy!(on_destroy_slot_10, 10);
+make_on_destroy!(on_destroy_slot_11, 11);
+make_on_destroy!(on_destroy_slot_12, 12);
+make_on_destroy!(on_destroy_slot_13, 13);
+make_on_destroy!(on_destroy_slot_14, 14);
+make_on_destroy!(on_destroy_slot_15, 15);
+
+const ON_CREATE_TABLE: [unsafe extern "C" fn() -> i32; MAX_LOADED_APPS] = [
+    on_create_slot_0,  on_create_slot_1,  on_create_slot_2,  on_create_slot_3,
+    on_create_slot_4,  on_create_slot_5,  on_create_slot_6,  on_create_slot_7,
+    on_create_slot_8,  on_create_slot_9,  on_create_slot_10, on_create_slot_11,
+    on_create_slot_12, on_create_slot_13, on_create_slot_14, on_create_slot_15,
+];
+
+const ON_DESTROY_TABLE: [unsafe extern "C" fn(); MAX_LOADED_APPS] = [
+    on_destroy_slot_0,  on_destroy_slot_1,  on_destroy_slot_2,  on_destroy_slot_3,
+    on_destroy_slot_4,  on_destroy_slot_5,  on_destroy_slot_6,  on_destroy_slot_7,
+    on_destroy_slot_8,  on_destroy_slot_9,  on_destroy_slot_10, on_destroy_slot_11,
+    on_destroy_slot_12, on_destroy_slot_13, on_destroy_slot_14, on_destroy_slot_15,
+];
+
+/// Scan `/spiffs/apps/` and `/sdcard/apps/` for `*.app.elf` files, load each
+/// one, and register it with the app manager so it appears in the launcher.
+///
+/// # Safety
+/// May be called from C. Accesses the filesystem and global state.
+#[no_mangle]
+pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
+    let dirs: [&str; 2] = ["/spiffs/apps", "/sdcard/apps"];
+    let mut registered: i32 = 0;
+
+    for dir in &dirs {
+        let read_dir = match std::fs::read_dir(dir) {
+            Ok(d) => d,
+            Err(_) => {
+                esp_log_write(
+                    ESP_LOG_DEBUG,
+                    TAG.as_ptr(),
+                    b"No apps directory: %s\0".as_ptr(),
+                    dir.as_ptr(),
+                );
+                continue;
+            }
+        };
+
+        for dir_entry in read_dir.flatten() {
+            let name = dir_entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            if !name_str.ends_with(".app.elf") {
+                continue;
+            }
+
+            let full_path = format!("{}/{}\0", dir, name_str);
+            let full_path_ptr = full_path.as_ptr() as *const c_char;
+
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Found app ELF: %s\0".as_ptr(),
+                full_path_ptr,
+            );
+
+            // 1. Load the ELF
+            let mut handle: *mut ElfAppHandle = std::ptr::null_mut();
+            let ret = elf_app_load(full_path_ptr, &mut handle);
+            if ret != ESP_OK {
+                esp_log_write(
+                    ESP_LOG_WARN,
+                    TAG.as_ptr(),
+                    b"Failed to load app ELF '%s': 0x%x\0".as_ptr(),
+                    full_path_ptr,
+                    ret,
+                );
+                continue;
+            }
+
+            // 2. Parse manifest to get app metadata
+            let mut manifest_path_buf = [0u8; 280];
+            manifest_path_from_elf(
+                full_path_ptr,
+                manifest_path_buf.as_mut_ptr() as *mut c_char,
+                manifest_path_buf.len(),
+            );
+
+            let mut c_manifest = std::mem::zeroed::<CManifest>();
+            let manifest_ret = manifest_parse_file(
+                manifest_path_buf.as_ptr() as *const c_char,
+                &mut c_manifest as *mut CManifest as *mut c_void,
+            );
+
+            if manifest_ret != ESP_OK {
+                esp_log_write(
+                    ESP_LOG_WARN,
+                    TAG.as_ptr(),
+                    b"No manifest for app ELF '%s', skipping registration\0".as_ptr(),
+                    full_path_ptr,
+                );
+                continue;
+            }
+
+            // Extract id and name from the parsed manifest
+            let id_len = c_manifest.id.iter().position(|&b| b == 0).unwrap_or(c_manifest.id.len());
+            let name_len = c_manifest.name.iter().position(|&b| b == 0).unwrap_or(c_manifest.name.len());
+
+            if id_len == 0 {
+                esp_log_write(
+                    ESP_LOG_WARN,
+                    TAG.as_ptr(),
+                    b"App ELF '%s' has empty manifest id, skipping\0".as_ptr(),
+                    full_path_ptr,
+                );
+                continue;
+            }
+
+            // 3. Find a free registration slot
+            let reg_slot = {
+                let regs = match REG_MUTEX.lock() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                match regs.iter().position(|r| !r.used) {
+                    Some(i) => i,
+                    None => {
+                        esp_log_write(
+                            ESP_LOG_ERROR,
+                            TAG.as_ptr(),
+                            b"No free registration slots for app '%s'\0".as_ptr(),
+                            full_path_ptr,
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            // 4. Copy id/name into static string storage so pointers remain valid
+            {
+                let mut strings = match REG_STR_MUTEX.lock() {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let s = &mut strings[reg_slot];
+                let copy_id = id_len.min(s.id.len() - 1);
+                s.id[..copy_id].copy_from_slice(&c_manifest.id[..copy_id]);
+                s.id[copy_id] = 0;
+                let copy_name = name_len.min(s.name.len() - 1);
+                s.name[..copy_name].copy_from_slice(&c_manifest.name[..copy_name]);
+                s.name[copy_name] = 0;
+            }
+
+            // 5. Build registration entry with static pointers
+            //    We must get pointers into the static string storage.
+            let (id_ptr, name_ptr) = {
+                let strings = match REG_STR_MUTEX.lock() {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                (
+                    strings[reg_slot].id.as_ptr() as *const c_char,
+                    strings[reg_slot].name.as_ptr() as *const c_char,
+                )
+            };
+
+            {
+                let mut regs = match REG_MUTEX.lock() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let reg = &mut regs[reg_slot];
+
+                reg.manifest = CAppManifest {
+                    id:               id_ptr,
+                    name:             name_ptr,
+                    version:          b"0.0.0\0".as_ptr() as *const c_char,
+                    allow_background: c_manifest.background,
+                    min_memory_kb:    c_manifest.min_memory_kb,
+                };
+                reg.handle = handle;
+                reg.entry = CAppEntry {
+                    on_create:  Some(ON_CREATE_TABLE[reg_slot]),
+                    on_start:   None,
+                    on_pause:   None,
+                    on_resume:  None,
+                    on_destroy: Some(ON_DESTROY_TABLE[reg_slot]),
+                    manifest:   &reg.manifest as *const CAppManifest,
+                };
+                reg.used = true;
+            }
+
+            // 6. Register with the app manager
+            let entry_ptr = {
+                let regs = match REG_MUTEX.lock() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                &regs[reg_slot].entry as *const CAppEntry
+            };
+
+            let reg_ret = crate::app_manager::register(entry_ptr);
+            if reg_ret != ESP_OK {
+                esp_log_write(
+                    ESP_LOG_WARN,
+                    TAG.as_ptr(),
+                    b"Failed to register app '%s' with app manager: 0x%x\0".as_ptr(),
+                    full_path_ptr,
+                    reg_ret,
+                );
+                // Roll back the slot
+                if let Ok(mut regs) = REG_MUTEX.lock() {
+                    regs[reg_slot] = ElfAppRegistration::empty();
+                }
+                continue;
+            }
+
+            // 7. Grant permissions from manifest
+            let perms = c_manifest.permissions;
+            if perms != 0 {
+                permissions_grant(id_ptr, perms);
+            }
+
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Registered ELF app: %s (perms=0x%x)\0".as_ptr(),
+                id_ptr,
+                perms,
+            );
+            registered += 1;
+        }
+    }
+
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"App scan complete: %d app(s) registered\0".as_ptr(),
+        registered,
+    );
+
+    registered
 }

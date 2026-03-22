@@ -21,7 +21,7 @@ static esp_err_t bhi260ap_init(const void *config)
     //       upload firmware blob if required, configure virtual sensor list,
     //       install ISR on pin_int.
     ESP_LOGW(TAG, "%s: not implemented", __func__);
-    memcpy(&s_config, config, sizeof(s_config));
+    if (config) memcpy(&s_config, config, sizeof(s_config));
     return ESP_ERR_NOT_SUPPORTED;
 }
 

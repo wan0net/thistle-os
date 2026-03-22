@@ -46,7 +46,7 @@ extern "C" {
 
     // Manifest (C/Rust shims)
     fn manifest_parse_file(path: *const c_char, out: *mut c_void) -> i32;
-    fn manifest_is_compatible(manifest: *const c_void) -> bool;
+    fn manifest_is_compatible(manifest: *const c_void, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table (C)
@@ -66,6 +66,9 @@ const ESP_LOG_ERROR: i32 = 1;
 const ESP_LOG_DEBUG: i32 = 4;
 
 static TAG: &[u8] = b"drv_loader\0";
+
+// Current architecture string for manifest compatibility checks
+static CURRENT_ARCH: &[u8] = b"xtensa-esp32s3\0";
 
 // Size of esp_elf_t opaque struct — must be large enough to hold the C struct.
 // We use a byte array as an opaque storage blob.
@@ -251,7 +254,7 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
         if !manifest_buf.is_null() {
             if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                if !manifest_is_compatible(manifest_buf as *const c_void) {
+                if !manifest_is_compatible(manifest_buf as *const c_void, CURRENT_ARCH.as_ptr() as *const c_char) {
                     esp_log_write(
                         ESP_LOG_ERROR,
                         TAG.as_ptr(),

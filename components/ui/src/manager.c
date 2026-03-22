@@ -125,7 +125,37 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
             .y2 = (uint16_t)area->y2,
         };
 
-        esp_err_t err = reg->display->flush(&hal_area, px_map);
+        /* E-paper displays need 1-bit data, LVGL outputs RGB565. Convert. */
+        esp_err_t err;
+        if (reg->display->type == HAL_DISPLAY_TYPE_EPAPER) {
+            uint16_t w = hal_area.x2 - hal_area.x1 + 1;
+            uint16_t h = hal_area.y2 - hal_area.y1 + 1;
+            uint32_t pixel_count = (uint32_t)w * h;
+            uint32_t mono_bytes = (pixel_count + 7) / 8;
+            uint8_t *mono_buf = (uint8_t *)heap_caps_malloc(mono_bytes, MALLOC_CAP_DEFAULT);
+            if (mono_buf) {
+                memset(mono_buf, 0, mono_bytes);
+                const uint16_t *rgb565 = (const uint16_t *)px_map;
+                for (uint32_t i = 0; i < pixel_count; i++) {
+                    uint16_t c = rgb565[i];
+                    /* Luminance threshold: white if bright enough */
+                    uint8_t r5 = (c >> 11) & 0x1F;
+                    uint8_t g6 = (c >> 5) & 0x3F;
+                    uint8_t b5 = c & 0x1F;
+                    /* Weighted luminance (BT.601): 0.299R + 0.587G + 0.114B */
+                    uint16_t lum = r5 * 77 + g6 * 150 + b5 * 29;  /* max ~8160 */
+                    if (lum > 4080) {  /* ~50% threshold */
+                        mono_buf[i / 8] |= (0x80 >> (i & 7));  /* white */
+                    }
+                }
+                err = reg->display->flush(&hal_area, mono_buf);
+                free(mono_buf);
+            } else {
+                err = ESP_ERR_NO_MEM;
+            }
+        } else {
+            err = reg->display->flush(&hal_area, px_map);
+        }
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "HAL flush failed: %s", esp_err_to_name(err));
         }
@@ -189,7 +219,7 @@ esp_err_t ui_manager_init(void)
         return ESP_FAIL;
     }
 
-    /* 3. Set draw buffers (double-buffered, partial) */
+    /* 3. Set draw buffers (double-buffered, partial rendering) */
     lv_display_set_buffers(s_display,
                            s_draw_buf1, s_draw_buf2,
                            sizeof(s_draw_buf1),
@@ -244,14 +274,7 @@ esp_err_t ui_manager_init(void)
     }
     esp_timer_start_periodic(tick_timer, 1000); /* 1 ms */
 
-    /* 6b. Start LVGL handler task */
-    BaseType_t ret = xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "failed to create LVGL task");
-        return ESP_ERR_NO_MEM;
-    }
-
-    /* 7. Build screen layout */
+    /* 7. Build screen layout (LVGL task starts AFTER layout is complete) */
     s_screen = lv_display_get_screen_active(s_display);
     lv_obj_set_size(s_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
@@ -306,6 +329,19 @@ esp_err_t ui_manager_init(void)
     /* 11. Show splash screen for 2 seconds */
     ui_manager_show_splash(2000);
 
+    /* NOTE: LVGL render task is NOT started here — call ui_manager_start()
+     * after all LVGL objects (apps, launcher) are fully created. */
+    return ESP_OK;
+}
+
+esp_err_t ui_manager_start(void)
+{
+    BaseType_t xret = xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
+    if (xret != pdPASS) {
+        ESP_LOGE(TAG, "failed to create LVGL task");
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "LVGL render task started");
     return ESP_OK;
 }
 

@@ -148,21 +148,44 @@ esp_err_t hal_registry_start_all(void)
             if (ret != ESP_OK) return ret;
         }
     }
-    if (s_registry.radio && s_registry.radio->init)
-        s_registry.radio->init(s_registry.radio_config);
-    if (s_registry.gps && s_registry.gps->init)
-        s_registry.gps->init(s_registry.gps_config);
-    if (s_registry.audio && s_registry.audio->init)
-        s_registry.audio->init(s_registry.audio_config);
-    if (s_registry.power && s_registry.power->init)
-        s_registry.power->init(s_registry.power_config);
-    if (s_registry.imu && s_registry.imu->init)
-        s_registry.imu->init(s_registry.imu_config);
+    // Non-display drivers: log failures but continue (non-fatal)
+    if (s_registry.radio && s_registry.radio->init) {
+        ESP_LOGI(TAG, "Starting radio...");
+        if (s_registry.radio->init(s_registry.radio_config) != ESP_OK)
+            ESP_LOGW(TAG, "Radio init failed (non-fatal)");
+    }
+    if (s_registry.gps && s_registry.gps->init) {
+        ESP_LOGI(TAG, "Starting GPS...");
+        if (s_registry.gps->init(s_registry.gps_config) != ESP_OK)
+            ESP_LOGW(TAG, "GPS init failed (non-fatal)");
+    }
+    if (s_registry.audio && s_registry.audio->init) {
+        ESP_LOGI(TAG, "Starting audio...");
+        if (s_registry.audio->init(s_registry.audio_config) != ESP_OK)
+            ESP_LOGW(TAG, "Audio init failed (non-fatal)");
+    }
+    if (s_registry.power && s_registry.power->init) {
+        ESP_LOGI(TAG, "Starting power...");
+        if (s_registry.power->init(s_registry.power_config) != ESP_OK)
+            ESP_LOGW(TAG, "Power init failed (non-fatal)");
+    }
+    if (s_registry.imu && s_registry.imu->init) {
+        ESP_LOGI(TAG, "Starting IMU...");
+        if (s_registry.imu->init(s_registry.imu_config) != ESP_OK)
+            ESP_LOGW(TAG, "IMU init failed (non-fatal)");
+    }
     for (int i = 0; i < s_registry.storage_count; i++) {
-        if (s_registry.storage[i] && s_registry.storage[i]->init)
-            s_registry.storage[i]->init(s_registry.storage_configs[i]);
-        if (s_registry.storage[i] && s_registry.storage[i]->mount)
-            s_registry.storage[i]->mount(NULL);
+        if (s_registry.storage[i] && s_registry.storage[i]->init) {
+            ESP_LOGI(TAG, "Starting storage[%d]...", i);
+            if (s_registry.storage[i]->init(s_registry.storage_configs[i]) != ESP_OK) {
+                ESP_LOGW(TAG, "Storage[%d] init failed (non-fatal)", i);
+                continue;  // Skip mount if init failed
+            }
+        }
+        if (s_registry.storage[i] && s_registry.storage[i]->mount) {
+            ESP_LOGI(TAG, "Mounting storage[%d]...", i);
+            s_registry.storage[i]->mount(s_registry.storage_configs[i]);
+        }
     }
     return ESP_OK;
 }

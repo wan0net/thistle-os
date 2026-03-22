@@ -28,3 +28,7 @@ const app_manifest_t *elf_app_get_manifest(elf_app_handle_t handle);
 
 /* Initialize the ELF loader subsystem */
 esp_err_t elf_loader_init(void);
+
+/* Scan /spiffs/apps/ and /sdcard/apps/ for .app.elf files,
+ * load them, and register with the app manager. */
+int elf_app_scan_and_register(void);
