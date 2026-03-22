@@ -3,9 +3,6 @@
 idf_component_register(
     SRCS "stub.c"
     INCLUDE_DIRS "include"
-    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
-             esp_wifi esp_netif esp_event bt mbedtls esp_http_client
-             driver spiffs nvs_flash esp_adc
 )
 
 set(RUST_TARGET "xtensa-esp32s3-espidf")
