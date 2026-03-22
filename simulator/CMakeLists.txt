@@ -23,6 +23,8 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
     # Widget API dispatch (Rust widget.rs → WM vtable bridge)
     ${THISTLE_DIR}/components/ui/src/widget_shims.c
+    # thistle-tk WM C vtable + HAL bridge
+    ${THISTLE_DIR}/components/kernel/src/tk_wm_shims.c
     # UI
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c

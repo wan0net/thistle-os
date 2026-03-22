@@ -10,3 +10,8 @@ const display_server_wm_t *lvgl_epaper_wm_get(void);
 /* Get the LVGL LCD window manager vtable.
  * Uses direct flush, shows splash screen on init. */
 const display_server_wm_t *lvgl_lcd_wm_get(void);
+
+/* Get the thistle-tk (pure Rust) window manager vtable.
+ * Uses embedded-graphics renderer. Works with both e-paper and LCD.
+ * Defined in kernel/src/tk_wm_shims.c, backed by kernel_rs/src/tk_wm.rs. */
+const display_server_wm_t *thistle_tk_wm_get(void);

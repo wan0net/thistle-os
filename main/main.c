@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "esp_err.h"
@@ -12,6 +13,7 @@
 #include "thistle/ota.h"
 #include "thistle/display_server.h"
 #include "thistle/elf_loader.h"
+#include "thistle/board_config.h"
 #include "hal/board.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
@@ -90,9 +92,9 @@ void app_main(void)
         return;
     }
 
-    /* Select WM variant based on display capabilities:
-     * E-paper displays have a refresh() function for deferred panel commit;
-     * LCD displays do not. */
+    /* Select WM variant based on display capabilities.
+     * Default: LVGL (existing apps depend on it).
+     * thistle-tk is available but needs its own app set — use via system.json. */
     {
         const hal_registry_t *reg = hal_get_registry();
         if (reg && reg->display && reg->display->refresh) {
@@ -102,7 +104,7 @@ void app_main(void)
         }
     }
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register LVGL window manager: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to register window manager: %s", esp_err_to_name(ret));
         return;
     }
 

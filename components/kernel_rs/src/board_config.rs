@@ -224,3 +224,51 @@ pub extern "C" fn board_config_get_name() -> *const c_char {
         Err(_) => b"Unknown\0".as_ptr() as *const c_char,
     }
 }
+
+// ── Window manager preference from system.json ──────────────────────
+
+static WM_NAME: Mutex<[u8; 64]> = Mutex::new([0u8; 64]);
+
+/// Read the "window_manager" value from system.json.
+/// Tries /spiffs/config/system.json first, then SD card.
+fn load_wm_name() {
+    let paths = [
+        "/spiffs/config/system.json",
+        "/tmp/thistle_sdcard/config/system.json",
+    ];
+    for path in &paths {
+        if let Ok(json) = fs::read_to_string(path) {
+            // Look inside "thistle_os" object for "window_manager"
+            if let Some(os_obj) = extract_object(&json, "thistle_os") {
+                if let Some(wm) = json_get_string(&os_obj, "window_manager") {
+                    if let Ok(mut buf) = WM_NAME.lock() {
+                        let bytes = wm.as_bytes();
+                        let len = bytes.len().min(63);
+                        buf[..len].copy_from_slice(&bytes[..len]);
+                        buf[len] = 0;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Return the configured WM name, or NULL if not set.
+/// Reads system.json on first call and caches the result.
+#[no_mangle]
+pub extern "C" fn board_config_get_wm_name() -> *const c_char {
+    // Load lazily on first call
+    {
+        let buf = WM_NAME.lock().unwrap();
+        if buf[0] == 0 {
+            drop(buf);
+            load_wm_name();
+        }
+    }
+    let buf = WM_NAME.lock().unwrap();
+    if buf[0] == 0 {
+        return std::ptr::null();
+    }
+    buf.as_ptr() as *const c_char
+}

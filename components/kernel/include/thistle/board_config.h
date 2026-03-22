@@ -13,3 +13,7 @@ esp_err_t board_config_init(const char *config_path);
 
 /* Get the board name as read from board.json */
 const char *board_config_get_name(void);
+
+/* Get the configured window manager name from system.json.
+ * Returns NULL if not set or system.json not found. */
+const char *board_config_get_wm_name(void);

@@ -25,4 +25,5 @@ pub mod net_manager;
 pub mod appstore_client;
 pub mod crypto;
 pub mod widget;
+pub mod tk_wm;
 mod ffi;
