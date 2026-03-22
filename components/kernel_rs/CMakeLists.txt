@@ -3,6 +3,9 @@
 idf_component_register(
     SRCS "stub.c"
     INCLUDE_DIRS "include"
+    REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
+             esp_wifi esp_netif esp_event bt mbedtls esp_http_client
+             driver spiffs nvs_flash esp_adc sdmmc espressif__elf_loader
 )
 
 set(RUST_TARGET "xtensa-esp32s3-espidf")
@@ -22,9 +25,7 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-# NOTE: The Rust staticlib is linked from the `kernel` component (not here)
-# because kernel has REQUIRES for all ESP-IDF components the Rust code
-# references (bt, spiffs, nvs_flash, esp_adc, etc.). Linking from kernel_rs
-# would put the Rust lib before those deps in link order, causing undefined
-# reference errors.
-# See components/kernel/CMakeLists.txt for the actual target_link_libraries.
+# Link Rust lib with --start-group/--end-group to handle circular deps
+# with C components (widget_shims, display_server, etc.)
+target_link_libraries(${COMPONENT_LIB} INTERFACE
+    -Wl,--start-group ${RUST_LIB} -Wl,--end-group)
