@@ -19,13 +19,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Rust ESP toolchain
+        uses: actions/cache@v4
+        id: rust-cache
+        with:
+          path: |
+            /root/.cargo
+            /root/.rustup
+          key: rust-esp-toolchain-v2
+          restore-keys: rust-esp-toolchain-
+
       - name: Install Rust ESP toolchain
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          fi
           . "$HOME/.cargo/env"
-          cargo install espup
-          espup install
+          if ! command -v espup &> /dev/null; then
+            cargo install espup
+          fi
+          espup install || echo "espup install failed (may be cached)"
           # NOTE: Do NOT source export-esp.sh here — it overrides ESP-IDF's
           # GCC with an incompatible version. The kernel_rs CMakeLists.txt
           # adds cargo to PATH when invoking the Rust build.
