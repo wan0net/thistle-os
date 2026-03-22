@@ -34,3 +34,4 @@ simulator/build/
 appstore-site/
 appstore-site/
 external/ghostty
+crates/thistle-tk/target/
