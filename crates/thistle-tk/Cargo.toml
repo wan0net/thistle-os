@@ -1,0 +1,17 @@
+[package]
+name = "thistle-tk"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+description = "Embedded widget toolkit for e-paper and LCD displays, built on embedded-graphics"
+keywords = ["embedded", "gui", "e-paper", "widgets", "no-std"]
+categories = ["embedded", "gui", "no-std"]
+
+[dependencies]
+embedded-graphics = "0.8"
+embedded-text = "0.7"
+u8g2-fonts = "0.5"
+heapless = "0.8"
+
+[dev-dependencies]
+embedded-graphics-simulator = "0.7"
