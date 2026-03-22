@@ -132,7 +132,7 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
             uint16_t h = hal_area.y2 - hal_area.y1 + 1;
             uint32_t pixel_count = (uint32_t)w * h;
             uint32_t mono_bytes = (pixel_count + 7) / 8;
-            uint8_t *mono_buf = (uint8_t *)heap_caps_malloc(mono_bytes, MALLOC_CAP_DEFAULT);
+            uint8_t *mono_buf = (uint8_t *)malloc(mono_bytes);
             if (mono_buf) {
                 memset(mono_buf, 0, mono_bytes);
                 const uint16_t *rgb565 = (const uint16_t *)px_map;
