@@ -1,0 +1,19 @@
+{
+    "type": "driver",
+    "id": "com.thistle.drv.accel-qmi8658",
+    "name": "QMI8658C 6-Axis IMU",
+    "version": "1.0.0",
+    "author": "ThistleOS",
+    "description": "QST QMI8658C 6-axis IMU driver (3-axis accelerometer + 3-axis gyroscope). Detected at I2C 0x6B on the LilyGo T-Deck Pro.",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "accel-qmi8658.drv.elf",
+    "hal_interface": "imu",
+    "compatible_boards": ["tdeck-pro"],
+    "detection": {
+        "bus": "i2c",
+        "address": "0x6B",
+        "chip_id_reg": "0x00",
+        "chip_id_value": "0x05"
+    }
+}

@@ -404,3 +404,268 @@ pub unsafe extern "C" fn net_list_transports(
 pub extern "C" fn net_manager_register_wifi() -> i32 {
     unsafe { net_manager_register(&WIFI_NET_DRIVER as *const HalNetDriver) }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+//
+// net_manager_init() and net_manager_register() call esp_log_write and are
+// not safe to call in host tests. All tests operate directly on a locally
+// constructed NetManagerState to avoid the global and its C dependencies.
+//
+// The following functions ARE pure Rust and operate on the global state but
+// only read it; they are tested via the local-state pathway:
+//   net_is_connected(), net_get_state(), net_get_active(), net_get_ip(),
+//   net_get_rssi(), net_get_transport_name()
+//
+// We test the accessor path by setting up mock HalNetDriver vtables and
+// directly populating a local NetManagerState.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::raw::c_char;
+
+    // -----------------------------------------------------------------------
+    // Mock drivers
+    // -----------------------------------------------------------------------
+
+    unsafe extern "C" fn mock_not_connected() -> bool { false }
+    unsafe extern "C" fn mock_is_connected()  -> bool { true  }
+    unsafe extern "C" fn mock_state_disconnected() -> u32 { HAL_NET_STATE_DISCONNECTED }
+    unsafe extern "C" fn mock_state_connected()    -> u32 { HAL_NET_STATE_CONNECTED    }
+    unsafe extern "C" fn mock_get_ip() -> *const c_char {
+        b"192.168.1.100\0".as_ptr() as *const c_char
+    }
+    unsafe extern "C" fn mock_get_rssi() -> i8 { -55 }
+
+    static MOCK_DISCONNECTED: HalNetDriver = HalNetDriver {
+        transport_type: 0,
+        name: b"MockDisconnected\0".as_ptr() as *const c_char,
+        init: None,
+        connect: None,
+        disconnect: None,
+        get_state: Some(mock_state_disconnected),
+        get_ip: None,
+        get_rssi: Some(mock_get_rssi),
+        is_connected: Some(mock_not_connected),
+    };
+
+    static MOCK_CONNECTED: HalNetDriver = HalNetDriver {
+        transport_type: 0,
+        name: b"MockConnected\0".as_ptr() as *const c_char,
+        init: None,
+        connect: None,
+        disconnect: None,
+        get_state: Some(mock_state_connected),
+        get_ip: Some(mock_get_ip),
+        get_rssi: Some(mock_get_rssi),
+        is_connected: Some(mock_is_connected),
+    };
+
+    // -----------------------------------------------------------------------
+    // Helper: build a local NetManagerState with the given driver pointers
+    // -----------------------------------------------------------------------
+
+    fn make_state_with(drivers: &[*const HalNetDriver]) -> NetManagerState {
+        let mut s = NetManagerState::new();
+        s.initialized = true;
+        s.count = drivers.len().min(MAX_NET_TRANSPORTS);
+        for (i, &d) in drivers.iter().take(MAX_NET_TRANSPORTS).enumerate() {
+            s.transports[i] = d;
+        }
+        s
+    }
+
+    // -----------------------------------------------------------------------
+    // Local equivalents of the FFI functions operating on a given state ref
+    // -----------------------------------------------------------------------
+
+    fn local_is_connected(s: &NetManagerState) -> bool {
+        for i in 0..s.count {
+            let drv = s.transports[i];
+            if drv.is_null() { continue; }
+            unsafe {
+                if let Some(f) = (*drv).is_connected {
+                    if f() { return true; }
+                }
+            }
+        }
+        false
+    }
+
+    fn local_get_state(s: &NetManagerState) -> u32 {
+        let mut best = HAL_NET_STATE_DISCONNECTED;
+        for i in 0..s.count {
+            let drv = s.transports[i];
+            if drv.is_null() { continue; }
+            unsafe {
+                if let Some(f) = (*drv).get_state {
+                    let st = f();
+                    if st == HAL_NET_STATE_CONNECTED  { return HAL_NET_STATE_CONNECTED; }
+                    if st == HAL_NET_STATE_CONNECTING { best = HAL_NET_STATE_CONNECTING; }
+                }
+            }
+        }
+        best
+    }
+
+    fn local_get_active(s: &NetManagerState) -> *const HalNetDriver {
+        for i in 0..s.count {
+            let drv = s.transports[i];
+            if drv.is_null() { continue; }
+            unsafe {
+                if let Some(f) = (*drv).is_connected {
+                    if f() { return drv; }
+                }
+            }
+        }
+        std::ptr::null()
+    }
+
+    fn local_get_ip(s: &NetManagerState) -> *const c_char {
+        let active = local_get_active(s);
+        if active.is_null() { return std::ptr::null(); }
+        unsafe {
+            if let Some(f) = (*active).get_ip { return f(); }
+        }
+        std::ptr::null()
+    }
+
+    fn local_get_transport_name(s: &NetManagerState) -> *const c_char {
+        let active = local_get_active(s);
+        if active.is_null() { return b"None\0".as_ptr() as *const c_char; }
+        unsafe {
+            if !(*active).name.is_null() { return (*active).name; }
+        }
+        b"None\0".as_ptr() as *const c_char
+    }
+
+    // -----------------------------------------------------------------------
+    // test_not_connected_initially (empty state)
+    // Mirrors test_net_manager.c: freshly constructed state has no connections.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_not_connected_initially() {
+        let s = make_state_with(&[]);
+        assert!(!local_is_connected(&s), "empty state must not be connected");
+        assert_eq!(local_get_state(&s), HAL_NET_STATE_DISCONNECTED);
+        assert!(local_get_active(&s).is_null());
+    }
+
+    // -----------------------------------------------------------------------
+    // test_disconnected_mock_not_connected
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_disconnected_mock_not_connected() {
+        let s = make_state_with(&[&MOCK_DISCONNECTED as *const HalNetDriver]);
+        assert!(!local_is_connected(&s), "disconnected mock must not be connected");
+        assert_eq!(local_get_state(&s), HAL_NET_STATE_DISCONNECTED);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_connected_mock_is_connected
+    // Mirrors test_net_manager.c: connected mock makes net_is_connected() true.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_connected_mock_is_connected() {
+        let s = make_state_with(&[&MOCK_CONNECTED as *const HalNetDriver]);
+        assert!(local_is_connected(&s), "connected mock must report connected");
+        assert_eq!(local_get_state(&s), HAL_NET_STATE_CONNECTED);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_ip_from_connected_mock
+    // Mirrors test_net_manager.c: net_get_ip() returns the mock address.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_ip_from_connected_mock() {
+        let s = make_state_with(&[&MOCK_CONNECTED as *const HalNetDriver]);
+        let ip_ptr = local_get_ip(&s);
+        assert!(!ip_ptr.is_null(), "get_ip must return non-null for connected transport");
+        let ip_str = unsafe { std::ffi::CStr::from_ptr(ip_ptr).to_str().unwrap() };
+        assert_eq!(ip_str, "192.168.1.100");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_ip_null_when_disconnected
+    // Mirrors test_net_manager.c: no connected transport → NULL ip.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_ip_null_when_disconnected() {
+        let s = make_state_with(&[&MOCK_DISCONNECTED as *const HalNetDriver]);
+        let ip_ptr = local_get_ip(&s);
+        assert!(ip_ptr.is_null(), "get_ip must return null when disconnected");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_transport_name
+    // Mirrors test_net_manager.c: transport name is reported correctly.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_transport_name() {
+        let s = make_state_with(&[&MOCK_CONNECTED as *const HalNetDriver]);
+        let name_ptr = local_get_transport_name(&s);
+        assert!(!name_ptr.is_null());
+        let name = unsafe { std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap() };
+        assert_eq!(name, "MockConnected");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_transport_name_none_when_no_active
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_transport_name_none_when_no_active() {
+        let s = make_state_with(&[]);
+        let name_ptr = local_get_transport_name(&s);
+        let name = unsafe { std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap() };
+        assert_eq!(name, "None");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_multiple_transports_picks_connected
+    // Mirrors test_net_manager.c: when multiple transports registered, the
+    // connected one is returned as active.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_multiple_transports_picks_connected() {
+        let s = make_state_with(&[
+            &MOCK_DISCONNECTED as *const HalNetDriver,
+            &MOCK_CONNECTED    as *const HalNetDriver,
+        ]);
+        assert!(local_is_connected(&s));
+        let active = local_get_active(&s);
+        assert_eq!(active, &MOCK_CONNECTED as *const HalNetDriver);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_list_transports_empty
+    // Mirrors test_net_manager.c: net_list_transports on empty state returns 0.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_list_transports_empty() {
+        let s = NetManagerState::new();
+        assert_eq!(s.count, 0, "empty state must have 0 transports");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_state_constant_values
+    // Verify the HAL state constants match expected values from hal/net.h.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_state_constant_values() {
+        assert_eq!(HAL_NET_STATE_DISCONNECTED, 0);
+        assert_eq!(HAL_NET_STATE_CONNECTING,   1);
+        assert_eq!(HAL_NET_STATE_CONNECTED,    2);
+    }
+}

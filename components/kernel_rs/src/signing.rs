@@ -371,4 +371,124 @@ mod tests {
         let result = unsafe { signing_verify(data.as_ptr(), data.len(), std::ptr::null()) };
         assert_eq!(result, ESP_ERR_INVALID_ARG, "null signature must return ESP_ERR_INVALID_ARG");
     }
+
+    // -----------------------------------------------------------------------
+    // test_has_signature_nonexistent_path
+    // Mirrors test_signing.c: signing_has_signature on a path that doesn't
+    // exist on disk must return false.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_has_signature_nonexistent_path() {
+        let path = b"/nonexistent/path/that/does/not/exist.elf\0";
+        let result = unsafe { signing_has_signature(path.as_ptr() as *const c_char) };
+        assert!(!result, "signing_has_signature must return false for missing file");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_verify_file_not_found
+    // Mirrors test_signing.c: signing_verify_file on a missing path returns
+    // ESP_ERR_NOT_FOUND.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_verify_file_not_found() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+
+        let path = b"/no/such/file.elf\0";
+        let result = unsafe { signing_verify_file(path.as_ptr() as *const c_char) };
+        assert_eq!(
+            result, ESP_ERR_NOT_FOUND,
+            "signing_verify_file on missing path must return ESP_ERR_NOT_FOUND"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_signing_init_null_key
+    // Mirrors test_signing.c: signing_init(NULL) must return INVALID_ARG.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_signing_init_null_key() {
+        reset();
+        let result = unsafe { signing_init(std::ptr::null()) };
+        assert_eq!(
+            result, ESP_ERR_INVALID_ARG,
+            "signing_init(NULL) must return ESP_ERR_INVALID_ARG"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_verify_zero_length_data
+    // Mirrors test_signing.c: signing_verify with data_len == 0 and a bad sig
+    // must return INVALID_CRC (not panic).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_verify_zero_length_data() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+
+        let zero_sig = [0u8; 64];
+        let dummy: [u8; 1] = [0];
+        let result = unsafe { signing_verify(dummy.as_ptr(), 0, zero_sig.as_ptr()) };
+        assert_eq!(
+            result, ESP_ERR_INVALID_CRC,
+            "zero-length data with bad sig must return ESP_ERR_INVALID_CRC"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_hex_output_deterministic
+    // Mirrors test_signing.c: two successive inits with the same key produce
+    // the same hex output.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_hex_output_deterministic() {
+        reset();
+        let key_bytes = fresh_verifying_key_bytes();
+
+        unsafe { signing_init(key_bytes.as_ptr()) };
+        let ptr1 = signing_get_public_key_hex();
+        let hex1 = unsafe { CStr::from_ptr(ptr1).to_str().unwrap().to_string() };
+
+        // Re-init with the same key
+        reset();
+        unsafe { signing_init(key_bytes.as_ptr()) };
+        let ptr2 = signing_get_public_key_hex();
+        let hex2 = unsafe { CStr::from_ptr(ptr2).to_str().unwrap().to_string() };
+
+        assert_eq!(hex1, hex2, "same key must produce identical hex output on two inits");
+        assert_eq!(hex1.len(), 64, "hex output must be exactly 64 characters");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_verify_file_null_path
+    // Mirrors test_signing.c: signing_verify_file(NULL) returns INVALID_ARG.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_verify_file_null_path() {
+        reset();
+        let result = unsafe { signing_verify_file(std::ptr::null()) };
+        assert_eq!(
+            result, ESP_ERR_INVALID_ARG,
+            "signing_verify_file(NULL) must return ESP_ERR_INVALID_ARG"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_has_signature_null_path
+    // Mirrors test_signing.c: signing_has_signature(NULL) must return false.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_has_signature_null_path() {
+        let result = unsafe { signing_has_signature(std::ptr::null()) };
+        assert!(!result, "signing_has_signature(NULL) must return false");
+    }
 }

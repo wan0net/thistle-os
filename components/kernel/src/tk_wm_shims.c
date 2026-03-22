@@ -1,42 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// thistle-tk WM — C shims for HAL display access and vtable construction
+// thistle-tk WM — weak stubs and WM vtable construction
 //
-// The Rust tk_wm module cannot call HAL display functions directly (they
-// go through the registry pointer). These thin C helpers bridge the gap.
-// Also provides thistle_tk_wm_get() which returns the WM vtable populated
-// with the Rust function pointers.
+// HAL display bridge functions (tk_wm_hal_flush_rs, etc.) have been moved
+// into Rust (components/kernel_rs/src/tk_wm.rs) now that the HAL registry
+// is implemented in Rust.
+//
+// This file retains:
+//   1. Weak stubs — satisfy the linker during static-lib extraction.
+//   2. thistle_tk_wm_get() — constructs the display_server_wm_t vtable.
 
 #include "thistle/display_server.h"
-#include "hal/board.h"
-#include "hal/display.h"
 #include <stdbool.h>
 #include <stdint.h>
-
-// ── HAL display bridge functions (called by Rust tk_wm.rs) ──────────
-
-int tk_wm_hal_flush(const hal_area_t *area, const uint8_t *data)
-{
-    const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->display && reg->display->flush) {
-        return reg->display->flush(area, data);
-    }
-    return -1;
-}
-
-int tk_wm_hal_refresh(void)
-{
-    const hal_registry_t *reg = hal_get_registry();
-    if (reg && reg->display && reg->display->refresh) {
-        return reg->display->refresh();
-    }
-    return -1;
-}
-
-bool tk_wm_hal_has_refresh(void)
-{
-    const hal_registry_t *reg = hal_get_registry();
-    return (reg && reg->display && reg->display->refresh);
-}
 
 // ── Weak stubs for Rust tk_wm functions ─────────────────────────────
 // The Rust static lib provides strong symbols; these weak stubs satisfy

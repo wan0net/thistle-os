@@ -1,0 +1,51 @@
+{
+    "board": {
+        "name": "LilyGo T3-S3 LoRa",
+        "arch": "esp32s3",
+        "board_id": "t3-s3",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": 11,
+                "miso": 2,
+                "sclk": 14,
+                "max_transfer_bytes": 4096
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 18,
+                "scl": 17,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.oled-ssd1306",
+            "hal": "display",
+            "entry": "oled-ssd1306.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x3C",
+                "pin_rst": -1
+            }
+        },
+        {
+            "id": "com.thistle.drv.radio-sx1262",
+            "hal": "radio",
+            "entry": "radio-sx1262.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "cs": 8,
+                "dio1": 33,
+                "rst": 12,
+                "busy": 34
+            }
+        }
+    ]
+}

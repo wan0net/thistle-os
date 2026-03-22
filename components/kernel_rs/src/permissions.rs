@@ -325,6 +325,58 @@ pub unsafe extern "C" fn permissions_get(app_id: *const c_char) -> u32 {
     }
 }
 
+/// Parse a single permission name and return its flag, or 0 if unknown.
+///
+/// Matches the C `permissions_parse(const char *name)` signature.
+/// Replaces the C implementation formerly in kernel_shims.c.
+///
+/// # Safety
+/// `name` must be a valid null-terminated C string or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn permissions_parse(name: *const c_char) -> u32 {
+    if name.is_null() {
+        return 0;
+    }
+    match CStr::from_ptr(name).to_str() {
+        Ok(s) => match s.to_ascii_lowercase().as_str() {
+            "radio"   => PERM_RADIO,
+            "gps"     => PERM_GPS,
+            "storage" => PERM_STORAGE,
+            "network" => PERM_NETWORK,
+            "audio"   => PERM_AUDIO,
+            "system"  => PERM_SYSTEM,
+            "ipc"     => PERM_IPC,
+            _         => 0,
+        },
+        Err(_) => 0,
+    }
+}
+
+/// Write a comma-separated list of permission names for `perms` into `buf`.
+///
+/// Matches the C `permissions_to_string(permission_set_t, char *, size_t)` signature.
+/// Replaces the C implementation formerly in kernel_shims.c.
+/// Returns `buf` (same as the C version).
+///
+/// # Safety
+/// `buf` must point to at least `buf_len` writable bytes. `buf_len` must be > 0.
+#[no_mangle]
+pub unsafe extern "C" fn permissions_to_string(
+    perms: u32,
+    buf: *mut c_char,
+    buf_len: usize,
+) -> *mut c_char {
+    if buf.is_null() || buf_len == 0 {
+        return buf;
+    }
+    let s = to_string(perms);
+    let bytes = s.as_bytes();
+    let len = bytes.len().min(buf_len - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, len);
+    *buf.add(len) = 0;
+    buf
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -427,5 +479,136 @@ mod tests {
         assert_eq!(grant("app.accum", PERM_RADIO), ESP_OK);
         assert_eq!(grant("app.accum", PERM_GPS),   ESP_OK);
         assert_eq!(get("app.accum"), PERM_RADIO | PERM_GPS);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_init_returns_ok
+    // Mirrors test_permissions.c: init() must return ESP_OK.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_init_returns_ok() {
+        let rc = init();
+        assert_eq!(rc, ESP_OK, "init() must return ESP_OK");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_check_denied_returns_false
+    // Mirrors test_permissions.c: checking a permission that was not granted.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_check_denied_returns_false() {
+        reset();
+        assert_eq!(grant("app.check_deny", PERM_RADIO), ESP_OK);
+        assert!(
+            !check("app.check_deny", PERM_GPS),
+            "GPS must not be granted when only RADIO was granted"
+        );
+        assert!(
+            !check("app.check_deny", PERM_AUDIO),
+            "AUDIO must not be granted when only RADIO was granted"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_bitmask
+    // Mirrors test_permissions.c: get() returns the exact bitmask.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_bitmask() {
+        reset();
+        assert_eq!(grant("app.getbm", PERM_RADIO | PERM_STORAGE | PERM_IPC), ESP_OK);
+        let mask = get("app.getbm");
+        assert_eq!(mask, PERM_RADIO | PERM_STORAGE | PERM_IPC, "get() must return exact granted bitmask");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_to_string_contains_expected_names
+    // Mirrors test_permissions.c: to_string outputs canonical names.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_to_string_contains_expected_names() {
+        let s = to_string(PERM_RADIO | PERM_AUDIO | PERM_SYSTEM);
+        assert!(s.contains("radio"),  "to_string must include 'radio'");
+        assert!(s.contains("audio"),  "to_string must include 'audio'");
+        assert!(s.contains("system"), "to_string must include 'system'");
+        assert!(!s.contains("gps"),   "to_string must NOT include 'gps'");
+        assert!(!s.contains("ipc"),   "to_string must NOT include 'ipc'");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_unknown_app_returns_zero
+    // Mirrors test_permissions.c: get() on an unregistered app returns 0.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_unknown_app_returns_zero() {
+        reset();
+        assert_eq!(get("app.nonexistent"), 0, "get() on unknown app must return 0");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_check_after_reinit
+    // Mirrors test_permissions.c: after init() all permissions are cleared.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_check_after_reinit() {
+        reset();
+        assert_eq!(grant("app.reinit", PERM_ALL), ESP_OK);
+        assert!(check("app.reinit", PERM_RADIO), "RADIO should be granted before reinit");
+
+        // Reinitialise — clears all slots
+        assert_eq!(init(), ESP_OK);
+
+        assert!(
+            !check("app.reinit", PERM_RADIO),
+            "RADIO must not be granted after reinit"
+        );
+        assert_eq!(get("app.reinit"), 0, "get() must return 0 for cleared slot");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_grant_zero_flags
+    // Mirrors test_permissions.c: granting 0 flags succeeds but adds no bits.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_grant_zero_flags() {
+        reset();
+        assert_eq!(grant("app.zero", 0), ESP_OK, "grant(0) must succeed");
+        assert_eq!(get("app.zero"), 0, "get() must return 0 after grant(0)");
+        assert!(
+            !check("app.zero", PERM_RADIO),
+            "no permissions should be set after grant(0)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_to_string_empty_set
+    // Mirrors test_permissions.c: to_string(0) returns empty string.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_to_string_empty_set() {
+        let s = to_string(0);
+        assert_eq!(s, "", "to_string(0) must return empty string");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_check_unregistered_app_returns_false
+    // Mirrors test_permissions.c: check() on an unknown app returns false.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_check_unregistered_app_returns_false() {
+        reset();
+        assert!(
+            !check("app.ghost2", PERM_RADIO),
+            "check() on unregistered app must return false"
+        );
     }
 }

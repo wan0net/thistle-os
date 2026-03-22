@@ -7,15 +7,98 @@ use std::sync::Mutex;
 
 const ESP_OK: i32 = 0;
 
+// ── ESP-IDF error codes needed for boot ──────────────────────────────
+const ESP_ERR_NVS_NO_FREE_PAGES: i32 = 0x1101;
+const ESP_ERR_NVS_NEW_VERSION_FOUND: i32 = 0x1102;
+
 // ESP-IDF FFI
 extern "C" {
     fn esp_timer_get_time() -> i64;
 }
 
+// ── SPIFFS FFI (hardware builds only) ────────────────────────────────
+
+#[cfg(target_os = "espidf")]
+#[repr(C)]
+struct SpiffsConf {
+    base_path: *const u8,
+    partition_label: *const u8,
+    max_files: usize,
+    format_if_mount_failed: bool,
+}
+
+#[cfg(target_os = "espidf")]
+extern "C" {
+    fn esp_vfs_spiffs_register(conf: *const SpiffsConf) -> i32;
+    fn esp_spiffs_info(partition: *const u8, total: *mut usize, used: *mut usize) -> i32;
+    fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
+}
+
+/// Mount the SPIFFS filesystem at /spiffs using the "storage" partition.
+///
+/// This replaces the C `spiffs_mount()` shim in kernel_shims.c.
+fn spiffs_mount() -> i32 {
+    #[cfg(target_os = "espidf")]
+    unsafe {
+        let conf = SpiffsConf {
+            base_path: b"/spiffs\0".as_ptr(),
+            partition_label: b"storage\0".as_ptr(),
+            max_files: 10,
+            format_if_mount_failed: true,
+        };
+        let ret = esp_vfs_spiffs_register(&conf);
+        if ret == ESP_OK {
+            let mut total: usize = 0;
+            let mut used: usize = 0;
+            esp_spiffs_info(b"storage\0".as_ptr(), &mut total, &mut used);
+            esp_log_write(
+                3, /* INFO */
+                b"spiffs\0".as_ptr(),
+                b"Mounted /spiffs (total: %u, used: %u)\0".as_ptr(),
+                total as u32,
+                used as u32,
+            );
+        } else {
+            esp_log_write(
+                1, /* ERROR */
+                b"spiffs\0".as_ptr(),
+                b"Mount failed: %d\0".as_ptr(),
+                ret,
+            );
+        }
+        return ret;
+    }
+    #[cfg(not(target_os = "espidf"))]
+    ESP_OK
+}
+
+// ── NVS flash FFI (hardware builds only) ─────────────────────────────
+
+#[cfg(target_os = "espidf")]
+extern "C" {
+    fn nvs_flash_init() -> i32;
+    fn nvs_flash_erase() -> i32;
+}
+
+/// Initialise NVS flash, erasing and retrying on version mismatch.
+///
+/// This replaces the C `nvs_flash_init_safe()` shim in kernel_shims.c.
+fn nvs_flash_init_safe() -> i32 {
+    #[cfg(target_os = "espidf")]
+    unsafe {
+        let mut ret = nvs_flash_init();
+        if ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND {
+            nvs_flash_erase();
+            ret = nvs_flash_init();
+        }
+        return ret;
+    }
+    #[cfg(not(target_os = "espidf"))]
+    ESP_OK
+}
+
 // Subsystem init functions (some Rust, some still C)
 extern "C" {
-    fn nvs_flash_init_safe() -> i32;
-    fn spiffs_mount() -> i32;
     fn net_manager_init() -> i32;
     fn driver_manager_init() -> i32;
     fn driver_manager_start_all() -> i32;
@@ -41,11 +124,11 @@ pub extern "C" fn kernel_init() -> i32 {
     }
 
     // NVS flash — required by WiFi, BLE, and other ESP-IDF subsystems
-    let ret = unsafe { nvs_flash_init_safe() };
+    let ret = nvs_flash_init_safe();
     if ret != ESP_OK { return ret; }
 
     // Mount SPIFFS — apps, drivers, config, themes live here
-    let ret = unsafe { spiffs_mount() };
+    let ret = spiffs_mount();
     if ret != ESP_OK {
         // Non-fatal: SD card can still provide apps/config
     }

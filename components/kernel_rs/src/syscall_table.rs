@@ -58,7 +58,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-// FreeRTOS — stubs provided in simulator
+// FreeRTOS — stubs provided in simulator. Not available on aarch64-apple-darwin test builds.
+#[cfg(not(test))]
 extern "C" {
     fn vTaskDelay(ticks: u32);
     fn xTaskCreatePinnedToCore(
@@ -147,12 +148,17 @@ unsafe impl Sync for SyscallEntry {}
 // Syscall implementations (thin wrappers calling kernel subsystems)
 // ---------------------------------------------------------------------------
 
+// thistle_log calls esp_log_write (not available on host test builds).
+// thistle_millis calls kernel_uptime_ms which calls esp_timer_get_time (also not on host).
+// Both are excluded from test builds; the test-mode SYSCALL_TABLE omits these entries.
+#[cfg(not(test))]
 unsafe extern "C" fn thistle_log(tag: *const c_char, msg: *const c_char) {
     let t = if tag.is_null() { b"app\0".as_ptr() } else { tag as *const u8 };
     let m = if msg.is_null() { b"\0".as_ptr() } else { msg as *const u8 };
     esp_log_write(3 /* INFO */, t, b"%s\0".as_ptr(), m);
 }
 
+#[cfg(not(test))]
 unsafe extern "C" fn thistle_millis() -> u32 {
     kernel_uptime_ms()
 }
@@ -170,15 +176,15 @@ unsafe extern "C" fn thistle_delay(ms: u32) {
 }
 
 unsafe extern "C" fn thistle_malloc(size: usize) -> *mut c_void {
-    libc_malloc(size)
+    malloc(size)
 }
 
 unsafe extern "C" fn thistle_free(ptr: *mut c_void) {
-    libc_free(ptr);
+    free(ptr);
 }
 
 unsafe extern "C" fn thistle_realloc(ptr: *mut c_void, size: usize) -> *mut c_void {
-    libc_realloc(ptr, size)
+    realloc(ptr, size)
 }
 
 unsafe extern "C" fn thistle_msg_send(msg: *const c_void) -> i32 {
@@ -201,43 +207,146 @@ unsafe extern "C" fn thistle_event_publish(event: *const c_void) -> i32 {
     event_publish(event)
 }
 
-// Display helpers — read from HAL registry
+// libc memory allocation — available in both espidf and simulator
+extern "C" {
+    fn malloc(size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
+    fn realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+}
+
+// libc file I/O — available in both espidf and simulator
+extern "C" {
+    fn fopen(path: *const c_char, mode: *const c_char) -> *mut c_void;
+    fn fread(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
+    fn fwrite(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
+    fn fclose(stream: *mut c_void) -> i32;
+}
+
+// Display helpers — read from Rust HAL registry
 unsafe extern "C" fn thistle_display_get_width() -> u16 {
-    // The display vtable's width field is at a known offset.
-    // We delegate to a C helper to avoid duplicating the struct layout.
-    hal_display_get_width_helper()
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        (*reg.display).width
+    } else {
+        320 // default
+    }
 }
 
 unsafe extern "C" fn thistle_display_get_height() -> u16 {
-    hal_display_get_height_helper()
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        (*reg.display).height
+    } else {
+        240 // default
+    }
 }
 
-extern "C" {
-    fn hal_display_get_width_helper() -> u16;
-    fn hal_display_get_height_helper() -> u16;
+// ── HAL syscall implementations (pure Rust, using Rust HAL registry) ─
 
-    fn thistle_input_register_cb_impl(cb: *const c_void, user_data: *mut c_void) -> i32;
-    fn thistle_radio_send_impl(data: *const u8, len: usize) -> i32;
-    fn thistle_radio_start_rx_impl(cb: *const c_void, user_data: *mut c_void) -> i32;
-    fn thistle_radio_set_freq_impl(freq_hz: u32) -> i32;
-    fn thistle_gps_get_position_impl(pos: *mut c_void) -> i32;
-    fn thistle_gps_enable_impl() -> i32;
-    fn thistle_fs_open_impl(path: *const c_char, mode: *const c_char) -> *mut c_void;
-    fn thistle_fs_read_impl(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> i32;
-    fn thistle_fs_write_impl(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> i32;
-    fn thistle_fs_close_impl(stream: *mut c_void) -> i32;
-    fn thistle_power_get_battery_mv_impl() -> u16;
-    fn thistle_power_get_battery_pct_impl() -> u8;
+unsafe extern "C" fn thistle_input_register_cb_impl(cb: *const c_void, user_data: *mut c_void) -> i32 {
+    let reg = crate::hal_registry::registry();
+    for i in 0..(reg.input_count as usize) {
+        if !reg.inputs[i].is_null() {
+            if let Some(register_cb) = (*reg.inputs[i]).register_callback {
+                let typed_cb: crate::hal_registry::HalInputCb = core::mem::transmute(cb);
+                register_cb(typed_cb, user_data);
+            }
+        }
+    }
+    0
 }
 
-// libc malloc/free/realloc — available in both espidf and simulator
-extern "C" {
-    fn libc_malloc(size: usize) -> *mut c_void;
-    fn libc_free(ptr: *mut c_void);
-    fn libc_realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+unsafe extern "C" fn thistle_radio_send_impl(data: *const u8, len: usize) -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.radio.is_null() {
+        if let Some(send) = (*reg.radio).send {
+            return send(data, len);
+        }
+    }
+    -1
 }
 
-// Widget API (Rust, defined in widget.rs)
+unsafe extern "C" fn thistle_radio_start_rx_impl(cb: *const c_void, user_data: *mut c_void) -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.radio.is_null() {
+        if let Some(start_receive) = (*reg.radio).start_receive {
+            let typed_cb: crate::hal_registry::HalRadioRxCb = core::mem::transmute(cb);
+            return start_receive(typed_cb, user_data);
+        }
+    }
+    -1
+}
+
+unsafe extern "C" fn thistle_radio_set_freq_impl(freq_hz: u32) -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.radio.is_null() {
+        if let Some(set_frequency) = (*reg.radio).set_frequency {
+            return set_frequency(freq_hz);
+        }
+    }
+    -1
+}
+
+unsafe extern "C" fn thistle_gps_get_position_impl(pos: *mut c_void) -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.gps.is_null() {
+        if let Some(get_position) = (*reg.gps).get_position {
+            return get_position(pos as *mut crate::hal_registry::HalGpsPosition);
+        }
+    }
+    -1
+}
+
+unsafe extern "C" fn thistle_gps_enable_impl() -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.gps.is_null() {
+        if let Some(enable) = (*reg.gps).enable {
+            return enable();
+        }
+    }
+    -1
+}
+
+unsafe extern "C" fn thistle_power_get_battery_mv_impl() -> u16 {
+    let reg = crate::hal_registry::registry();
+    if !reg.power.is_null() {
+        if let Some(get_battery_mv) = (*reg.power).get_battery_mv {
+            return get_battery_mv();
+        }
+    }
+    0
+}
+
+unsafe extern "C" fn thistle_power_get_battery_pct_impl() -> u8 {
+    let reg = crate::hal_registry::registry();
+    if !reg.power.is_null() {
+        if let Some(get_battery_percent) = (*reg.power).get_battery_percent {
+            return get_battery_percent();
+        }
+    }
+    0
+}
+
+// ── File I/O syscall wrappers ─────────────────────────────────────────
+
+unsafe extern "C" fn thistle_fs_open_impl(path: *const c_char, mode: *const c_char) -> *mut c_void {
+    fopen(path, mode)
+}
+
+unsafe extern "C" fn thistle_fs_read_impl(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+    fread(buf, size, count, stream) as i32
+}
+
+unsafe extern "C" fn thistle_fs_write_impl(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+    fwrite(buf, size, count, stream) as i32
+}
+
+unsafe extern "C" fn thistle_fs_close_impl(stream: *mut c_void) -> i32 {
+    fclose(stream)
+}
+
+// Widget API (Rust, defined in widget.rs). Not available on aarch64-apple-darwin test builds.
+#[cfg(not(test))]
 extern "C" {
     fn thistle_ui_get_app_root() -> u32;
     fn thistle_ui_create_container(parent: u32) -> u32;
@@ -288,6 +397,10 @@ macro_rules! entry {
     };
 }
 
+// Full syscall table — used in firmware and simulator builds.
+// Omitted from test builds because FreeRTOS, widget API, esp_log_write, and
+// esp_timer_get_time symbols are not available on aarch64-apple-darwin.
+#[cfg(not(test))]
 static SYSCALL_TABLE: &[SyscallEntry] = &[
     // System
     entry!("thistle_log",                   thistle_log                         as unsafe extern "C" fn(*const c_char, *const c_char)),
@@ -395,6 +508,73 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("esp_log_write",                 esp_log_write                       as unsafe extern "C" fn(i32, *const u8, *const u8, ...)),
 ];
 
+// Minimal syscall table for host (aarch64-apple-darwin) test builds.
+// Only contains entries whose function bodies are pure Rust or reference
+// libc/in-crate symbols resolvable without ESP-IDF or FreeRTOS.
+// Excluded: thistle_log (esp_log_write), thistle_millis (esp_timer_get_time),
+//           FreeRTOS entries, widget API entries, esp_log_write itself.
+#[cfg(test)]
+static SYSCALL_TABLE: &[SyscallEntry] = &[
+    // System (host-safe only)
+    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
+    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
+    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
+    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
+
+    // Display
+    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
+    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
+
+    // Input
+    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+
+    // Radio
+    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32),
+    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32),
+
+    // GPS
+    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32),
+
+    // Storage
+    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void),
+    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32),
+    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+
+    // IPC
+    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32),
+    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
+    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
+
+    // Power
+    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
+    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
+
+    // HAL registration (all Rust FFI exports in hal_registry.rs)
+    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
+    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
+
+    // HAL bus (Rust FFI exports in hal_registry.rs)
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
+
+    // Driver config (Rust FFI export in driver_loader.rs)
+    entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
+];
+
 // ---------------------------------------------------------------------------
 // FFI exports
 // ---------------------------------------------------------------------------
@@ -456,6 +636,7 @@ pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
         }
     }
 
+    #[cfg(not(test))]
     esp_log_write(
         2, // WARN
         b"syscall\0".as_ptr(),
@@ -463,4 +644,113 @@ pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
         name,
     );
     std::ptr::null_mut()
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+//
+// Only pure-Rust functions are tested here: syscall_table_count(),
+// syscall_table_get(), and the success path of syscall_resolve() (which
+// returns before calling esp_log_write).
+//
+// syscall_table_init() and the failure path of syscall_resolve() both call
+// esp_log_write which is not available on the host target, so they are skipped.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    // -----------------------------------------------------------------------
+    // test_table_count_nonzero
+    // Mirrors test_syscall_table.c: count must be > 0 after the table is built.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_table_count_nonzero() {
+        let count = syscall_table_count();
+        assert!(count > 0, "syscall table must contain at least one entry");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_table_get_returns_non_null
+    // Mirrors test_syscall_table.c: syscall_table_get() must not be NULL.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_table_get_returns_non_null() {
+        let ptr = syscall_table_get();
+        assert!(!ptr.is_null(), "syscall_table_get() must return a non-null pointer");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_resolve_thistle_delay
+    // Mirrors test_syscall_table.c: resolve a known symbol must return non-NULL.
+    // Uses "thistle_delay" (host-safe wrapper using std::thread::sleep).
+    // Note: "thistle_log" and "thistle_millis" are excluded from the test-mode
+    // table because their bodies call esp_log_write / esp_timer_get_time which
+    // are not available on aarch64-apple-darwin.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_thistle_delay() {
+        let name = b"thistle_delay\0";
+        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
+        assert!(
+            !ptr.is_null(),
+            "syscall_resolve(\"thistle_delay\") must return a non-null address"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_resolve_thistle_malloc
+    // Mirrors test_syscall_table.c: resolve("thistle_malloc") must return non-NULL.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_thistle_malloc() {
+        let name = b"thistle_malloc\0";
+        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
+        assert!(
+            !ptr.is_null(),
+            "syscall_resolve(\"thistle_malloc\") must return a non-null address"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_resolve_null_returns_null
+    // syscall_resolve(NULL) must return NULL without crashing.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_null_returns_null() {
+        let ptr = unsafe { syscall_resolve(std::ptr::null()) };
+        assert!(ptr.is_null(), "syscall_resolve(NULL) must return NULL");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_table_entries_have_non_null_names_and_funcs
+    // All entries in the static table must have valid name and func_ptr.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_table_entries_have_non_null_names_and_funcs() {
+        let count = syscall_table_count();
+        let base = syscall_table_get();
+
+        for i in 0..count {
+            let entry = unsafe { &*base.add(i) };
+            assert!(
+                !entry.name.is_null(),
+                "entry[{}].name must not be null", i
+            );
+            assert!(
+                !entry.func_ptr.is_null(),
+                "entry[{}].func_ptr must not be null (name={})",
+                i,
+                unsafe { CStr::from_ptr(entry.name).to_str().unwrap_or("?") }
+            );
+        }
+    }
 }

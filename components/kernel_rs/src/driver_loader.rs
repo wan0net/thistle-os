@@ -456,3 +456,89 @@ pub unsafe extern "C" fn driver_loader_load_with_config(
 
     ret
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+//
+// driver_loader_init(), driver_loader_load(), and driver_loader_scan_and_load()
+// all call esp_log_write and are not safe on aarch64-apple-darwin.
+//
+// driver_loader_get_count() and driver_loader_get_config() are pure Rust and
+// are tested here using direct state manipulation under the Mutex.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn reset_state() {
+        if let Ok(mut s) = STATE.lock() {
+            for d in s.drivers.iter_mut() {
+                *d = LoadedDriver::empty();
+            }
+            s.count = 0;
+            s.current_config = EMPTY_CONFIG.as_ptr() as *const c_char;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_count_is_zero_initially
+    // Mirrors test_driver_loader.c: count is 0 after init (no drivers loaded).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_count_is_zero_initially() {
+        reset_state();
+        assert_eq!(
+            driver_loader_get_count(),
+            0,
+            "driver count must be 0 after reset"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_config_returns_default
+    // Mirrors test_driver_loader.c: default config is the "{}" empty JSON.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_config_returns_default() {
+        reset_state();
+        let ptr = driver_loader_get_config();
+        assert!(!ptr.is_null(), "driver_loader_get_config() must not return NULL");
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "{}", "default config must be \"{{}}\"");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_count_after_manual_increment
+    // Direct state manipulation verifies the count accessor is wired correctly.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_count_after_manual_increment() {
+        reset_state();
+        {
+            let mut s = STATE.lock().unwrap();
+            s.drivers[0].loaded = true;
+            s.count = 1;
+        }
+        assert_eq!(
+            driver_loader_get_count(),
+            1,
+            "driver count must reflect manually-set value"
+        );
+        reset_state();
+    }
+
+    // -----------------------------------------------------------------------
+    // test_max_loaded_drvs_constant
+    // The capacity constant must match what tests assume.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_max_loaded_drvs_constant() {
+        assert_eq!(MAX_LOADED_DRVS, 8, "MAX_LOADED_DRVS must be 8");
+    }
+}

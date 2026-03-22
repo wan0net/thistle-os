@@ -27,6 +27,7 @@
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
         <a href="board-support.html">Board Support</a>
+        <a href="devices.html">Supported Devices</a>
 
         <div class="nav-label">System</div>
         <a href="app-store.html">App Store</a>
@@ -40,7 +41,7 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Architecture</div>
       <h1>Architecture</h1>
-      <p class="lead">A layered design: HAL interfaces at the bottom, drivers implementing them, a kernel coordinating everything, and apps at the top — with each layer knowing nothing about the one above it.</p>
+      <p class="lead">A layered design: HAL interfaces at the bottom, 14 Rust drivers implementing them, a pure Rust kernel (40+ modules) coordinating everything, and apps at the top — with each layer knowing nothing about the one above it.</p>
       <a href="https://github.com/wan0net/esp32-os/blob/main/docs/architecture.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
@@ -51,20 +52,25 @@
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
 &#x2502;  <span class="d-blue">Syscall table  — symbol resolution for ELF loader</span>    &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-blue">Kernel</span>                                                &#x2502;
+&#x2502;  <span class="d-blue">Kernel — 100% Rust, 40+ modules, 489+ tests</span>          &#x2502;
 &#x2502;  app_manager  driver_manager  ipc  event_bus  ota    &#x2502;
 &#x2502;  wifi_manager  ble_manager  permissions  elf_loader  &#x2502;
+&#x2502;  signing  manifest  crypto  version  display_server  &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-blue">UI (LVGL 9)</span>                                           &#x2502;
+&#x2502;  <span class="d-blue">WM (.wm.elf)  — thistle-tk (Rust) | LVGL (C)</span>         &#x2502;
 &#x2502;  window_manager  statusbar  theme  toast  app_switcher&#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
 &#x2502;  <span class="d-green">HAL registry  — hal_get_registry() returns all drivers</span>&#x2502;
+&#x2502;  display  input  radio  gps  audio  power  imu        &#x2502;
+&#x2502;  storage  net  crypto  rtc                            &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-green">Drivers (drv_*)</span>                                       &#x2502;
-&#x2502;  epaper  kbd  touch  sx1262  gps  audio  imu  sdcard  &#x2502;
+&#x2502;  <span class="d-green">14 Rust Drivers (drv_*)</span>                               &#x2502;
+&#x2502;  epaper  lcd  oled  kbd  touch  gps  imu  rtc         &#x2502;
+&#x2502;  audio  power  sdcard  (light sensor, imu stubs)     &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-green">Board definition (board_tdeck_pro)</span>                    &#x2502;
-&#x2502;  pin assignments, bus init, driver registration       &#x2502;
+&#x2502;  <span class="d-green">Board config (board.json on SPIFFS)</span>                   &#x2502;
+&#x2502;  pin assignments, bus config, driver list             &#x2502;
+&#x2502;  detected by Recovery OS (I2C/SPI/UART scan)         &#x2502;
 &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
 
     <h2>HAL vtable design</h2>
@@ -105,6 +111,9 @@
           <tr><td><code>hal_power_driver_t</code></td><td><code>hal/power.h</code></td><td>init, get_battery_mv, get_battery_pct</td></tr>
           <tr><td><code>hal_imu_driver_t</code></td><td><code>hal/imu.h</code></td><td>init, get_accel, get_gyro, register_gesture_cb</td></tr>
           <tr><td><code>hal_storage_driver_t</code></td><td><code>hal/storage.h</code></td><td>init, mount, unmount (POSIX FS after mount)</td></tr>
+          <tr><td><code>hal_net_driver_t</code></td><td><code>hal/net.h</code></td><td>init, is_connected, get_ip</td></tr>
+          <tr><td><code>hal_crypto_driver_t</code></td><td><code>hal/crypto.h</code></td><td>aes_encrypt, aes_decrypt, sha256 — hardware or software fallback</td></tr>
+          <tr><td><code>hal_rtc_driver_t</code></td><td><code>hal/rtc.h</code></td><td>init, get_time, set_time, set_alarm</td></tr>
         </tbody>
       </table>
     </div>

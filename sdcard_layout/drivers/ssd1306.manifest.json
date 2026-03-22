@@ -1,0 +1,17 @@
+{
+    "type": "driver",
+    "id": "com.thistle.drv.oled-ssd1306",
+    "name": "SSD1306 128x64 OLED",
+    "version": "1.0.0",
+    "author": "ThistleOS",
+    "description": "SSD1306 128x64 monochrome OLED display driver (I2C 0x3C). Used on LilyGo T3-S3 LoRa.",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "oled-ssd1306.drv.elf",
+    "hal_interface": "display",
+    "compatible_boards": ["t3-s3"],
+    "detection": {
+        "bus": "i2c",
+        "address": "0x3C"
+    }
+}

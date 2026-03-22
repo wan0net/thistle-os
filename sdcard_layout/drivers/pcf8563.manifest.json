@@ -1,0 +1,16 @@
+{
+    "type": "driver",
+    "id": "com.thistle.drv.rtc-pcf8563",
+    "name": "PCF8563 RTC",
+    "version": "1.0.0",
+    "author": "ThistleOS Contributors",
+    "description": "NXP PCF8563 real-time clock driver for battery-backed timekeeping",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "rtc-pcf8563.drv.elf",
+    "hal_interface": "rtc",
+    "detection": {
+        "bus": "i2c",
+        "address": "0x55"
+    }
+}

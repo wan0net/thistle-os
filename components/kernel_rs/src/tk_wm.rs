@@ -176,25 +176,61 @@ static TK_WM: Mutex<Option<TkWmState>> = Mutex::new(None);
 // HAL FFI
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
-struct HalArea {
-    x1: u16,
-    y1: u16,
-    x2: u16,
-    y2: u16,
+use crate::hal_registry::HalArea;
+
+/// Return the display width from the HAL registry, or 320 if no driver is registered.
+fn hal_display_width() -> u16 {
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        unsafe { (*reg.display).width }
+    } else {
+        320
+    }
 }
 
-extern "C" {
-    fn hal_display_get_width_helper() -> u16;
-    fn hal_display_get_height_helper() -> u16;
+/// Return the display height from the HAL registry, or 240 if no driver is registered.
+fn hal_display_height() -> u16 {
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        unsafe { (*reg.display).height }
+    } else {
+        240
+    }
 }
 
-// Display driver access — we call flush/refresh through C helper functions.
-// These are defined in tk_wm_shims.c and bridge to the HAL display driver.
-extern "C" {
-    fn tk_wm_hal_flush(area: *const HalArea, data: *const u8) -> i32;
-    fn tk_wm_hal_refresh() -> i32;
-    fn tk_wm_hal_has_refresh() -> bool;
+/// Flush pixel data to the display driver.
+///
+/// # Safety
+/// `area` and `data` must be valid pointers for the duration of the call.
+unsafe fn tk_wm_hal_flush_rs(area: *const HalArea, data: *const u8) -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        if let Some(flush_fn) = (*reg.display).flush {
+            return flush_fn(area, data);
+        }
+    }
+    -1
+}
+
+/// Trigger a display refresh (e-paper full/partial commit).
+unsafe fn tk_wm_hal_refresh_rs() -> i32 {
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        if let Some(refresh_fn) = (*reg.display).refresh {
+            return refresh_fn();
+        }
+    }
+    -1
+}
+
+/// Check whether the display driver exposes a refresh() function (e-paper vs LCD).
+fn tk_wm_hal_has_refresh_rs() -> bool {
+    let reg = crate::hal_registry::registry();
+    if !reg.display.is_null() {
+        unsafe { (*reg.display).refresh.is_some() }
+    } else {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -230,10 +266,10 @@ unsafe fn cstr_to_str<'a>(s: *const c_char) -> &'a str {
 
 #[no_mangle]
 pub extern "C" fn tk_wm_init() -> i32 {
-    let width = unsafe { hal_display_get_width_helper() } as u32;
-    let height = unsafe { hal_display_get_height_helper() } as u32;
+    let width = hal_display_width() as u32;
+    let height = hal_display_height() as u32;
 
-    let has_refresh = unsafe { tk_wm_hal_has_refresh() };
+    let has_refresh = tk_wm_hal_has_refresh_rs();
     let mode = if has_refresh {
         DisplayMode::Mono
     } else {
@@ -315,8 +351,8 @@ pub extern "C" fn tk_wm_render() {
                 fb.clear_white();
                 render::render(&state.tree, &state.theme, &MonoMapper, fb);
                 unsafe {
-                    tk_wm_hal_flush(&area, fb.buf.as_ptr());
-                    tk_wm_hal_refresh();
+                    tk_wm_hal_flush_rs(&area, fb.buf.as_ptr());
+                    tk_wm_hal_refresh_rs();
                 }
             }
         }
@@ -325,7 +361,7 @@ pub extern "C" fn tk_wm_render() {
                 fb.clear_black();
                 render::render(&state.tree, &state.theme, &RgbMapper, fb);
                 unsafe {
-                    tk_wm_hal_flush(&area, fb.buf.as_ptr());
+                    tk_wm_hal_flush_rs(&area, fb.buf.as_ptr());
                 }
             }
         }

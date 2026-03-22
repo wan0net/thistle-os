@@ -522,4 +522,150 @@ mod tests {
         event_unsubscribe(EventType::WifiConnected as u32, handler_dt_wifi);
         event_unsubscribe(EventType::BleDisconnected as u32, handler_dt_ble);
     }
+
+    // -----------------------------------------------------------------------
+    // test_event_bus_init_returns_ok
+    // Mirrors test_event_bus.c: event_bus_init() must return ESP_OK.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_event_bus_init_returns_ok() {
+        let rc = event_bus_init();
+        assert_eq!(rc, ESP_OK, "event_bus_init must return ESP_OK");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_publish_simple_no_data
+    // Mirrors test_event_bus.c: event_publish_simple fires subscribers.
+    // -----------------------------------------------------------------------
+
+    static COUNTER_SIMPLE: AtomicU32 = AtomicU32::new(0);
+
+    extern "C" fn handler_simple(_event: *const CEvent, _ud: *mut c_void) {
+        COUNTER_SIMPLE.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_publish_simple_no_data() {
+        COUNTER_SIMPLE.store(0, Ordering::SeqCst);
+
+        event_subscribe(EventType::SdMounted as u32, handler_simple, std::ptr::null_mut());
+
+        let rc = event_publish_simple(EventType::SdMounted as u32);
+        assert_eq!(rc, ESP_OK, "event_publish_simple must return ESP_OK");
+        assert_eq!(COUNTER_SIMPLE.load(Ordering::SeqCst), 1, "handler must be called once");
+
+        event_unsubscribe(EventType::SdMounted as u32, handler_simple);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_publish_null_event
+    // Mirrors test_event_bus.c: event_publish(NULL) returns ESP_ERR_INVALID_ARG.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_publish_null_event() {
+        let rc = event_publish(std::ptr::null());
+        assert_eq!(rc, ESP_ERR_INVALID_ARG, "publish(NULL) must return ESP_ERR_INVALID_ARG");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_unsubscribe_nonexistent_no_crash
+    // Mirrors test_event_bus.c: unsubscribing a handler that was never
+    // registered must return ESP_ERR_NOT_FOUND (not crash).
+    // -----------------------------------------------------------------------
+
+    extern "C" fn handler_never_subbed(_: *const CEvent, _: *mut c_void) {}
+
+    #[test]
+    fn test_unsubscribe_nonexistent_no_crash() {
+        let rc = event_unsubscribe(EventType::BatteryLow as u32, handler_never_subbed);
+        assert_eq!(
+            rc, ESP_ERR_NOT_FOUND,
+            "unsubscribe of unregistered handler must return ESP_ERR_NOT_FOUND"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_user_data_forwarding
+    // Mirrors test_event_bus.c: user_data pointer is forwarded to handler.
+    // -----------------------------------------------------------------------
+
+    extern "C" fn handler_ud(_event: *const CEvent, ud: *mut c_void) {
+        if !ud.is_null() {
+            unsafe {
+                let counter = &*(ud as *const AtomicU32);
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[test]
+    fn test_user_data_forwarding() {
+        let counter = AtomicU32::new(0);
+        let ud_ptr: *mut c_void = &counter as *const AtomicU32 as *mut c_void;
+
+        event_subscribe(EventType::SdUnmounted as u32, handler_ud, ud_ptr);
+
+        let ev = make_event(EventType::SdUnmounted);
+        event_publish(&ev as *const CEvent);
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "user_data must be forwarded to handler"
+        );
+
+        event_unsubscribe(EventType::SdUnmounted as u32, handler_ud);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_data_pointer_and_length_forwarded
+    // Mirrors test_event_bus.c: data and data_len fields are visible to handler.
+    // -----------------------------------------------------------------------
+
+    static DATA_LEN_SEEN: AtomicU32 = AtomicU32::new(0);
+
+    extern "C" fn handler_data_check(event: *const CEvent, _ud: *mut c_void) {
+        let ev = unsafe { &*event };
+        DATA_LEN_SEEN.store(ev.data_len as u32, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_data_pointer_and_length_forwarded() {
+        DATA_LEN_SEEN.store(0, Ordering::SeqCst);
+
+        event_subscribe(EventType::InputKey as u32, handler_data_check, std::ptr::null_mut());
+
+        let payload: u32 = 0xCAFE_BABE;
+        let ev = CEvent {
+            event_type: EventType::InputKey as u32,
+            timestamp:  0,
+            data:       &payload as *const u32 as *mut c_void,
+            data_len:   std::mem::size_of::<u32>(),
+        };
+        event_publish(&ev as *const CEvent);
+
+        assert_eq!(
+            DATA_LEN_SEEN.load(Ordering::SeqCst),
+            std::mem::size_of::<u32>() as u32,
+            "data_len must match what was set in the event"
+        );
+
+        event_unsubscribe(EventType::InputKey as u32, handler_data_check);
+    }
+
+    // -----------------------------------------------------------------------
+    // test_publish_simple_no_subscribers_ok
+    // Mirrors test_event_bus.c: publish_simple with no subscribers returns OK.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_publish_simple_no_subscribers_ok() {
+        // BleConnected is intentionally not subscribed in this test.
+        // The existing test_publish_no_subscribers also covers this but uses
+        // event_publish directly; here we verify event_publish_simple too.
+        let rc = event_publish_simple(EventType::BatteryCharging as u32);
+        assert_eq!(rc, ESP_OK, "publish_simple with no subscribers must return ESP_OK");
+    }
 }

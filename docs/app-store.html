@@ -27,6 +27,7 @@
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
         <a href="board-support.html">Board Support</a>
+        <a href="devices.html">Supported Devices</a>
 
         <div class="nav-label">System</div>
         <a href="app-store.html" class="active">App Store</a>
@@ -40,32 +41,47 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / App Store</div>
       <h1>App Store &amp; Catalog</h1>
-      <p class="lead">The ThistleOS app store is decentralized — anyone can host a catalog. The device fetches JSON over HTTPS, verifies SHA-256 checksums and signatures, then downloads and installs entries onto the SD card.</p>
+      <p class="lead">The ThistleOS app store is decentralized — anyone can host a catalog. The device fetches JSON over HTTPS, filters entries by chip architecture and detected hardware components, verifies SHA-256 checksums and Ed25519 signatures, then downloads and installs entries onto the SD card.</p>
       <a href="https://github.com/wan0net/esp32-os/blob/main/docs/app-store.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">Built-in App Store</div>
+      The App Store itself is a built-in Rust app (<code>tk_appstore</code>) built on thistle-tk. It shows ratings, download counts, categories, and changelogs. Component-level driver detection ensures only compatible entries are offered for your hardware.
     </div>
 
     <h2>Catalog format</h2>
     <p>A catalog is a single JSON file. The top-level object contains metadata and an array of entries:</p>
 
     <pre><code>{
-  <span class="tok-string">"catalog_version"</span>: 1,
+  <span class="tok-string">"catalog_version"</span>: 2,
   <span class="tok-string">"name"</span>: <span class="tok-string">"ThistleOS Official"</span>,
   <span class="tok-string">"url"</span>: <span class="tok-string">"https://wan0net.github.io/thistle-apps/catalog.json"</span>,
-  <span class="tok-string">"updated"</span>: <span class="tok-string">"2026-03-01"</span>,
+  <span class="tok-string">"updated"</span>: <span class="tok-string">"2026-03-22"</span>,
   <span class="tok-string">"entries"</span>: [
     {
-      <span class="tok-string">"id"</span>:          <span class="tok-string">"com.example.chat"</span>,
-      <span class="tok-string">"name"</span>:        <span class="tok-string">"LoRa Chat"</span>,
-      <span class="tok-string">"version"</span>:     <span class="tok-string">"1.2.0"</span>,
-      <span class="tok-string">"type"</span>:        <span class="tok-string">"app"</span>,
-      <span class="tok-string">"url"</span>:         <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf"</span>,
-      <span class="tok-string">"sha256"</span>:      <span class="tok-string">"a3f1b29c..."</span>,
-      <span class="tok-string">"sig_url"</span>:     <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf.sig"</span>,
-      <span class="tok-string">"size_bytes"</span>:  48320,
-      <span class="tok-string">"permissions"</span>: [<span class="tok-string">"radio"</span>, <span class="tok-string">"ipc"</span>],
-      <span class="tok-string">"description"</span>: <span class="tok-string">"Send and receive LoRa messages with nearby devices."</span>,
-      <span class="tok-string">"author"</span>:      <span class="tok-string">"Example Dev"</span>,
-      <span class="tok-string">"min_os"</span>:      <span class="tok-string">"0.1.0"</span>
+      <span class="tok-string">"id"</span>:               <span class="tok-string">"com.example.chat"</span>,
+      <span class="tok-string">"name"</span>:             <span class="tok-string">"LoRa Chat"</span>,
+      <span class="tok-string">"version"</span>:          <span class="tok-string">"1.2.0"</span>,
+      <span class="tok-string">"type"</span>:             <span class="tok-string">"app"</span>,
+      <span class="tok-string">"arch"</span>:             [<span class="tok-string">"xtensa"</span>, <span class="tok-string">"riscv"</span>],
+      <span class="tok-string">"url"</span>:              <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf"</span>,
+      <span class="tok-string">"sha256"</span>:           <span class="tok-string">"a3f1b29c..."</span>,
+      <span class="tok-string">"sig_url"</span>:          <span class="tok-string">"https://example.com/apps/chat-1.2.0.app.elf.sig"</span>,
+      <span class="tok-string">"size_bytes"</span>:       48320,
+      <span class="tok-string">"permissions"</span>:      [<span class="tok-string">"radio"</span>, <span class="tok-string">"ipc"</span>],
+      <span class="tok-string">"description"</span>:      <span class="tok-string">"Send and receive LoRa messages with nearby devices."</span>,
+      <span class="tok-string">"author"</span>:           <span class="tok-string">"Example Dev"</span>,
+      <span class="tok-string">"min_os"</span>:           <span class="tok-string">"0.2.0"</span>,
+      <span class="tok-string">"category"</span>:         <span class="tok-string">"communication"</span>,
+      <span class="tok-string">"rating"</span>:           4.7,
+      <span class="tok-string">"download_count"</span>:   1204,
+      <span class="tok-string">"changelog"</span>:        <span class="tok-string">"v1.2.0: Group chat support, RSSI display"</span>,
+      <span class="tok-string">"compatible_boards"</span>: [<span class="tok-string">"tdeck_pro"</span>, <span class="tok-string">"tdeck"</span>, <span class="tok-string">"t3s3"</span>],
+      <span class="tok-string">"detection"</span>: {
+        <span class="tok-string">"requires_i2c"</span>: [],
+        <span class="tok-string">"requires_hal"</span>: [<span class="tok-string">"radio"</span>]
+      }
     }
   ]
 }</code></pre>
@@ -81,12 +97,19 @@
           <tr><td><code>type</code></td><td>string</td><td>yes</td><td><code>"app"</code>, <code>"driver"</code>, or <code>"firmware"</code>.</td></tr>
           <tr><td><code>url</code></td><td>string</td><td>yes</td><td>HTTPS URL to the binary.</td></tr>
           <tr><td><code>sha256</code></td><td>string</td><td>yes</td><td>Hex SHA-256 of the binary at <code>url</code>.</td></tr>
-          <tr><td><code>sig_url</code></td><td>string</td><td>no</td><td>URL to the <code>.sig</code> file (HMAC-SHA256 or Ed25519).</td></tr>
+          <tr><td><code>sig_url</code></td><td>string</td><td>no</td><td>URL to the <code>.sig</code> file (Ed25519 signature).</td></tr>
           <tr><td><code>size_bytes</code></td><td>number</td><td>no</td><td>Download size hint for progress display.</td></tr>
           <tr><td><code>permissions</code></td><td>array</td><td>no</td><td>Permission strings the app declares it needs.</td></tr>
           <tr><td><code>description</code></td><td>string</td><td>no</td><td>Short description shown in the store UI.</td></tr>
           <tr><td><code>author</code></td><td>string</td><td>no</td><td>Author name or organization.</td></tr>
           <tr><td><code>min_os</code></td><td>string</td><td>no</td><td>Minimum ThistleOS version required.</td></tr>
+          <tr><td><code>arch</code></td><td>array</td><td>no</td><td>Target architectures: <code>"xtensa"</code>, <code>"riscv"</code>. Omit = all.</td></tr>
+          <tr><td><code>category</code></td><td>string</td><td>no</td><td>App category for store browsing (e.g. <code>"communication"</code>).</td></tr>
+          <tr><td><code>rating</code></td><td>number</td><td>no</td><td>Average star rating (0.0–5.0).</td></tr>
+          <tr><td><code>download_count</code></td><td>number</td><td>no</td><td>Total install count shown in the store UI.</td></tr>
+          <tr><td><code>changelog</code></td><td>string</td><td>no</td><td>Short description of changes in this version.</td></tr>
+          <tr><td><code>compatible_boards</code></td><td>array</td><td>no</td><td>Board IDs this entry is compatible with. Used by Recovery for driver matching.</td></tr>
+          <tr><td><code>detection</code></td><td>object</td><td>no</td><td>Component-level hardware detection hints. <code>requires_i2c</code>: I2C addresses; <code>requires_hal</code>: HAL interface names.</td></tr>
         </tbody>
       </table>
     </div>

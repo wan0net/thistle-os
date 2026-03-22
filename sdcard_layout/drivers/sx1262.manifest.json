@@ -8,5 +8,11 @@
     "min_os": "0.1.0",
     "arch": "esp32s3",
     "entry": "sx1262.drv.elf",
-    "hal_interface": "radio"
+    "hal_interface": "radio",
+    "compatible_boards": ["tdeck-pro", "tdeck"],
+    "detection": {
+        "bus": "spi",
+        "chip_id_reg": "0x0320",
+        "chip_id_value": "0x0058"
+    }
 }

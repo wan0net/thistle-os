@@ -463,4 +463,178 @@ mod tests {
         assert_eq!(received.data_len, 2, "data_len not preserved");
         assert_eq!(received.timestamp, 0xCAFE, "timestamp not preserved");
     }
+
+    // ── test_data_integrity_pattern ──────────────────────────────────────────
+    // Mirrors test_ipc.c: fill data buffer with a byte pattern, verify it
+    // round-trips intact through the queue.
+
+    #[test]
+    fn test_data_integrity_pattern() {
+        let g = make_global();
+
+        let mut msg = CIpcMessage::default();
+        msg.msg_type = 1;
+        msg.data_len = IPC_MSG_MAX_DATA;
+        for i in 0..IPC_MSG_MAX_DATA {
+            msg.data[i] = (i as u8) ^ 0xA5;
+        }
+
+        assert_eq!(send_to(&g, msg), ESP_OK);
+
+        let received = recv_from(&g, 50).expect("expected message");
+        assert_eq!(received.data_len, IPC_MSG_MAX_DATA, "data_len mismatch");
+        for i in 0..IPC_MSG_MAX_DATA {
+            assert_eq!(
+                received.data[i],
+                (i as u8) ^ 0xA5,
+                "data byte {} corrupted", i
+            );
+        }
+    }
+
+    // ── test_handler_not_called_for_wrong_type ───────────────────────────────
+    // Mirrors test_ipc.c: handler registered for type X must not fire for type Y.
+
+    #[test]
+    fn test_handler_not_called_for_wrong_type() {
+        let g = make_global();
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+        let called_ptr: *mut c_void = Arc::into_raw(called_clone) as *mut c_void;
+
+        extern "C" fn wrong_type_handler(_msg: *const CIpcMessage, ud: *mut c_void) {
+            let flag = unsafe { &*(ud as *const AtomicBool) };
+            flag.store(true, Ordering::SeqCst);
+        }
+
+        {
+            let mut st = g.state.lock().unwrap();
+            st.handlers.push(HandlerEntry {
+                msg_type: 10, // registered for type 10
+                handler: wrong_type_handler,
+                user_data: called_ptr,
+                active: true,
+            });
+        }
+
+        // Send a message of type 20 — handler must NOT fire
+        let mut msg = CIpcMessage::default();
+        msg.msg_type = 20;
+        send_to(&g, msg);
+
+        let _ = unsafe { Arc::from_raw(called_ptr as *const AtomicBool) };
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "handler for type 10 must not fire for type 20"
+        );
+    }
+
+    // ── test_send_to_self ────────────────────────────────────────────────────
+    // Mirrors test_ipc.c: src_app == dst_app is valid.
+
+    #[test]
+    fn test_send_to_self() {
+        let g = make_global();
+
+        let mut msg = CIpcMessage::default();
+        msg.src_app = 42;
+        msg.dst_app = 42;
+        msg.msg_type = 5;
+        msg.data_len = 0;
+
+        assert_eq!(send_to(&g, msg), ESP_OK, "send-to-self must succeed");
+
+        let received = recv_from(&g, 50).expect("expected message from self-send");
+        assert_eq!(received.src_app, 42);
+        assert_eq!(received.dst_app, 42);
+    }
+
+    // ── test_zero_data_len ───────────────────────────────────────────────────
+    // Mirrors test_ipc.c: data_len == 0 is valid (no-payload message).
+
+    #[test]
+    fn test_zero_data_len() {
+        let g = make_global();
+
+        let mut msg = CIpcMessage::default();
+        msg.msg_type = 3;
+        msg.data_len = 0;
+
+        assert_eq!(send_to(&g, msg), ESP_OK, "message with zero data_len must succeed");
+
+        let received = recv_from(&g, 50).expect("expected message");
+        assert_eq!(received.data_len, 0, "data_len must be 0");
+    }
+
+    // ── test_recv_zero_ms_timeout ────────────────────────────────────────────
+    // Mirrors test_ipc.c: recv with 0ms timeout on empty queue returns TIMEOUT.
+
+    #[test]
+    fn test_recv_zero_ms_timeout() {
+        let g = make_global();
+        let result = recv_from(&g, 0);
+        assert_eq!(
+            result.unwrap_err(),
+            ESP_ERR_TIMEOUT,
+            "recv with 0ms timeout on empty queue must return ESP_ERR_TIMEOUT"
+        );
+    }
+
+    // ── test_user_data_forwarding ────────────────────────────────────────────
+    // Mirrors test_ipc.c: user_data pointer is forwarded to the handler.
+
+    #[test]
+    fn test_ipc_user_data_forwarding() {
+        let g = make_global();
+
+        let counter = Arc::new(AtomicBool::new(false));
+        let counter_clone = counter.clone();
+        let ud_ptr: *mut c_void = Arc::into_raw(counter_clone) as *mut c_void;
+
+        extern "C" fn ud_handler(_msg: *const CIpcMessage, ud: *mut c_void) {
+            let flag = unsafe { &*(ud as *const AtomicBool) };
+            flag.store(true, Ordering::SeqCst);
+        }
+
+        {
+            let mut st = g.state.lock().unwrap();
+            st.handlers.push(HandlerEntry {
+                msg_type: 77,
+                handler: ud_handler,
+                user_data: ud_ptr,
+                active: true,
+            });
+        }
+
+        let mut msg = CIpcMessage::default();
+        msg.msg_type = 77;
+        send_to(&g, msg);
+
+        let _ = unsafe { Arc::from_raw(ud_ptr as *const AtomicBool) };
+        assert!(
+            counter.load(Ordering::SeqCst),
+            "user_data must be forwarded to IPC handler"
+        );
+    }
+
+    // ── test_broadcast ───────────────────────────────────────────────────────
+    // Mirrors test_ipc.c: dst_app == 0 is a broadcast (accepted by any receiver).
+
+    #[test]
+    fn test_broadcast() {
+        let g = make_global();
+
+        let mut msg = CIpcMessage::default();
+        msg.src_app = 5;
+        msg.dst_app = 0; // broadcast
+        msg.msg_type = 99;
+        msg.data_len = 0;
+
+        assert_eq!(send_to(&g, msg), ESP_OK, "broadcast message must succeed");
+
+        let received = recv_from(&g, 50).expect("expected broadcast message");
+        assert_eq!(received.dst_app, 0, "dst_app must be 0 (broadcast)");
+        assert_eq!(received.src_app, 5);
+    }
 }

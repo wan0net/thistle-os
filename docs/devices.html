@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supported Devices — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+        <a href="devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Supported Devices</div>
+      <h1>Supported Devices</h1>
+      <p class="lead">ThistleOS runs on the ESP32 chip family. One firmware binary per architecture. Hardware drivers are auto-detected by the Recovery OS via I2C/SPI/UART scanning and downloaded from the catalog.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/devices.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Chip support</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Chip</th><th>Architecture</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>ESP32-S3</td><td>Xtensa LX7</td><td><span class="badge badge-green">Full support</span></td></tr>
+          <tr><td>ESP32</td><td>Xtensa LX6</td><td><span class="badge badge-green">Board configs ready</span></td></tr>
+          <tr><td>ESP32-S2</td><td>Xtensa LX7</td><td><span class="badge badge-yellow">Planned</span></td></tr>
+          <tr><td>ESP32-C3</td><td>RISC-V RV32IMC</td><td><span class="badge badge-green">Board configs ready</span></td></tr>
+          <tr><td>ESP32-C6</td><td>RISC-V RV32IMAC</td><td><span class="badge badge-yellow">Planned</span></td></tr>
+          <tr><td>ESP32-H2</td><td>RISC-V RV32IMAC</td><td><span class="badge badge-yellow">Planned</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">One binary per architecture</div>
+      The kernel is compiled separately for each architecture family: one binary for Xtensa (ESP32, S2, S3) and one for RISC-V (C3, C6, H2). Apps and drivers are also architecture-specific. The catalog <code>arch</code> field filters entries to the correct binary for each device.
+    </div>
+
+    <h2>Device details</h2>
+
+    <h3>LilyGo T-Deck Pro — Primary development board</h3>
+    <p><span class="badge badge-green">Primary target</span> ESP32-S3 &mdash; e-paper display, physical keyboard, LoRa, GPS, IMU, RTC, audio DAC</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>MCU</td><td>ESP32-S3FN16R8 (dual-core 240 MHz, 16 MB flash, 8 MB PSRAM)</td><td>—</td><td>—</td></tr>
+          <tr><td>Display</td><td>GDEQ031T10 3.1" e-paper (240&times;320)</td><td>SPI</td><td><code>drv_epaper_gdeq031t10</code></td></tr>
+          <tr><td>Keyboard</td><td>TCA8418 matrix scanner</td><td>I2C 0x34</td><td><code>drv_kbd_tca8418</code></td></tr>
+          <tr><td>Touch</td><td>CST328 capacitive</td><td>I2C 0x1A</td><td><code>drv_touch_cst328</code></td></tr>
+          <tr><td>Radio</td><td>SX1262 LoRa 868/915 MHz</td><td>SPI</td><td>RadioLib wrapper</td></tr>
+          <tr><td>GPS</td><td>MIA-M10Q GNSS</td><td>UART</td><td><code>drv_gps_mia_m10q</code></td></tr>
+          <tr><td>IMU</td><td>QMI8658C 6-axis</td><td>I2C</td><td><code>drv_accel_qmi8658</code></td></tr>
+          <tr><td>IMU hub</td><td>BHI260AP sensor hub</td><td>I2C 0x28</td><td><code>drv_imu_bhi260ap</code> (stub)</td></tr>
+          <tr><td>Light sensor</td><td>LTR-553 ambient</td><td>I2C 0x23</td><td><code>drv_light_ltr553</code> (stub)</td></tr>
+          <tr><td>Audio</td><td>PCM5102A I2S DAC</td><td>I2S</td><td><code>drv_audio_pcm5102a</code></td></tr>
+          <tr><td>Power</td><td>TP4065B LiPo charger + ADC</td><td>ADC/GPIO</td><td><code>drv_power_tp4065b</code></td></tr>
+          <tr><td>RTC</td><td>PCF8563</td><td>I2C</td><td><code>drv_rtc_pcf8563</code></td></tr>
+          <tr><td>Storage</td><td>MicroSD</td><td>SPI</td><td><code>drv_sdcard</code></td></tr>
+          <tr><td>4G (optional)</td><td>Simcom A7682E LTE Cat-1</td><td>UART</td><td>esp_modem wrapper</td></tr>
+          <tr><td>Connectivity</td><td>WiFi 4 + BLE 5.0 (on-chip)</td><td>—</td><td>esp-idf-svc</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Window manager: <strong>thistle-tk</strong> (pure Rust, embedded-graphics, e-paper optimized)</p>
+
+    <h3>LilyGo T-Deck — LCD variant</h3>
+    <p><span class="badge badge-green">Supported</span> ESP32-S3 &mdash; LCD display, physical keyboard, LoRa, GPS</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>Display</td><td>ST7789 LCD (320&times;240)</td><td>SPI</td><td><code>drv_lcd_st7789</code></td></tr>
+          <tr><td>Keyboard</td><td>TCA8418 matrix scanner</td><td>I2C 0x34</td><td><code>drv_kbd_tca8418</code></td></tr>
+          <tr><td>Touch</td><td>CST328 capacitive</td><td>I2C 0x1A</td><td><code>drv_touch_cst328</code></td></tr>
+          <tr><td>Radio</td><td>SX1262 LoRa</td><td>SPI</td><td>RadioLib wrapper</td></tr>
+          <tr><td>GPS</td><td>MIA-M10Q GNSS</td><td>UART</td><td><code>drv_gps_mia_m10q</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Window manager: <strong>LVGL</strong> (C, LCD rendering)</p>
+
+    <h3>LilyGo T-Display-S3</h3>
+    <p><span class="badge badge-green">Supported</span> ESP32-S3 &mdash; small LCD display, capacitive touch, hardware buttons</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>Display</td><td>ST7789 LCD (170&times;320)</td><td>SPI</td><td><code>drv_lcd_st7789</code></td></tr>
+          <tr><td>Touch</td><td>CST816S capacitive</td><td>I2C</td><td><code>drv_touch_cst816</code></td></tr>
+          <tr><td>Input</td><td>2 hardware buttons</td><td>GPIO</td><td>GPIO input driver</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Window manager: <strong>LVGL</strong></p>
+
+    <h3>LilyGo T3-S3 — LoRa board</h3>
+    <p><span class="badge badge-green">Supported</span> ESP32-S3 &mdash; OLED display, SX1262 LoRa radio</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>Display</td><td>SSD1306 OLED (128&times;64)</td><td>I2C</td><td><code>drv_oled_ssd1306</code></td></tr>
+          <tr><td>Radio</td><td>SX1262 LoRa</td><td>SPI</td><td>RadioLib wrapper</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>CYD ESP32-2432S028 — Cheap Yellow Display</h3>
+    <p><span class="badge badge-green">Supported</span> ESP32 &mdash; ILI9341 LCD with resistive touch</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>Display</td><td>ILI9341 LCD (320&times;240)</td><td>SPI</td><td>esp_lcd wrapper</td></tr>
+          <tr><td>Touch</td><td>XPT2046 resistive</td><td>SPI</td><td>XPT2046 driver</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>ESP32-C3 SuperMini</h3>
+    <p><span class="badge badge-green">Supported</span> ESP32-C3 (RISC-V) &mdash; minimal IoT board with optional SSD1306 OLED</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Bus</th><th>Driver</th></tr></thead>
+        <tbody>
+          <tr><td>Display</td><td>SSD1306 OLED (128&times;64)</td><td>I2C</td><td><code>drv_oled_ssd1306</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>How hardware detection works</h2>
+    <p>When Recovery OS boots on a new or blank device, it auto-provisions hardware with no user configuration needed:</p>
+
+    <ol class="steps">
+      <li><strong>Chip detection</strong> — Recovery reads the chip model register at boot. It knows whether it is running on ESP32, S2, S3, C3, C6, or H2, and selects the correct firmware architecture from the catalog.</li>
+      <li><strong>Power rail enable</strong> — Before scanning, Recovery enables peripheral power rails (where applicable) to ensure devices are powered.</li>
+      <li><strong>I2C bus scan</strong> — Probes addresses 0x08 through 0x77 on each I2C bus. Each responding address is looked up in the detection table. Known I2C addresses include: TCA8418 (0x34), CST328 (0x1A), BHI260AP (0x28), LTR-553 (0x23), PCF8563 (0x51), SSD1306 (0x3C/0x3D), and others.</li>
+      <li><strong>SPI device probing</strong> — GPIO-level CS pin checks determine whether SPI devices (e-paper, LoRa SX1262, SD card) are present by toggling CS and observing MISO behaviour.</li>
+      <li><strong>UART device probing</strong> — Listens on UART ports for GPS NMEA sentences (to detect MIA-M10Q or similar) and sends AT commands to detect cellular modems.</li>
+      <li><strong>Catalog match</strong> — Detected components are matched against catalog entries using the <code>detection</code> field. Matching driver <code>.drv.elf</code> files are selected for download.</li>
+      <li><strong>Bundle download</strong> — Recovery downloads the firmware binary (filtered by chip arch), matching drivers, and the appropriate window manager in one provisioning pass.</li>
+    </ol>
+
+    <div class="callout tip">
+      <div class="callout-title">No board definition required</div>
+      Recovery identifies hardware by component detection, not by board name. A new board with a TCA8418 keyboard and ST7789 display will automatically get the correct keyboard and LCD drivers without any manual configuration.
+    </div>
+
+    <h2>Adding your own board</h2>
+    <p>To make a custom board work with ThistleOS:</p>
+
+    <ol class="steps">
+      <li>Create a <code>board.json</code> on SPIFFS with pin assignments, bus configs, and the driver list for your hardware. See <a href="board-support.html">Board Support</a> for the JSON schema.</li>
+      <li>Write (or reuse) driver manifests with <code>detection</code> fields — I2C addresses or SPI probe hints that Recovery can use to auto-detect your components.</li>
+      <li>Add your board to the catalog with <code>compatible_boards</code> and <code>arch</code> fields so Recovery can match firmware and drivers to your device.</li>
+      <li>Recovery auto-detects the hardware at first boot — no code changes to the kernel or core firmware needed.</li>
+    </ol>
+
+    <h2>Rust driver table</h2>
+    <p>All 14 hardware drivers are written in Rust and implement the HAL vtable interfaces.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Driver</th><th>Chip</th><th>Bus</th><th>HAL Interface</th><th>LOC</th></tr></thead>
+        <tbody>
+          <tr><td><code>drv_epaper_gdeq031t10</code></td><td>GDEQ031T10</td><td>SPI</td><td>display</td><td>1,153</td></tr>
+          <tr><td><code>drv_lcd_st7789</code></td><td>ST7789</td><td>SPI</td><td>display</td><td>880</td></tr>
+          <tr><td><code>drv_oled_ssd1306</code></td><td>SSD1306</td><td>I2C</td><td>display</td><td>~400</td></tr>
+          <tr><td><code>drv_kbd_tca8418</code></td><td>TCA8418</td><td>I2C</td><td>input</td><td>706</td></tr>
+          <tr><td><code>drv_touch_cst328</code></td><td>CST328</td><td>I2C</td><td>input</td><td>797</td></tr>
+          <tr><td><code>drv_touch_cst816</code></td><td>CST816S</td><td>I2C</td><td>input</td><td>~400</td></tr>
+          <tr><td><code>drv_gps_mia_m10q</code></td><td>MIA-M10Q</td><td>UART</td><td>gps</td><td>1,208</td></tr>
+          <tr><td><code>drv_accel_qmi8658</code></td><td>QMI8658C</td><td>I2C</td><td>imu</td><td>~500</td></tr>
+          <tr><td><code>drv_power_tp4065b</code></td><td>TP4065B</td><td>ADC/GPIO</td><td>power</td><td>967</td></tr>
+          <tr><td><code>drv_audio_pcm5102a</code></td><td>PCM5102A</td><td>I2S</td><td>audio</td><td>1,086</td></tr>
+          <tr><td><code>drv_rtc_pcf8563</code></td><td>PCF8563</td><td>I2C</td><td>rtc</td><td>~400</td></tr>
+          <tr><td><code>drv_sdcard</code></td><td>Generic SD</td><td>SPI</td><td>storage</td><td>679</td></tr>
+          <tr><td><code>drv_imu_bhi260ap</code></td><td>BHI260AP</td><td>I2C</td><td>imu (stub)</td><td>368</td></tr>
+          <tr><td><code>drv_light_ltr553</code></td><td>LTR-553</td><td>I2C</td><td>custom (stub)</td><td>324</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">Stubs</div>
+      Drivers marked <em>stub</em> register with the HAL and return sane defaults, but do not yet implement full functionality. They exist so the board boots cleanly and the HAL reports the device as present. Full implementations are in progress.
+    </div>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

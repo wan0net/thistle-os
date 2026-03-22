@@ -27,6 +27,7 @@
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
         <a href="board-support.html">Board Support</a>
+        <a href="devices.html">Supported Devices</a>
 
         <div class="nav-label">System</div>
         <a href="app-store.html">App Store</a>
@@ -40,7 +41,7 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Recovery OS</div>
       <h1>Recovery OS</h1>
-      <p class="lead">A minimal Rust firmware in <code>ota_0</code> that can reinstall ThistleOS without a programmer — via SD card, WiFi, or the UART console.</p>
+      <p class="lead">A minimal Rust firmware in <code>ota_0</code> that auto-detects hardware via I2C/SPI/UART scanning, downloads matching drivers and firmware from the catalog, and reinstalls ThistleOS without a programmer — via SD card, WiFi, or the UART console.</p>
       <a href="https://github.com/wan0net/esp32-os/blob/main/docs/recovery.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
@@ -50,6 +51,9 @@
     <p>Key design choices:</p>
     <ul>
       <li><strong>Rust + esp-rs</strong> — smaller binary than equivalent C code, and memory safety means fewer panic-class bugs in the one piece of code that must always work.</li>
+      <li><strong>Hardware auto-detection</strong> — Recovery detects the chip variant (ESP32/S3/C3/etc.), then scans I2C buses (0x08–0x77), probes SPI device CS pins, and listens on UART for GPS NMEA / modem AT responses. Component matches are looked up in the catalog.</li>
+      <li><strong>Multi-arch chip detection</strong> — a single Recovery binary identifies whether it is running on Xtensa or RISC-V and selects the correct firmware architecture from the catalog.</li>
+      <li><strong>Full bundle download</strong> — Recovery downloads firmware binary, matching drivers, and the appropriate window manager in one provisioning flow. The device boots fully configured with no manual SD card setup.</li>
       <li><strong>No LVGL</strong> — the recovery UI is a captive portal web page served over WiFi, viewable on any phone or laptop. The e-paper display shows status messages via raw framebuffer writes.</li>
       <li><strong>No SD card required</strong> — if the SD card is missing or corrupt, recovery can still download firmware over WiFi.</li>
       <li><strong>UART console as fallback</strong> — if WiFi is not available, a serial console provides the same commands.</li>
@@ -65,6 +69,9 @@
   &#x2514;&#x2500; NO &#x2500;&#x25BA; Boot Recovery OS (ota_0)
                      &#x2502;
                      &#x25BC;
+          [Step 0] Detect chip type (ESP32/S3/C3/S2/C6/H2)
+                     &#x2502;
+                     &#x25BC;
           [Step 1] Check ota_1 partition state
           &#x251c;&#x2500; Valid &#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x25BA; boot_ota1() — reboot into main OS
           &#x251c;&#x2500; PendingVerify &#x2500;&#x25BA; boot_ota1() — let it verify itself
@@ -77,24 +84,31 @@
           &#x2514;&#x2500; NO &#x2500;&#x25BA; continue
                      &#x2502;
                      &#x25BC;
-          [Step 3] Start WiFi AP "ThistleOS-Recovery"
-          [Step 4] Start HTTP captive portal (192.168.4.1)
-          [Step 5] Start UART console loop
-                     &#x2502;
-                     &#x25BC; (user action via web or UART)
-          download_and_flash(CATALOG_URL)
+          [Step 3] Hardware scan
+          &#x251c;&#x2500; Enable power rails
+          &#x251c;&#x2500; Scan I2C bus 0x08..0x77 (probe addresses)
+          &#x251c;&#x2500; Probe SPI CS pins (GPIO-level checks)
+          &#x251c;&#x2500; Probe UART: GPS (NMEA), modem (AT)
+          &#x2514;&#x2500; Match detected components to catalog entries
                      &#x2502;
                      &#x25BC;
-          Reboot into ThistleOS</div>
+          [Step 4] Start WiFi AP "ThistleOS-Recovery"
+          [Step 5] Start HTTP captive portal (192.168.4.1)
+                     — 3-step flow: WiFi, Download, Reboot
+          [Step 6] Start UART console loop
+                     &#x2502;
+                     &#x25BC; (user action via web or UART)
+          Download firmware + matching drivers + WM bundle
+          Flash to ota_1 &#x2500;&#x25BA; Reboot into ThistleOS</div>
 
     <h2>Captive portal web UI</h2>
     <p>When Recovery OS starts its WiFi AP, any device that connects to <strong>ThistleOS-Recovery</strong> (open network, no password) is automatically redirected to the captive portal. The portal is a single self-contained HTML page served from flash — no SD card needed.</p>
 
-    <p>The portal provides three functions:</p>
+    <p>The portal provides a 3-step guided flow:</p>
     <ol>
-      <li><strong>WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP).</li>
-      <li><strong>Download &amp; Install</strong> — fetches the latest ThistleOS from the official catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>), streams it to flash, and reboots.</li>
-      <li><strong>Status / Reboot</strong> — shows current recovery state; reboots the device.</li>
+      <li><strong>Step 1 — WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP). Recovery shows detected hardware components on this screen.</li>
+      <li><strong>Step 2 — Download &amp; Install</strong> — fetches the firmware binary, matching drivers, and window manager from the official catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>), filtered to the detected chip architecture. Streams the bundle to flash and the SD card.</li>
+      <li><strong>Step 3 — Reboot</strong> — confirms installation; reboots the device into a fully provisioned ThistleOS.</li>
     </ol>
 
     <p>The portal design reuses the same link42 dark theme as these docs:</p>
@@ -163,7 +177,7 @@ Firmware installed! Rebooting...</code></pre>
     <h2>Building from source</h2>
     <p>The Recovery OS is a standard <code>esp-idf-svc</code> Rust project. You need:</p>
     <ul>
-      <li>Rust toolchain with the <code>xtensa-esp32s3-espidf</code> target</li>
+      <li>Rust toolchain with the <code>xtensa-esp32s3-espidf</code> target (and/or RISC-V target for C3/C6/H2)</li>
       <li><code>espup</code> (Espressif's Rust toolchain installer)</li>
     </ul>
 

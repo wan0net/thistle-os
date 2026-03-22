@@ -39,17 +39,12 @@ struct HalCryptoDriver {
     name: *const u8,
 }
 
-// HAL crypto driver access — not available in test builds
-#[cfg(not(test))]
-extern "C" {
-    fn hal_crypto_get() -> *const std::os::raw::c_void;
-}
-
+// HAL crypto driver access — delegates to Rust registry (not available in test builds)
 #[cfg(not(test))]
 unsafe fn get_hw_crypto() -> Option<&'static HalCryptoDriver> {
-    let crypto_ptr = hal_crypto_get();
+    let crypto_ptr = crate::hal_registry::registry().crypto;
     if crypto_ptr.is_null() { return None; }
-    Some(&*(crypto_ptr as *const HalCryptoDriver))
+    Some(&*crypto_ptr)
 }
 
 #[cfg(test)]

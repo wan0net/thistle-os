@@ -1,0 +1,47 @@
+{
+    "board": {
+        "name": "LilyGo T-Display-S3",
+        "arch": "esp32s3",
+        "board_id": "tdisplay-s3",
+        "version": "1.0"
+    },
+    "buses": {
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 18,
+                "scl": 17,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.lcd-st7789",
+            "hal": "display",
+            "entry": "lcd-st7789.drv.elf",
+            "config": {
+                "cs": 6,
+                "dc": 7,
+                "rst": 5,
+                "bl": 38,
+                "spi_bus": 0,
+                "width": 170,
+                "height": 320
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-cst816",
+            "hal": "input",
+            "entry": "touch-cst816.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x15",
+                "pin_int": 16,
+                "pin_rst": 21,
+                "max_x": 170,
+                "max_y": 320
+            }
+        }
+    ]
+}

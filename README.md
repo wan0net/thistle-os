@@ -20,13 +20,13 @@
 
 ---
 
-> **Alpha Software** — ThistleOS boots on the T-Deck Pro with a pure Rust UI (thistle-tk + embedded-graphics). E-paper display, keyboard, and touch all working. LVGL fallback available for LCD.
+> **Beta Software** — Rust migration complete. 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests), 14 Rust hardware drivers, multi-board support (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini), and multi-arch builds (ESP32, S2, S3, C3, C6, H2). Recovery auto-detects hardware via I2C/SPI/UART scanning.
 
 ## Why ThistleOS
 
 The ESP32 ecosystem is full of great hardware — T-Deck, T-Beam, M5Stack, Heltec, custom boards — but every project starts from scratch. Different pin assignments, different displays, different radios, all requiring custom firmware.
 
-ThistleOS separates the **kernel** from the **hardware**. The kernel runs the same on every ESP32-S3 device. Drivers are loaded at boot from the SD card. Apps are downloaded from an online store. Update your OS by dropping a file on the SD card or tapping "Update" in Settings.
+ThistleOS separates the **kernel** from the **hardware**. The kernel runs the same on every ESP32 device — ESP32, S2, S3, C3, C6, H2. Drivers are loaded at boot from the SD card. Apps are downloaded from an online store. Update your OS by dropping a file on the SD card or tapping "Update" in Settings.
 
 **The goal:** Flash ThistleOS once. The device figures out the rest.
 
@@ -47,15 +47,21 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 │         KERNEL (100% Rust, immutable)      │
 │  App Manager • IPC • Permissions • Events  │
 │  Signing • Manifest • Crypto • Syscall table│
+│  40+ modules • 26,000+ LOC • 489+ tests    │
 ├─────────────────────────────────────────────┤
 │         HAL (vtable interfaces)            │
 │  Display • Input • Radio • GPS • Audio     │
 │  Power • IMU • Storage • Network • Crypto  │
+│  RTC                                       │
 ├─────────────────────────────────────────────┤
 │         DRIVERS (.drv.elf from SPIFFS/SD)  │
-│  e-paper • LCD • SX1262 • TCA8418 ...     │
+│  14 Rust drivers: e-paper • LCD • OLED     │
+│  TCA8418 • CST328/816 • SX1262 • GPS       │
+│  IMU • Power • Audio • RTC • SD card       │
 ├─────────────────────────────────────────────┤
 │         ESP-IDF + FreeRTOS + Hardware      │
+│  ESP32 • ESP32-S2 • ESP32-S3 (Xtensa)     │
+│  ESP32-C3 • ESP32-C6 • ESP32-H2 (RISC-V) │
 └─────────────────────────────────────────────┘
 ```
 
@@ -99,16 +105,17 @@ static const hal_display_driver_t my_driver = {
 
 | Interface | What it abstracts | Example drivers |
 |-----------|------------------|-----------------|
-| `hal_display_driver_t` | Any screen | E-paper (GDEQ031T10), LCD (ST7789 via esp_lcd) |
-| `hal_input_driver_t` | Keyboards, touch, trackballs | TCA8418 I2C keypad, CST328 capacitive touch |
+| `hal_display_driver_t` | Any screen | E-paper (GDEQ031T10), LCD (ST7789), OLED (SSD1306) |
+| `hal_input_driver_t` | Keyboards, touch, trackballs | TCA8418 I2C keypad, CST328/CST816S capacitive touch |
 | `hal_radio_driver_t` | LoRa, Sub-GHz radios | SX1262 (RadioLib) |
 | `hal_gps_driver_t` | Position receivers | U-blox MIA-M10Q (NMEA) |
 | `hal_audio_driver_t` | DACs, speakers | PCM5102A (I2S) |
 | `hal_power_driver_t` | Battery, charging | TP4065B + ADC |
-| `hal_imu_driver_t` | Motion, environment | BHI260AP |
+| `hal_imu_driver_t` | Motion, environment | QMI8658C 6-axis IMU, BHI260AP sensor hub |
 | `hal_storage_driver_t` | SD cards, flash | SDSPI + FATFS |
 | `hal_net_driver_t` | Internet connectivity | WiFi, 4G PPP (esp_modem), simulator host |
 | `hal_crypto_driver_t` | Crypto acceleration | ESP32-S3 hardware AES/SHA, software fallback |
+| `hal_rtc_driver_t` | Real-time clock | PCF8563 RTC |
 
 ### Official FOSS upstream drivers
 
@@ -147,30 +154,42 @@ Every download is verified with SHA-256 hash integrity and cryptographic signatu
 
 Anyone can host their own catalog by pointing `appstore.json` at a different URL.
 
-## Currently Supported Hardware
+## Supported Devices
+
+See the full [Supported Devices](https://wan0net.github.io/esp32-os/docs/devices.html) page for component-level hardware details and driver tables.
+
+| Device | Chip | Display | Status |
+|--------|------|---------|--------|
+| LilyGo T-Deck Pro | ESP32-S3 | 3.1" GDEQ031T10 e-paper (240×320) | Primary target |
+| LilyGo T-Deck | ESP32-S3 | ST7789 LCD (320×240) | Supported |
+| LilyGo T-Display-S3 | ESP32-S3 | ST7789 LCD (170×320) | Supported |
+| LilyGo T3-S3 | ESP32-S3 | SSD1306 OLED (128×64) | Supported |
+| CYD ESP32-2432S028 | ESP32 | ILI9341 LCD (320×240) | Supported |
+| ESP32-C3 SuperMini | ESP32-C3 | SSD1306 OLED (128×64) | Supported |
+
+Multi-arch: ESP32 (Xtensa), ESP32-S2/S3 (Xtensa LX7), ESP32-C3/C6/H2 (RISC-V). One firmware binary per architecture. Hardware drivers auto-detected and downloaded by Recovery OS.
 
 ### LilyGo T-Deck Pro (primary target)
 
 | Component | Chip | Interface |
 |-----------|------|-----------|
 | MCU | ESP32-S3FN16R8 (dual-core 240MHz, 16MB flash, 8MB PSRAM) | — |
-| Display | 3.1" GDEQ031T10 e-paper (320×240) | SPI |
-| Touch | CST328 | I2C |
+| Display | 3.1" GDEQ031T10 e-paper (240×320) | SPI |
+| Touch | CST328 capacitive | I2C |
 | Keyboard | TCA8418 matrix scanner | I2C |
 | LoRa | SX1262 (868/915 MHz, +22 dBm) | SPI |
-| GPS | U-blox MIA-M10Q | UART |
+| GPS | U-blox MIA-M10Q GNSS | UART |
 | Audio | PCM5102A I2S DAC | I2S |
-| Battery | TP4065B charger + ADC | GPIO |
-| IMU | Bosch BHI260AP | I2C |
+| Battery | TP4065B charger + ADC | GPIO/ADC |
+| IMU | QMI8658C 6-axis + BHI260AP hub | I2C |
+| Light | LTR-553 ambient light sensor | I2C |
+| RTC | PCF8563 real-time clock | I2C |
 | Storage | MicroSD | SPI |
 | 4G (optional) | Simcom A7682E LTE Cat-1 | UART |
 | Connectivity | WiFi 4 + BLE 5.0 (on-chip) | — |
 
-### LilyGo T-Deck (LCD variant)
-Same as T-Deck Pro but with ST7789 320×240 TFT LCD instead of e-paper. Different board definition, same kernel.
-
 ### Adding your own board
-See [CLAUDE.md](CLAUDE.md) for the developer guide. The short version: create a `board_yourdevice/` component with pin definitions and register the appropriate drivers.
+See the [Board Support](https://wan0net.github.io/esp32-os/docs/board-support.html) docs. Create a `board.json` with pin assignments and a driver list — the kernel reads it at boot. No recompilation needed for new boards.
 
 ## Built-in Apps
 
@@ -298,16 +317,19 @@ The kernel contains a platform-independent crypto layer (`components/kernel_rs/s
 
 **eFuse burning is NEVER done by default.** It's an optional, irreversible step for production devices only. Software-only signing provides strong security without hardware lock-in.
 
-## Recovery OS (WIP)
+## Recovery OS
 
-A minimal Rust firmware for ota_0 that provides unbreakable recovery:
+A minimal Rust firmware for ota_0 that provides unbreakable recovery and hardware self-provisioning:
 
-1. Checks ota_1 → boots if valid
-2. Checks SD card → flashes firmware if found
-3. Starts WiFi hotspot → user connects phone → captive portal web UI
-4. Downloads firmware from app store → flashes → reboots
+1. Detects chip type (ESP32/S3/C3/etc.)
+2. Checks ota_1 → boots if valid
+3. Checks SD card → flashes firmware if found
+4. Enables power rails → scans I2C bus (0x08–0x77), probes SPI/UART devices
+5. Matches detected components to catalog — downloads matching drivers + firmware + WM
+6. Starts WiFi hotspot → user connects phone → 3-step captive portal web UI
+7. Reboots into a fully provisioned ThistleOS
 
-Written in Rust using `esp-idf-hal` + `esp-idf-svc`. Works on any ESP32-S3 — no board-specific drivers needed (WiFi is on-chip).
+Written in Rust using `esp-idf-hal` + `esp-idf-svc`. Works on any ESP32 variant — no board-specific drivers needed (WiFi is on-chip).
 
 ## Simulator
 
@@ -329,8 +351,19 @@ The simulator runs the **real kernel and app code** in an SDL2 window with:
 
 ### Prerequisites
 - [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/)
+- Rust toolchain with `xtensa-esp32s3-espidf` target (for Recovery OS): `cargo install espup && espup install`
 
 ### Build & Flash
+
+**Option A — Flash Recovery OS and let it self-provision:**
+```bash
+cd recovery
+cargo build --release
+espflash flash target/xtensa-esp32s3-espidf/release/thistleos-recovery
+# Connect to "ThistleOS-Recovery" WiFi → follow captive portal
+```
+
+**Option B — Build the full firmware directly:**
 ```bash
 git clone https://github.com/wan0net/thistle-os.git
 cd thistle-os
@@ -352,15 +385,14 @@ cmake .. && make -j8 && ./thistle_sim
 
 | Metric | Value |
 |--------|-------|
-| C source code | ~15,000 lines |
-| Rust kernel code | ~5,000 lines |
-| Source files | 160+ |
+| Rust kernel code | 26,000+ lines |
+| Kernel modules | 40+ |
+| Kernel tests | 489+ |
+| Rust drivers | 14 |
 | Built-in apps | 14 |
-| HAL drivers | 12 |
-| Board configs | 2 (T-Deck Pro, T-Deck) |
-| Unit tests | 80+ (C) + 66 (Rust) |
-| Firmware binary | ~1.6 MB |
-| Commits | 75+ |
+| HAL interfaces | 11 (display, input, radio, GPS, audio, power, IMU, storage, net, crypto, RTC) |
+| Supported boards | 6 (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini) |
+| Supported architectures | 6 (ESP32, S2, S3, C3, C6, H2) |
 | License | BSD 3-Clause |
 | Dependencies | All BSD/MIT/Apache-2.0 (no GPL) |
 
@@ -378,8 +410,11 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 
 ### Completed
 - [x] Ed25519 asymmetric signing (Monocypher)
-- [x] Recovery OS (Rust, compiles clean)
-- [x] 100% Rust kernel (20 modules, 66 tests)
+- [x] Recovery OS (Rust) with hardware auto-detection (I2C/SPI/UART scanning)
+- [x] 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests)
+- [x] 14 Rust hardware drivers
+- [x] Multi-board support (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini)
+- [x] Multi-arch builds (ESP32, S2, S3, C3, C6, H2)
 - [x] Unified manifest system for apps, drivers, firmware
 - [x] Boot-from-JSON (board.json driven hardware init)
 - [x] Display server with swappable window managers
@@ -387,27 +422,24 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 - [x] Expanded syscall table (45 ESP-IDF APIs for runtime drivers)
 - [x] Hardware bringup on T-Deck Pro (e-paper, keyboard, touch working)
 - [x] App loading infrastructure (SPIFFS + SD card scanner)
-- [x] Widget API syscall table (31 functions)
-- [x] Switch kernel from C to Rust implementations
+- [x] App store with ratings, categories, download counts
 - [x] thistle-tk: Pure Rust widget toolkit replacing LVGL for e-paper
 - [x] Rust launcher app running on thistle-tk WM
+- [x] RTC HAL interface (PCF8563)
+- [x] Component-level driver detection (not board-level)
 
 ### In Progress
 - [ ] Port remaining apps from C/LVGL to Rust/thistle-tk
 - [ ] Compile existing drivers as standalone .drv.elf files
 - [ ] Move built-in apps to .app.elf on SPIFFS
 - [ ] Wire display server into boot sequence
-- [ ] E-paper display rotation and LVGL rendering
 
 ### Planned
-- [ ] First-boot setup wizard (board detection, WM selection, WiFi)
-- [ ] LVGL window manager as loadable .wm.elf
 - [ ] Permission enforcement at syscall boundary
 - [ ] Claude API integration in AI assistant
-- [ ] Hardware auto-detection bootloader
-- [ ] More board support (T-Beam, M5Stack, Heltec)
 - [ ] WASM web simulator with terminal + app store
 - [ ] Async event dispatch and per-app IPC queues
+- [ ] More board support (T-Beam, M5Stack, Heltec)
 
 ## Dependencies
 

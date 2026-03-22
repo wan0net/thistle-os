@@ -6,11 +6,11 @@ edition = "2021"
 license = "BSD-3-Clause"
 
 [dependencies]
-esp-idf-hal = "0.45"
-esp-idf-svc = { version = "0.50", features = ["experimental"] }
-esp-idf-sys = { version = "0.36", features = ["binstart"] }
+esp-idf-hal = "0.46"
+esp-idf-svc = { version = "0.52", features = ["experimental"] }
+esp-idf-sys = { version = "0.37", features = ["binstart"] }
 log = "0.4"
-embedded-svc = "0.28"
+embedded-svc = "0.29"
 anyhow = "1"
 
 [build-dependencies]

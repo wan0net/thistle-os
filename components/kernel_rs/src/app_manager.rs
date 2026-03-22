@@ -1054,4 +1054,292 @@ mod tests {
             "get_state(999) must return UNLOADED for unknown handle"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // test_launch_invokes_on_create_and_on_start
+    // Mirrors test_app_manager.c: on_create and on_start are called on launch.
+    // -----------------------------------------------------------------------
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
+    static START_COUNT:  AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn on_create_track() -> i32 {
+        CREATE_COUNT.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+    unsafe extern "C" fn on_start_track() {
+        START_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_launch_invokes_on_create_and_on_start() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+        CREATE_COUNT.store(0, Ordering::SeqCst);
+        START_COUNT.store(0, Ordering::SeqCst);
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.lifecycle\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = CAppEntry {
+            on_create:  Some(on_create_track),
+            on_start:   Some(on_start_track),
+            on_pause:   None,
+            on_resume:  None,
+            on_destroy: None,
+            manifest:   &manifest as *const CAppManifest,
+        };
+
+        unsafe { register(&entry as *const CAppEntry) };
+        let rc = launch("app.lifecycle");
+        assert_eq!(rc, ESP_OK, "launch must return ESP_OK");
+        assert_eq!(CREATE_COUNT.load(Ordering::SeqCst), 1, "on_create must be called once");
+        assert_eq!(START_COUNT.load(Ordering::SeqCst),  1, "on_start must be called once");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_foreground_after_launch
+    // Mirrors test_app_manager.c: get_foreground returns the launched handle.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_foreground_after_launch() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.fg_check\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = make_test_entry(&manifest as *const CAppManifest);
+
+        unsafe { register(&entry as *const CAppEntry) };
+
+        // Capture the assigned handle
+        let handle = APP_MANAGER.lock().unwrap().slots[0].handle;
+
+        launch("app.fg_check");
+
+        let fg = get_foreground();
+        assert_eq!(fg, handle, "get_foreground must return the handle of the launched app");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_launch_sets_running_state
+    // Mirrors test_app_manager.c: app is RUNNING after launch.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_launch_sets_running_state() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.run_state\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = make_test_entry(&manifest as *const CAppManifest);
+
+        unsafe { register(&entry as *const CAppEntry) };
+        let handle = APP_MANAGER.lock().unwrap().slots[0].handle;
+
+        launch("app.run_state");
+
+        assert_eq!(
+            get_state(handle),
+            AppState::Running as u32,
+            "app must be in RUNNING state after launch"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_suspend_calls_on_pause_and_sets_suspended
+    // Mirrors test_app_manager.c: suspend() transitions to SUSPENDED.
+    // -----------------------------------------------------------------------
+
+    static PAUSE_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn on_pause_track() {
+        PAUSE_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_suspend_calls_on_pause_and_sets_suspended() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+        PAUSE_COUNT.store(0, Ordering::SeqCst);
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.suspend\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = CAppEntry {
+            on_create:  None,
+            on_start:   None,
+            on_pause:   Some(on_pause_track),
+            on_resume:  None,
+            on_destroy: None,
+            manifest:   &manifest as *const CAppManifest,
+        };
+
+        unsafe { register(&entry as *const CAppEntry) };
+        let handle = APP_MANAGER.lock().unwrap().slots[0].handle;
+
+        launch("app.suspend");
+        assert_eq!(get_state(handle), AppState::Running as u32, "must be RUNNING before suspend");
+
+        let rc = suspend(handle);
+        assert_eq!(rc, ESP_OK, "suspend must return ESP_OK");
+        assert_eq!(PAUSE_COUNT.load(Ordering::SeqCst), 1, "on_pause must be called once");
+        assert_eq!(
+            get_state(handle),
+            AppState::Suspended as u32,
+            "app must be SUSPENDED after suspend"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_kill_calls_on_destroy_and_sets_unloaded
+    // Mirrors test_app_manager.c: kill() calls on_destroy and frees the slot.
+    // -----------------------------------------------------------------------
+
+    static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn on_destroy_track() {
+        DESTROY_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_kill_calls_on_destroy_and_sets_unloaded() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+        DESTROY_COUNT.store(0, Ordering::SeqCst);
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.kill\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = CAppEntry {
+            on_create:  None,
+            on_start:   None,
+            on_pause:   None,
+            on_resume:  None,
+            on_destroy: Some(on_destroy_track),
+            manifest:   &manifest as *const CAppManifest,
+        };
+
+        unsafe { register(&entry as *const CAppEntry) };
+        let handle = APP_MANAGER.lock().unwrap().slots[0].handle;
+
+        launch("app.kill");
+
+        let rc = kill(handle);
+        assert_eq!(rc, ESP_OK, "kill must return ESP_OK");
+        assert_eq!(DESTROY_COUNT.load(Ordering::SeqCst), 1, "on_destroy must be called once");
+        assert_eq!(
+            get_state(handle),
+            AppState::Unloaded as u32,
+            "app must be UNLOADED after kill"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_launch_nonexistent_fails
+    // Mirrors test_app_manager.c: launching an unregistered app returns NOT_FOUND.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_launch_nonexistent_fails() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let rc = launch("app.does_not_exist");
+        assert_eq!(
+            rc, ESP_ERR_NOT_FOUND,
+            "launch of unregistered app must return ESP_ERR_NOT_FOUND"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_double_register_is_idempotent
+    // Mirrors test_app_manager.c: registering the same app ID twice succeeds
+    // but does not increase slot_count.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_double_register_is_idempotent() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let id = std::ffi::CStr::from_bytes_with_nul(b"app.dup\0").unwrap();
+        let manifest = make_test_manifest(id);
+        let entry = make_test_entry(&manifest as *const CAppManifest);
+
+        let rc1 = unsafe { register(&entry as *const CAppEntry) };
+        assert_eq!(rc1, ESP_OK, "first registration must succeed");
+
+        let count_after_first = APP_MANAGER.lock().unwrap().slot_count;
+
+        let rc2 = unsafe { register(&entry as *const CAppEntry) };
+        assert_eq!(rc2, ESP_OK, "duplicate registration must succeed (idempotent)");
+
+        let count_after_second = APP_MANAGER.lock().unwrap().slot_count;
+        assert_eq!(
+            count_after_first, count_after_second,
+            "slot_count must not increase on duplicate registration"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_list_apps_count
+    // Mirrors test_app_manager.c: list_apps returns the correct number of apps.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_list_apps_count() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        assert_eq!(list_apps().len(), 0, "list_apps must be empty after reset");
+
+        let id1 = std::ffi::CStr::from_bytes_with_nul(b"app.list1\0").unwrap();
+        let id2 = std::ffi::CStr::from_bytes_with_nul(b"app.list2\0").unwrap();
+        let m1 = make_test_manifest(id1);
+        let m2 = make_test_manifest(id2);
+        let e1 = make_test_entry(&m1 as *const CAppManifest);
+        let e2 = make_test_entry(&m2 as *const CAppManifest);
+
+        unsafe { register(&e1 as *const CAppEntry) };
+        assert_eq!(list_apps().len(), 1, "list_apps must have 1 entry after one registration");
+
+        unsafe { register(&e2 as *const CAppEntry) };
+        assert_eq!(list_apps().len(), 2, "list_apps must have 2 entries after two registrations");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_suspend_invalid_handle
+    // Mirrors test_app_manager.c: suspend on an unknown handle returns NOT_FOUND.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_suspend_invalid_handle() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let rc = suspend(9999);
+        assert_eq!(
+            rc, ESP_ERR_NOT_FOUND,
+            "suspend on invalid handle must return ESP_ERR_NOT_FOUND"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_kill_invalid_handle
+    // Mirrors test_app_manager.c: kill on an unknown handle returns NOT_FOUND.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_kill_invalid_handle() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_manager();
+
+        let rc = kill(9999);
+        assert_eq!(
+            rc, ESP_ERR_NOT_FOUND,
+            "kill on invalid handle must return ESP_ERR_NOT_FOUND"
+        );
+    }
 }

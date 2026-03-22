@@ -28,6 +28,7 @@
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
         <a href="board-support.html">Board Support</a>
+        <a href="devices.html">Supported Devices</a>
 
         <div class="nav-label">System</div>
         <a href="app-store.html">App Store</a>
@@ -41,7 +42,7 @@
   <main class="main-content">
     <div class="page-header">
       <h1>ThistleOS</h1>
-      <p class="lead">An open-source operating system for ESP32-S3 devices. Dynamic app loading, swappable hardware drivers, LVGL UI, and LoRa mesh networking — all on a microcontroller.</p>
+      <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 14 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6, H2 (RISC-V).</p>
       <a href="https://github.com/wan0net/esp32-os" class="edit-link">
         &#9998; Edit on GitHub
       </a>
@@ -54,18 +55,19 @@
 
     <div class="callout info">
       <div class="callout-title">Status</div>
-      ThistleOS v0.1.0 is in active development. 100% Rust kernel, Ed25519 signing, swappable window managers, and a browser simulator.
+      ThistleOS Rust migration complete. 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests), 14 Rust hardware drivers, 6 supported boards, multi-arch ESP32 support, and hardware auto-detection in the Recovery OS.
     </div>
 
     <h2>What is ThistleOS?</h2>
-    <p>ThistleOS is a micro operating system for the ESP32-S3, initially targeting the LilyGo T-Deck Pro. It brings concepts from mainstream operating systems — loadable apps, a hardware abstraction layer, app permissions, and an app store — down to a device with 512 KB of internal SRAM and 8 MB of PSRAM.</p>
+    <p>ThistleOS is a micro operating system for the ESP32 chip family, initially targeting the LilyGo T-Deck Pro. It brings concepts from mainstream operating systems — loadable apps, a hardware abstraction layer, app permissions, and an app store — down to a device with 512 KB of internal SRAM and 8 MB of PSRAM.</p>
 
     <p>Key design decisions:</p>
     <ul>
-      <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel.</li>
+      <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel. 14 drivers written in Rust.</li>
       <li><strong>Apps are ELF files on an SD card.</strong> The kernel's ELF loader resolves symbols against a syscall table at runtime. No recompilation of the OS needed to install an app.</li>
       <li><strong>BSD 3-Clause throughout.</strong> No GPL components in the ThistleOS core; swap to any commercial use case without license headaches.</li>
-      <li><strong>Recovery OS is Rust.</strong> A separate, minimal firmware in <code>ota_0</code> that can reflash the main OS without a programmer.</li>
+      <li><strong>Recovery OS auto-detects hardware.</strong> A separate, minimal Rust firmware in <code>ota_0</code> scans I2C/SPI/UART buses, identifies connected components, and downloads the matching drivers and firmware over WiFi.</li>
+      <li><strong>Multi-arch.</strong> One kernel codebase targets Xtensa (ESP32, S2, S3) and RISC-V (C3, C6, H2). Board configs in JSON — no recompilation for new boards.</li>
     </ul>
 
     <h2>Quick Start</h2>
@@ -110,6 +112,11 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
         <div class="card-title">Board Support</div>
         <div class="card-desc">Adding new hardware: pin assignments, board component, driver registration.</div>
       </a>
+      <a href="devices.html" class="card">
+        <div class="card-icon">&#128187;</div>
+        <div class="card-title">Supported Devices</div>
+        <div class="card-desc">All 6 supported boards, chip support table, 14 Rust driver details, hardware detection flow.</div>
+      </a>
       <a href="security.html" class="card">
         <div class="card-icon">&#128274;</div>
         <div class="card-title">Security</div>
@@ -143,20 +150,9 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
       </table>
     </div>
 
-    <h2>Hardware: LilyGo T-Deck Pro</h2>
-    <p>The primary supported board is the <strong>LilyGo T-Deck Pro</strong>, an ESP32-S3 device with:</p>
-    <ul>
-      <li>3.1" e-paper display (GDEQ031T10, 300×168, partial refresh)</li>
-      <li>Physical QWERTY keyboard (TCA8418 key matrix)</li>
-      <li>Capacitive touch (CST328)</li>
-      <li>SX1262 LoRa radio (915 MHz / 868 MHz)</li>
-      <li>u-blox MIA-M10Q GPS</li>
-      <li>PCM5102A audio DAC</li>
-      <li>BHI260AP IMU</li>
-      <li>4G LTE modem (A7682E, optional)</li>
-      <li>microSD card slot</li>
-    </ul>
-    <p>See <a href="board-support.html">Board Support</a> for how to port ThistleOS to other ESP32-S3 boards.</p>
+    <h2>Supported Hardware</h2>
+    <p>ThistleOS runs on 6 boards across the ESP32 family. The primary board is the <strong>LilyGo T-Deck Pro</strong> (ESP32-S3, 3.1" e-paper, QWERTY keyboard, LoRa, GPS, IMU, RTC). Other supported boards include the T-Deck (LCD), T-Display-S3, T3-S3 (LoRa), CYD (ESP32), and ESP32-C3 SuperMini.</p>
+    <p>See <a href="devices.html">Supported Devices</a> for the full hardware breakdown and driver table. See <a href="board-support.html">Board Support</a> for how to add your own board.</p>
 
     <h2>License</h2>
     <p>ThistleOS is released under the <strong>BSD 3-Clause License</strong>. All source files in <code>components/</code>, <code>app_sdk/</code>, and <code>recovery/</code> carry the SPDX identifier <code>BSD-3-Clause</code>. Third-party managed components (LVGL, RadioLib, esp-modem) retain their own licenses.</p>

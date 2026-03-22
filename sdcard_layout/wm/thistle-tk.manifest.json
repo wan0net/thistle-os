@@ -1,0 +1,12 @@
+{
+    "type": "wm",
+    "id": "com.thistle.wm.thistle-tk",
+    "name": "thistle-tk",
+    "version": "0.1.0",
+    "author": "ThistleOS Contributors",
+    "description": "Pure Rust window manager for e-paper displays",
+    "min_os": "0.1.0",
+    "arch": "esp32s3",
+    "entry": "thistle-tk.wm.elf",
+    "compatible_boards": ["tdeck-pro"]
+}

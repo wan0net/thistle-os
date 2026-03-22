@@ -42,6 +42,13 @@ const ESP_LOG_ERROR: i32 = 1;
 // ESP-IDF OTA FFI (hardware only)
 // ---------------------------------------------------------------------------
 
+/// ESP_OTA_IMG_PENDING_VERIFY state value from esp_ota_ops.h
+///
+/// Replaces the C `esp_ota_img_pending_verify()` helper shim in kernel_shims.c.
+/// The constant value 0x107 matches ESP_OTA_IMG_PENDING_VERIFY in ESP-IDF v5.x.
+#[cfg(target_os = "espidf")]
+const ESP_OTA_IMG_PENDING_VERIFY: u32 = 0x107;
+
 #[cfg(target_os = "espidf")]
 extern "C" {
     fn esp_ota_get_running_partition() -> *const c_void;
@@ -55,9 +62,6 @@ extern "C" {
     fn esp_ota_abort(handle: u32) -> i32;
     fn esp_ota_set_boot_partition(partition: *const c_void) -> i32;
     fn esp_restart() -> !;
-
-    /// OTA pending verify state constant
-    fn esp_ota_img_pending_verify() -> u32;
 }
 
 // Progress callback type — matches C typedef `void (*ota_progress_cb_t)(uint32_t written, uint32_t total, void *user_data)`
@@ -87,10 +91,8 @@ pub extern "C" fn ota_init() -> i32 {
         }
 
         let mut state: u32 = 0;
-        const ESP_OTA_IMG_PENDING_VERIFY: u32 = 0x0; // actual value from esp_ota_ops.h
         if esp_ota_get_state_partition(running, &mut state) == ESP_OK {
-            // ESP_OTA_IMG_PENDING_VERIFY = 0x107 in IDF, but we check the opaque value
-            if state == esp_ota_img_pending_verify() {
+            if state == ESP_OTA_IMG_PENDING_VERIFY {
                 esp_log_write(
                     ESP_LOG_INFO,
                     TAG.as_ptr(),
@@ -348,4 +350,98 @@ pub extern "C" fn ota_rollback() -> i32 {
     }
     #[cfg(not(target_os = "espidf"))]
     ESP_ERR_NOT_SUPPORTED
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+//
+// Only functions that are safe on aarch64-apple-darwin (no esp_log_write,
+// no flash access) are tested here:
+//   ota_get_current_version() — returns a static string
+//   ota_sd_update_available()  — calls std::fs::metadata (safe on host)
+//   ota_mark_valid()           — returns ESP_OK on non-espidf
+//   ota_get_running_partition() — returns "unknown" on non-espidf
+//   ota_rollback()             — returns ESP_ERR_NOT_SUPPORTED on non-espidf
+//
+// ota_init() and ota_apply_from_sd() are NOT tested: they call esp_log_write.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    // -----------------------------------------------------------------------
+    // test_get_current_version_non_null
+    // Mirrors test_ota.c: ota_get_current_version() must return a non-null pointer.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_current_version_non_null() {
+        let ptr = ota_get_current_version();
+        assert!(!ptr.is_null(), "ota_get_current_version() must not return NULL");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_current_version_matches_expected
+    // Mirrors test_ota.c: version string must match THISTLE_VERSION_STRING ("0.1.0").
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_current_version_matches_expected() {
+        let ptr = ota_get_current_version();
+        let version = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(version, "0.1.0", "OTA version must be \"0.1.0\"");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_sd_update_available_false_when_no_card
+    // Mirrors test_ota.c: without an SD card the update file does not exist.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_sd_update_available_false_when_no_card() {
+        // In the test environment there is no SD card, so the update path
+        // /sdcard/update/thistle_os.bin does not exist.
+        let available = ota_sd_update_available();
+        assert!(!available, "ota_sd_update_available() must return false when no SD card");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_mark_valid_returns_ok_on_host
+    // ota_mark_valid() is a no-op stub on non-espidf; must return ESP_OK.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mark_valid_returns_ok_on_host() {
+        let rc = ota_mark_valid();
+        assert_eq!(rc, ESP_OK, "ota_mark_valid() must return ESP_OK on host");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_get_running_partition_non_null
+    // ota_get_running_partition() returns "unknown" on host builds.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_running_partition_non_null() {
+        let ptr = ota_get_running_partition();
+        assert!(!ptr.is_null(), "ota_get_running_partition() must not return NULL");
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "unknown", "partition must be \"unknown\" on host builds");
+    }
+
+    // -----------------------------------------------------------------------
+    // test_rollback_not_supported_on_host
+    // ota_rollback() returns ESP_ERR_NOT_SUPPORTED on non-espidf.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_rollback_not_supported_on_host() {
+        let rc = ota_rollback();
+        assert_eq!(
+            rc, ESP_ERR_NOT_SUPPORTED,
+            "ota_rollback() must return ESP_ERR_NOT_SUPPORTED on host"
+        );
+    }
 }

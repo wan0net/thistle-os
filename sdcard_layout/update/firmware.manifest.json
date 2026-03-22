@@ -7,5 +7,6 @@
     "description": "ThistleOS firmware for ESP32-S3 devices",
     "arch": "esp32s3",
     "entry": "thistle_os.bin",
-    "changelog": "Initial release with 14 built-in apps, Ed25519 signing, multi-board support"
+    "changelog": "Initial release with 14 built-in apps, Ed25519 signing, multi-board support",
+    "compatible_boards": ["tdeck-pro", "tdeck"]
 }

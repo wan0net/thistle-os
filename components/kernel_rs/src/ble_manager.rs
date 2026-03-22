@@ -46,30 +46,19 @@ const ESP_LOG_ERROR: i32 = 1;
 // NimBLE FFI (hardware only)
 // ---------------------------------------------------------------------------
 
-// NimBLE shim wrappers (in kernel_shims.c) — avoids direct NimBLE link dependency
+// Direct NimBLE FFI — replaces ble_shim_* wrappers formerly in kernel_shims.c
 #[cfg(target_os = "espidf")]
 extern "C" {
-    #[link_name = "ble_shim_nimble_port_init"]
     fn nimble_port_init() -> i32;
-    #[link_name = "ble_shim_nimble_port_freertos_init"]
     fn nimble_port_freertos_init(task_fn: *const c_void);
-    #[link_name = "ble_shim_nimble_port_run"]
     fn nimble_port_run();
-    #[link_name = "ble_shim_nimble_port_freertos_deinit"]
     fn nimble_port_freertos_deinit();
-    #[link_name = "ble_shim_svc_gap_init"]
     fn ble_svc_gap_init();
-    #[link_name = "ble_shim_svc_gatt_init"]
     fn ble_svc_gatt_init();
-    #[link_name = "ble_shim_svc_gap_device_name_set"]
     fn ble_svc_gap_device_name_set(name: *const c_char) -> i32;
-    #[link_name = "ble_shim_gap_adv_stop"]
     fn ble_gap_adv_stop() -> i32;
-    #[link_name = "ble_shim_gap_terminate"]
     fn ble_gap_terminate(conn_handle: u16, hci_reason: u8) -> i32;
-    #[link_name = "ble_shim_gatts_notify_custom"]
     fn ble_gatts_notify_custom(conn_handle: u16, attr_handle: u16, om: *mut c_void) -> i32;
-    #[link_name = "ble_shim_hs_mbuf_from_flat"]
     fn ble_hs_mbuf_from_flat(buf: *const u8, len: u16) -> *mut c_void;
 }
 
