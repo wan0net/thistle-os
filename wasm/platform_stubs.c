@@ -109,37 +109,22 @@ void esp_elf_deinit(void *elf) { (void)elf; }
 void elf_set_symbol_resolver(void *resolver) { (void)resolver; }
 
 /* ── Logging ───────────────────────────────────────────────────────── */
+/* esp_log_write provided by Rust kernel (hal_registry.rs) on non-test builds.
+ * WASM needs a C stub because the Rust version uses variadic FFI. */
 void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)level;(void)tag;(void)fmt; }
 
-/* ── HAL crypto accessor (no hardware in WASM) ─────────────────────── */
-const void *hal_crypto_get(void) { return 0; }
+/* ── Functions moved to Rust (kernel_rs) ──────────────────────────── */
+/* The following are now implemented in Rust modules and linked from
+ * libthistle_kernel.a. Do NOT re-declare here:
+ *   hal_crypto_get, hal_display_get_width/height_helper,
+ *   libc_malloc/free/realloc, thistle_fs_*_impl,
+ *   thistle_input/radio/gps/power_*_impl,
+ *   nvs_flash_init_safe, spiffs_mount,
+ *   hal_*_register, hal_get_registry, hal_bus_*,
+ *   hal_registry_start_all, hal_registry_stop_all
+ */
 
-/* ── HAL helpers ───────────────────────────────────────────────────── */
-unsigned short hal_display_get_width_helper(void) { return 320; }
-unsigned short hal_display_get_height_helper(void) { return 240; }
-/* hal_registry_start_all/stop_all — now in hal_registry.c */
-/* board_init provided by board_simulator.c */
-
-/* ── C stdlib wrappers ─────────────────────────────────────────────── */
-void *libc_malloc(unsigned int sz) { return malloc(sz); }
-void libc_free(void *p) { free(p); }
-void *libc_realloc(void *p, unsigned int sz) { return realloc(p, sz); }
-void *thistle_fs_open_impl(const char *p, const char *m) { return fopen(p, m); }
-int thistle_fs_read_impl(void *f, void *b, unsigned int s) { return (int)fread(b, 1, s, f); }
-int thistle_fs_write_impl(void *f, const void *b, unsigned int s) { return (int)fwrite(b, 1, s, f); }
-int thistle_fs_close_impl(void *f) { return fclose(f); }
-
-/* ── HAL syscall stubs ─────────────────────────────────────────────── */
-void thistle_input_register_cb_impl(void *cb, void *ud) { (void)cb;(void)ud; }
-int thistle_radio_send_impl(const void *d, unsigned int l) { (void)d;(void)l; return -1; }
-int thistle_radio_start_rx_impl(void) { return -1; }
-int thistle_radio_set_freq_impl(float f) { (void)f; return -1; }
-int thistle_gps_get_position_impl(void *p) { (void)p; return -1; }
-int thistle_gps_enable_impl(int e) { (void)e; return -1; }
-int thistle_power_get_battery_mv_impl(void) { return 3700; }
-int thistle_power_get_battery_pct_impl(void) { return 75; }
-
-/* ── HTTP client stubs ─────────────────────────────────────────────── */
+/* ── HTTP client stubs (no real HTTP in WASM yet) ──────────────────── */
 void *esp_http_client_init(const void *config) { (void)config; return NULL; }
 int esp_http_client_perform(void *c) { (void)c; return -1; }
 int esp_http_client_open(void *c, int l) { (void)c;(void)l; return -1; }
@@ -148,10 +133,6 @@ int esp_http_client_read(void *c, void *b, int l) { (void)c;(void)b;(void)l; ret
 int esp_http_client_get_status_code(void *c) { (void)c; return 0; }
 int esp_http_client_close(void *c) { (void)c; return 0; }
 int esp_http_client_cleanup(void *c) { (void)c; return 0; }
-
-/* ── NVS / SPIFFS stubs (WASM has no flash storage) ──────────────── */
-int nvs_flash_init_safe(void) { return 0; }
-int spiffs_mount(void) { return 0; }
 
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }

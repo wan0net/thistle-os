@@ -19,8 +19,8 @@ file(GLOB_RECURSE LVGL_SRCS
 # ThistleOS source files (kernel, UI, HAL, apps)
 set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
-    # HAL (C — vtable interfaces, stays C)
-    ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
+    # HAL (registry moved to Rust — hal_registry.rs in kernel_rs)
+    ${THISTLE_DIR}/components/thistle_hal/src/stub.c
     # Widget API dispatch (Rust widget.rs → WM vtable bridge)
     ${THISTLE_DIR}/components/ui/src/widget_shims.c
     # thistle-tk WM C vtable + HAL bridge
