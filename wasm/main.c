@@ -65,7 +65,7 @@ int main(void)
     printf("display_server_init: %d\n", ret);
 
     /* Register LVGL window manager */
-    ret = display_server_register_wm(lvgl_wm_get());
+    ret = display_server_register_wm(lvgl_lcd_wm_get());
     printf("display_server_register_wm: %d\n", ret);
 
     /* Register built-in apps */

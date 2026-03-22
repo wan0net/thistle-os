@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
@@ -27,6 +28,10 @@ static const char *TAG = "ui_mgr";
 
 /* Timestamp (microseconds) of the most recent flush callback. */
 static int64_t s_last_flush_time = 0;
+
+/* Whether to run deferred e-paper refresh in the LVGL task.
+ * Set during ui_manager_init() based on the WM variant. */
+static bool s_use_deferred_refresh = false;
 
 /* Draw buffer — placed in PSRAM to save ~76KB of internal DRAM.
  * Double-buffer: allocate two halves so LVGL can render while we flush. */
@@ -119,9 +124,72 @@ static void ui_kbd_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 }
 
 /* -------------------------------------------------------------------------
- * LVGL flush callback — forwards pixel data to HAL display driver
+ * LVGL flush callbacks — separate variants for e-paper and LCD
  * ------------------------------------------------------------------------- */
-static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
+
+void ui_flush_cb_epaper(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    /* Debug: count non-zero pixels in the RGB565 data */
+    {
+        const uint16_t *dbg = (const uint16_t *)px_map;
+        uint32_t pc = (uint32_t)(area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1);
+        uint32_t nz = 0;
+        for (uint32_t i = 0; i < pc; i++) if (dbg[i] != 0xFFFF) nz++;
+        ESP_LOGI(TAG, "epaper flush: (%d,%d)-(%d,%d) non_white=%lu/%lu",
+                 area->x1, area->y1, area->x2, area->y2, (unsigned long)nz, (unsigned long)pc);
+    }
+
+    if (reg && reg->display && reg->display->flush) {
+        hal_area_t hal_area = {
+            .x1 = (uint16_t)area->x1,
+            .y1 = (uint16_t)area->y1,
+            .x2 = (uint16_t)area->x2,
+            .y2 = (uint16_t)area->y2,
+        };
+
+        /* E-paper displays need 1-bit data, LVGL outputs RGB565. Convert. */
+        uint16_t w = hal_area.x2 - hal_area.x1 + 1;
+        uint16_t h = hal_area.y2 - hal_area.y1 + 1;
+        uint32_t pixel_count = (uint32_t)w * h;
+        uint32_t mono_bytes = (pixel_count + 7) / 8;
+        uint8_t *mono_buf = (uint8_t *)malloc(mono_bytes);
+        esp_err_t err;
+        if (mono_buf) {
+            memset(mono_buf, 0, mono_bytes);
+            const uint16_t *rgb565 = (const uint16_t *)px_map;
+            for (uint32_t i = 0; i < pixel_count; i++) {
+                uint16_t c = rgb565[i];
+                /* Luminance threshold: white if bright enough */
+                uint8_t r5 = (c >> 11) & 0x1F;
+                uint8_t g6 = (c >> 5) & 0x3F;
+                uint8_t b5 = c & 0x1F;
+                /* Weighted luminance (BT.601): 0.299R + 0.587G + 0.114B */
+                uint16_t lum = r5 * 77 + g6 * 150 + b5 * 29;  /* max ~8160 */
+                if (lum > 4080) {  /* ~50% threshold */
+                    mono_buf[i / 8] |= (0x80 >> (i & 7));  /* white */
+                }
+            }
+            err = reg->display->flush(&hal_area, mono_buf);
+            free(mono_buf);
+        } else {
+            err = ESP_ERR_NO_MEM;
+        }
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "HAL flush failed: %s", esp_err_to_name(err));
+        }
+
+        /* Track dirty region for e-paper batching */
+        epaper_refresh_mark_dirty(hal_area.x1, hal_area.y1, hal_area.x2, hal_area.y2);
+
+        /* Record timestamp so the render loop can debounce the panel refresh */
+        s_last_flush_time = esp_timer_get_time();
+    }
+
+    lv_display_flush_ready(disp);
+}
+
+void ui_flush_cb_lcd(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     const hal_registry_t *reg = hal_get_registry();
 
@@ -133,46 +201,10 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
             .y2 = (uint16_t)area->y2,
         };
 
-        /* E-paper displays need 1-bit data, LVGL outputs RGB565. Convert. */
-        esp_err_t err;
-        if (reg->display->type == HAL_DISPLAY_TYPE_EPAPER) {
-            uint16_t w = hal_area.x2 - hal_area.x1 + 1;
-            uint16_t h = hal_area.y2 - hal_area.y1 + 1;
-            uint32_t pixel_count = (uint32_t)w * h;
-            uint32_t mono_bytes = (pixel_count + 7) / 8;
-            uint8_t *mono_buf = (uint8_t *)malloc(mono_bytes);
-            if (mono_buf) {
-                memset(mono_buf, 0, mono_bytes);
-                const uint16_t *rgb565 = (const uint16_t *)px_map;
-                for (uint32_t i = 0; i < pixel_count; i++) {
-                    uint16_t c = rgb565[i];
-                    /* Luminance threshold: white if bright enough */
-                    uint8_t r5 = (c >> 11) & 0x1F;
-                    uint8_t g6 = (c >> 5) & 0x3F;
-                    uint8_t b5 = c & 0x1F;
-                    /* Weighted luminance (BT.601): 0.299R + 0.587G + 0.114B */
-                    uint16_t lum = r5 * 77 + g6 * 150 + b5 * 29;  /* max ~8160 */
-                    if (lum > 4080) {  /* ~50% threshold */
-                        mono_buf[i / 8] |= (0x80 >> (i & 7));  /* white */
-                    }
-                }
-                err = reg->display->flush(&hal_area, mono_buf);
-                free(mono_buf);
-            } else {
-                err = ESP_ERR_NO_MEM;
-            }
-        } else {
-            err = reg->display->flush(&hal_area, px_map);
-        }
+        esp_err_t err = reg->display->flush(&hal_area, px_map);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "HAL flush failed: %s", esp_err_to_name(err));
         }
-
-        /* Track dirty region for e-paper batching */
-        epaper_refresh_mark_dirty(hal_area.x1, hal_area.y1, hal_area.x2, hal_area.y2);
-
-        /* Record timestamp so the render loop can debounce the panel refresh */
-        s_last_flush_time = esp_timer_get_time();
     }
 
     lv_display_flush_ready(disp);
@@ -211,9 +243,11 @@ static void lvgl_task(void *arg)
 
         /* ── Debounced e-paper panel refresh ──
          * After LVGL flushes stop arriving (UI settled for 300 ms), commit
-         * the in-memory framebuffer to the physical e-paper panel once. */
-        if (reg && reg->display &&
-            reg->display->refresh &&   /* deferred-refresh display (e-paper, etc.) */
+         * the in-memory framebuffer to the physical e-paper panel once.
+         * Only runs when the WM requested deferred refresh mode. */
+        if (s_use_deferred_refresh &&
+            reg && reg->display &&
+            reg->display->refresh &&
             epaper_refresh_is_dirty() &&
             s_last_flush_time > 0)
         {
@@ -238,9 +272,10 @@ static void lvgl_task(void *arg)
  * Public API
  * ------------------------------------------------------------------------- */
 
-esp_err_t ui_manager_init(void)
+esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
 {
-    ESP_LOGI(TAG, "initializing UI manager");
+    ESP_LOGI(TAG, "initializing UI manager (deferred_refresh=%d)", use_deferred_refresh);
+    s_use_deferred_refresh = use_deferred_refresh;
 
     /* 1. Initialize LVGL */
     lv_init();
@@ -258,8 +293,8 @@ esp_err_t ui_manager_init(void)
                            sizeof(s_draw_buf1),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    /* 4. Set flush callback */
-    lv_display_set_flush_cb(s_display, ui_flush_cb);
+    /* 4. Set flush callback (provided by the WM variant) */
+    lv_display_set_flush_cb(s_display, flush_cb);
 
     /* 4a. Register LVGL pointer input device (touch / mouse) */
     s_touch_indev = lv_indev_create();
@@ -359,12 +394,8 @@ esp_err_t ui_manager_init(void)
 
     ESP_LOGI(TAG, "UI manager ready (%dx%d)", DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
-    /* 11. Splash screen — disabled for now. On e-paper, every refresh is
-     *     expensive and the splash causes ghosting. Re-enable when we have
-     *     separate WMs for e-paper vs LCD. */
-    /* ui_manager_show_splash(2000); */
-
-    /* NOTE: LVGL render task is NOT started here — call ui_manager_start()
+    /* NOTE: Splash screen is now the responsibility of the LCD WM variant.
+     * LVGL render task is NOT started here — call ui_manager_start()
      * after all LVGL objects (apps, launcher) are fully created. */
     return ESP_OK;
 }

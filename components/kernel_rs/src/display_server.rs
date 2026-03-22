@@ -376,6 +376,19 @@ pub unsafe extern "C" fn display_server_surface_input_cb(
     ESP_ERR_NOT_FOUND
 }
 
+/// Return the raw WM vtable pointer so C widget_shims.c can call widget functions.
+#[no_mangle]
+pub extern "C" fn display_server_get_active_wm() -> *const c_void {
+    let lock = match DS.lock() {
+        Ok(l) => l,
+        Err(_) => return std::ptr::null(),
+    };
+    match lock.as_ref().and_then(|ds| ds.wm) {
+        Some(wm) => wm as *const _ as *const c_void,
+        None => std::ptr::null(),
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn display_server_tick() {
     let lock = match DS.lock() {

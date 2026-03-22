@@ -21,6 +21,8 @@ set(THISTLE_SRCS
     # UI (C — stays C, this is the LVGL WM)
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c
+    ${THISTLE_DIR}/components/ui/src/lvgl_wm_epaper.c
+    ${THISTLE_DIR}/components/ui/src/lvgl_wm_lcd.c
     ${THISTLE_DIR}/components/ui/src/theme.c
     ${THISTLE_DIR}/components/ui/src/statusbar.c
     ${THISTLE_DIR}/components/ui/src/app_switcher.c

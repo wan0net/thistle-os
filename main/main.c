@@ -12,6 +12,7 @@
 #include "thistle/ota.h"
 #include "thistle/display_server.h"
 #include "thistle/elf_loader.h"
+#include "hal/board.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
 #include "ui/toast.h"
@@ -89,7 +90,17 @@ void app_main(void)
         return;
     }
 
-    ret = display_server_register_wm(lvgl_wm_get());
+    /* Select WM variant based on display capabilities:
+     * E-paper displays have a refresh() function for deferred panel commit;
+     * LCD displays do not. */
+    {
+        const hal_registry_t *reg = hal_get_registry();
+        if (reg && reg->display && reg->display->refresh) {
+            ret = display_server_register_wm(lvgl_epaper_wm_get());
+        } else {
+            ret = display_server_register_wm(lvgl_lcd_wm_get());
+        }
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register LVGL window manager: %s", esp_err_to_name(ret));
         return;

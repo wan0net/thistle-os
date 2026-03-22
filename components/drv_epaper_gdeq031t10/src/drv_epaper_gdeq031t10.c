@@ -274,21 +274,6 @@ static esp_err_t gdeq031t10_init(const void *config)
     memset(s_epd.fb, 0xFF, EPD_FB_BYTES);      /* new = white */
     memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);   /* old = white */
 
-    /* Clear screen to white — wipe any leftover from previous firmware */
-    ESP_LOGI(TAG, "Clearing screen...");
-    ret = epaper_send_cmd(0x10);  /* old data = white */
-    if (ret == ESP_OK) ret = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
-    ret |= epaper_send_cmd(0x13); /* new data = white */
-    if (ret == ESP_OK) ret = epaper_send_data(s_epd.fb, EPD_FB_BYTES);
-    ret |= epaper_send_cmd(0x50); ret |= epaper_send_data_byte(0x97); /* VCOM full */
-    ret |= epaper_send_cmd(CMD_POWER_ON);
-    if (ret == ESP_OK) ret = epaper_wait_busy(5000);
-    ret |= epaper_send_cmd(CMD_DISPLAY_REFRESH);
-    if (ret == ESP_OK) ret = epaper_wait_busy(15000);
-    ret |= epaper_send_cmd(CMD_POWER_OFF);
-    epaper_wait_busy(5000);
-    if (ret != ESP_OK) ESP_LOGW(TAG, "Clear screen failed (non-fatal)");
-
     ESP_LOGI(TAG, "UC8253 initialised (%dx%d portrait)", EPD_WIDTH, EPD_HEIGHT);
     return ESP_OK;
 

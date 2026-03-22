@@ -3,8 +3,17 @@
 #include "esp_err.h"
 #include "lvgl.h"
 
-/* Initialize LVGL, create display driver, set up screen layout */
-esp_err_t ui_manager_init(void);
+/* Flush callback type — WM variants pass the appropriate one to init */
+typedef void (*ui_flush_fn_t)(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
+
+/* Initialize LVGL, create display driver, set up screen layout.
+ * flush_cb: display flush callback (epaper or LCD variant)
+ * use_deferred_refresh: true for e-paper (debounce panel refresh) */
+esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh);
+
+/* Flush callbacks — defined in manager.c, used by WM variants */
+void ui_flush_cb_epaper(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
+void ui_flush_cb_lcd(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
 
 /* Start the LVGL render loop. Call AFTER all UI objects are created. */
 esp_err_t ui_manager_start(void);

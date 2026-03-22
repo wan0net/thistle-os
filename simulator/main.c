@@ -54,7 +54,7 @@ int main(int argc, char **argv)
     printf("display_server_init: %d\n", err);
     fflush(stdout);
 
-    err = display_server_register_wm(lvgl_wm_get());
+    err = display_server_register_wm(lvgl_lcd_wm_get());
     printf("display_server_register_wm: %d\n", err);
     fflush(stdout);
 
