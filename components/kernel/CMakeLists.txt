@@ -8,8 +8,8 @@ idf_component_register(
 )
 
 # The Rust kernel staticlib references ESP-IDF symbols directly (NimBLE, SPIFFS,
-# ADC, etc.). These need to be in the same link group as the Rust lib so the
-# linker can resolve them in any order.
+# ADC, etc.). Use WHOLE_ARCHIVE so all Rust symbols are included in the final
+# link, and ESP-IDF's own --start-group/--end-group resolves cross-references.
 set(RUST_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../kernel_rs/target/xtensa-esp32s3-espidf/release/libthistle_kernel.a")
-target_link_libraries(${COMPONENT_LIB} PRIVATE
-    -Wl,--start-group ${RUST_LIB} -Wl,--end-group)
+target_link_libraries(${COMPONENT_LIB} INTERFACE
+    -Wl,--whole-archive ${RUST_LIB} -Wl,--no-whole-archive)

@@ -22,7 +22,9 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-# Wrap Rust lib in start-group/end-group to resolve circular deps
-# between kernel_rs (Rust) ↔ widget_shims.c (ui component)
-target_link_libraries(${COMPONENT_LIB} INTERFACE
-    -Wl,--start-group ${RUST_LIB} -Wl,--end-group)
+# NOTE: The Rust staticlib is linked from the `kernel` component (not here)
+# because kernel has REQUIRES for all ESP-IDF components the Rust code
+# references (bt, spiffs, nvs_flash, esp_adc, etc.). Linking from kernel_rs
+# would put the Rust lib before those deps in link order, causing undefined
+# reference errors.
+# See components/kernel/CMakeLists.txt for the actual target_link_libraries.
