@@ -13,7 +13,7 @@
 #include "thistle/ota.h"
 #include "thistle/display_server.h"
 #include "thistle/elf_loader.h"
-#include "thistle/board_config.h"
+/* board_config.h not needed — WM selected by display capability */
 #include "hal/board.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
@@ -92,13 +92,16 @@ void app_main(void)
         return;
     }
 
-    /* Select WM variant based on display capabilities.
-     * Default: LVGL (existing apps depend on it).
-     * thistle-tk is available but needs its own app set — use via system.json. */
+    /* Select WM variant based on display type.
+     * E-paper: thistle-tk (pure Rust, embedded-graphics)
+     * LCD: LVGL (existing C apps) */
+    bool use_tk_wm = false;
     {
         const hal_registry_t *reg = hal_get_registry();
         if (reg && reg->display && reg->display->refresh) {
-            ret = display_server_register_wm(lvgl_epaper_wm_get());
+            ESP_LOGI(TAG, "E-paper display: using thistle-tk WM");
+            ret = display_server_register_wm(thistle_tk_wm_get());
+            use_tk_wm = true;
         } else {
             ret = display_server_register_wm(lvgl_lcd_wm_get());
         }
@@ -115,27 +118,31 @@ void app_main(void)
     event_subscribe(EVENT_SD_UNMOUNTED,      system_event_toast, NULL);
     event_subscribe(EVENT_BATTERY_LOW,       system_event_toast, NULL);
 
-    /* Register and launch built-in apps */
-    launcher_app_register();
-    settings_app_register();
-    filemgr_app_register();
-    reader_app_register();
-    messenger_app_register();
-    navigator_app_register();
-    notes_app_register();
-    appstore_app_register();
-    assistant_app_register();
-    wifiscanner_app_register();
-    flashlight_app_register();
-    weather_app_register();
-    terminal_app_register();
-    vault_app_register();
+    if (!use_tk_wm) {
+        /* Register LVGL-based built-in apps (they depend on LVGL and would
+         * crash under the thistle-tk WM) */
+        launcher_app_register();
+        settings_app_register();
+        filemgr_app_register();
+        reader_app_register();
+        messenger_app_register();
+        navigator_app_register();
+        notes_app_register();
+        appstore_app_register();
+        assistant_app_register();
+        wifiscanner_app_register();
+        flashlight_app_register();
+        weather_app_register();
+        terminal_app_register();
+        vault_app_register();
+    }
 
     /* Scan SPIFFS and SD card for standalone .app.elf files.
      * This function is #[no_mangle] in Rust (elf_loader.rs). */
     elf_app_scan_and_register();
 
     /* Grant full permissions to built-in apps */
+    permissions_grant("com.thistle.tk_launcher", PERM_ALL);
     permissions_grant("com.thistle.launcher",   PERM_ALL);
     permissions_grant("com.thistle.settings",   PERM_ALL);
     permissions_grant("com.thistle.filemgr",    PERM_ALL);
@@ -151,11 +158,16 @@ void app_main(void)
     permissions_grant("com.thistle.terminal",    PERM_ALL);
     permissions_grant("com.thistle.vault",       PERM_STORAGE | PERM_SYSTEM);
 
-    app_manager_launch("com.thistle.launcher");
+    if (use_tk_wm) {
+        /* Launch the thistle-tk native launcher */
+        app_manager_launch("com.thistle.tk_launcher");
+    } else {
+        app_manager_launch("com.thistle.launcher");
 
-    /* Start LVGL render loop AFTER all UI objects are created.
-     * This prevents race conditions with e-paper's slow flush. */
-    ui_manager_start();
+        /* Start LVGL render loop AFTER all UI objects are created.
+         * This prevents race conditions with e-paper's slow flush. */
+        ui_manager_start();
+    }
 
     /* Check for SD card firmware update */
     if (ota_sd_update_available()) {

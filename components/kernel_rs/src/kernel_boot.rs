@@ -81,6 +81,10 @@ pub extern "C" fn kernel_init() -> i32 {
     // App manager (Rust)
     crate::app_manager::app_manager_init();
 
+    // Register the thistle-tk launcher (always register — main.c decides
+    // whether to launch it based on the active WM)
+    crate::tk_launcher::register();
+
     // Permissions (Rust)
     crate::permissions::init();
 

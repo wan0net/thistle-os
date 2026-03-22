@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// ThistleOS — thistle-tk Launcher App
+//
+// A built-in launcher for the thistle-tk window manager. Registers as
+// "com.thistle.tk_launcher" and builds its UI purely through the
+// thistle_ui_* widget API (which dispatches through the WM vtable).
+//
+// Layout:
+//   - Status bar (24px row): "ThistleOS" label left, clock label right
+//   - Scrollable app list below: one button per registered app
+
+use std::ffi::{CStr, CString};
+use std::os::raw::c_char;
+use std::ptr::addr_of_mut;
+use std::sync::Mutex;
+
+use crate::app_manager::{self, CAppEntry, CAppManifest};
+
+// ---------------------------------------------------------------------------
+// ESP-IDF error codes
+// ---------------------------------------------------------------------------
+
+const ESP_OK: i32 = 0;
+
+// ---------------------------------------------------------------------------
+// Widget API imports — these go through widget.rs -> widget_shims.c -> WM
+// ---------------------------------------------------------------------------
+
+extern "C" {
+    fn thistle_ui_get_app_root() -> u32;
+    fn thistle_ui_create_container(parent: u32) -> u32;
+    fn thistle_ui_create_label(parent: u32, text: *const c_char) -> u32;
+    fn thistle_ui_create_button(parent: u32, text: *const c_char) -> u32;
+    fn thistle_ui_set_size(widget: u32, w: i32, h: i32);
+    fn thistle_ui_set_layout(widget: u32, layout: i32);
+    fn thistle_ui_set_align(widget: u32, main_align: i32, cross_align: i32);
+    fn thistle_ui_set_gap(widget: u32, gap: i32);
+    fn thistle_ui_set_flex_grow(widget: u32, grow: i32);
+    fn thistle_ui_set_scrollable(widget: u32, scrollable: bool);
+    fn thistle_ui_set_padding(widget: u32, t: i32, r: i32, b: i32, l: i32);
+    fn thistle_ui_set_bg_color(widget: u32, color: u32);
+    fn thistle_ui_set_text_color(widget: u32, color: u32);
+    fn thistle_ui_set_font_size(widget: u32, size: i32);
+    fn thistle_ui_set_radius(widget: u32, r: i32);
+    fn thistle_ui_theme_bg() -> u32;
+    fn thistle_ui_theme_text() -> u32;
+    fn thistle_ui_theme_text_secondary() -> u32;
+    fn thistle_ui_theme_surface() -> u32;
+    fn thistle_ui_theme_primary() -> u32;
+
+    fn app_manager_list_apps(out: *mut *const CAppManifest, max_count: i32) -> i32;
+}
+
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+
+const LAYOUT_COLUMN: i32 = 0;
+const LAYOUT_ROW: i32 = 1;
+const ALIGN_CENTER: i32 = 1;
+const ALIGN_SPACE_BETWEEN: i32 = 3;
+const STATUS_BAR_HEIGHT: i32 = 24;
+
+// ---------------------------------------------------------------------------
+// App button metadata — stores the CStrings so they live long enough
+// ---------------------------------------------------------------------------
+
+/// Launcher state protected by a mutex. Stores app ID strings and button
+/// widget IDs so the on_press callback can reference them later.
+struct LauncherState {
+    app_ids: Vec<CString>,
+    app_buttons: Vec<u32>,
+}
+
+static LAUNCHER: Mutex<LauncherState> = Mutex::new(LauncherState {
+    app_ids: Vec::new(),
+    app_buttons: Vec::new(),
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle callbacks
+// ---------------------------------------------------------------------------
+
+/// on_create: Build the entire launcher UI
+unsafe extern "C" fn on_create() -> i32 {
+    let root = thistle_ui_get_app_root();
+    if root == 0 {
+        return -1;
+    }
+
+    let bg_color = thistle_ui_theme_bg();
+    let text_color = thistle_ui_theme_text();
+    let text_secondary = thistle_ui_theme_text_secondary();
+    let surface_color = thistle_ui_theme_surface();
+    let primary_color = thistle_ui_theme_primary();
+
+    // Root column container filling the screen
+    let main_col = thistle_ui_create_container(root);
+    thistle_ui_set_layout(main_col, LAYOUT_COLUMN);
+    thistle_ui_set_size(main_col, -1, -1); // fill parent
+    thistle_ui_set_flex_grow(main_col, 1);
+    thistle_ui_set_bg_color(main_col, bg_color);
+    thistle_ui_set_gap(main_col, 0);
+
+    // -- Status bar (24px row) ------------------------------------------------
+    let status_bar = thistle_ui_create_container(main_col);
+    thistle_ui_set_layout(status_bar, LAYOUT_ROW);
+    thistle_ui_set_size(status_bar, -1, STATUS_BAR_HEIGHT);
+    thistle_ui_set_align(status_bar, ALIGN_SPACE_BETWEEN, ALIGN_CENTER);
+    thistle_ui_set_padding(status_bar, 2, 4, 2, 4);
+    thistle_ui_set_bg_color(status_bar, surface_color);
+
+    let title_label = thistle_ui_create_label(
+        status_bar,
+        b"ThistleOS\0".as_ptr() as *const c_char,
+    );
+    thistle_ui_set_text_color(title_label, text_color);
+    thistle_ui_set_font_size(title_label, 12);
+
+    let clock_label = thistle_ui_create_label(
+        status_bar,
+        b"--:--\0".as_ptr() as *const c_char,
+    );
+    thistle_ui_set_text_color(clock_label, text_secondary);
+    thistle_ui_set_font_size(clock_label, 12);
+
+    // -- App list (scrollable column, flex-grow 1 to fill remaining) ----------
+    let app_list = thistle_ui_create_container(main_col);
+    thistle_ui_set_layout(app_list, LAYOUT_COLUMN);
+    thistle_ui_set_flex_grow(app_list, 1);
+    thistle_ui_set_gap(app_list, 4);
+    thistle_ui_set_padding(app_list, 4, 6, 4, 6);
+    thistle_ui_set_scrollable(app_list, true);
+    thistle_ui_set_bg_color(app_list, bg_color);
+
+    // -- Populate app buttons -------------------------------------------------
+    let mut manifests: [*const CAppManifest; 20] = [std::ptr::null(); 20];
+    let count = app_manager_list_apps(manifests.as_mut_ptr(), 20);
+
+    let mut state = LAUNCHER.lock().unwrap();
+    state.app_ids.clear();
+    state.app_buttons.clear();
+
+    for i in 0..(count as usize) {
+        let manifest = manifests[i];
+        if manifest.is_null() {
+            continue;
+        }
+        let m = &*manifest;
+
+        // Skip the launcher itself
+        if !m.id.is_null() {
+            let id_str = CStr::from_ptr(m.id).to_str().unwrap_or("");
+            if id_str == "com.thistle.tk_launcher" {
+                continue;
+            }
+        }
+
+        // Get display name
+        let name_ptr = if !m.name.is_null() { m.name } else { m.id };
+        if name_ptr.is_null() {
+            continue;
+        }
+
+        // Create button with app name
+        let btn = thistle_ui_create_button(app_list, name_ptr);
+        thistle_ui_set_size(btn, -1, 36);
+        thistle_ui_set_bg_color(btn, primary_color);
+        thistle_ui_set_text_color(btn, bg_color);
+        thistle_ui_set_radius(btn, 4);
+
+        // Store app ID for the callback
+        let id_cstring = if !m.id.is_null() {
+            CString::from(CStr::from_ptr(m.id))
+        } else {
+            CString::new("").unwrap()
+        };
+
+        state.app_buttons.push(btn);
+        state.app_ids.push(id_cstring);
+    }
+
+    ESP_OK
+}
+
+/// on_start: Launcher is becoming the foreground app
+unsafe extern "C" fn on_start() {
+    // No-op for now — the UI is already built in on_create
+}
+
+/// on_pause: Launcher is going to background
+unsafe extern "C" fn on_pause() {
+    // No-op — keep UI tree intact
+}
+
+/// on_resume: Launcher is returning to foreground
+unsafe extern "C" fn on_resume() {
+    // No-op for now — could refresh app list here in future
+}
+
+/// on_destroy: Cleanup
+unsafe extern "C" fn on_destroy() {
+    if let Ok(mut state) = LAUNCHER.lock() {
+        state.app_ids.clear();
+        state.app_buttons.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Static manifest and entry (must live for the lifetime of the kernel)
+// ---------------------------------------------------------------------------
+
+static MANIFEST: CAppManifest = CAppManifest {
+    id:               b"com.thistle.tk_launcher\0".as_ptr() as *const c_char,
+    name:             b"Launcher\0".as_ptr() as *const c_char,
+    version:          b"0.1.0\0".as_ptr() as *const c_char,
+    allow_background: false,
+    min_memory_kb:    0,
+};
+
+static ENTRY: CAppEntry = CAppEntry {
+    on_create:  Some(on_create),
+    on_start:   Some(on_start),
+    on_pause:   Some(on_pause),
+    on_resume:  Some(on_resume),
+    on_destroy: Some(on_destroy),
+    manifest:   &MANIFEST as *const CAppManifest,
+};
+
+// ---------------------------------------------------------------------------
+// Registration — called from kernel_boot.rs
+// ---------------------------------------------------------------------------
+
+/// Register the thistle-tk launcher with the app manager.
+/// Returns ESP_OK (0) on success.
+pub fn register() -> i32 {
+    unsafe { app_manager::register(&ENTRY as *const CAppEntry) }
+}
+
+/// C-callable registration entry point.
+#[no_mangle]
+pub extern "C" fn tk_launcher_register() -> i32 {
+    register()
+}

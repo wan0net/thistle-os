@@ -26,4 +26,5 @@ pub mod appstore_client;
 pub mod crypto;
 pub mod widget;
 pub mod tk_wm;
+pub mod tk_launcher;
 mod ffi;
