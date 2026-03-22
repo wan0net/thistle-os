@@ -26,7 +26,14 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-# Add Rust lib directly to the component's LINK_LIBRARIES so it appears
-# inside ESP-IDF's --start-group block at final link time. Using INTERFACE
-# would place it outside the group, causing undefined reference errors.
-target_link_libraries(${COMPONENT_LIB} PUBLIC ${RUST_LIB})
+# Merge Rust staticlib objects into this component's .a archive so the
+# linker sees them as part of __idf_kernel_rs (inside ESP-IDF's
+# --start-group block). This avoids the INTERFACE/PUBLIC link propagation
+# placing the Rust lib outside the group.
+add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+    COMMAND ${CMAKE_AR} x ${RUST_LIB}
+    COMMAND ${CMAKE_AR} rcs $<TARGET_FILE:${COMPONENT_LIB}> *.o
+    COMMAND ${CMAKE_COMMAND} -E remove -f *.o
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Merging Rust kernel objects into ${COMPONENT_LIB}"
+)
