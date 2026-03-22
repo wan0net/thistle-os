@@ -20,7 +20,7 @@
 
 ---
 
-> **Alpha Software** — ThistleOS is under active development. The e-paper display renders on the T-Deck Pro but the full UI pipeline is still being tuned. Expect rough edges.
+> **Alpha Software** — ThistleOS boots on the T-Deck Pro with a pure Rust UI (thistle-tk + embedded-graphics). E-paper display, keyboard, and touch all working. LVGL fallback available for LCD.
 
 ## Why ThistleOS
 
@@ -39,7 +39,7 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 ├─────────────────────────────────────────────┤
 │         WINDOW MANAGER (.wm.elf)           │
 │  Status bar • Launcher • Theme engine      │
-│  Widget toolkit (LVGL, Rust UI, terminal)  │
+│  thistle-tk (Rust, default) | LVGL (C, LCD fallback)  │
 ├─────────────────────────────────────────────┤
 │         DISPLAY SERVER (kernel)            │
 │  Surfaces • Input routing • Compositor     │
@@ -67,7 +67,7 @@ ThistleOS uses a three-tier immutable trust chain:
 
 The kernel never talks to hardware directly. It talks through **HAL vtables** — C structs of function pointers. Drivers are loaded from SPIFFS/SD as `.drv.elf` files and register themselves with the HAL at boot.
 
-**Window managers are swappable** — like Linux desktop environments. The default `lvgl-wm` uses LVGL 9, but you can install a Rust-based WM, a terminal-only WM, or build your own. The display server in the kernel manages surfaces and input routing; the WM draws the UI.
+**Window managers are swappable** — like Linux desktop environments. The default WM uses **thistle-tk** (pure Rust, embedded-graphics) for e-paper, with LVGL 9 available as a fallback for LCD. You can also install a terminal-only WM or build your own. The display server in the kernel manages surfaces and input routing; the WM draws the UI.
 
 ## The Driver Model
 
@@ -238,6 +238,16 @@ App → Window Manager → Display Server → HAL → Hardware
 
 The WM is selected in Settings or during first-boot setup. Downloaded from the app store like any other module.
 
+## thistle-tk
+
+**thistle-tk** is the default window manager for e-paper displays. It is a pure Rust widget toolkit built on **embedded-graphics** with zero C dependencies.
+
+- **Repo:** https://github.com/wan0net/thistle-tk
+- Works on both 1-bit e-paper (`BinaryColor`) and RGB565 LCD (`Rgb565`)
+- Apps use semantic widgets (`Container`, `Label`, `Button`, `TextInput`) and theme colors
+- Layout engine with flexbox-like positioning
+- The kernel's `tk_wm.rs` integrates thistle-tk as a display server window manager, and `tk_launcher.rs` implements the home screen launcher on top of it
+
 ## Security & Chain of Trust
 
 Signing and verification at every level — from boot to apps:
@@ -343,7 +353,7 @@ cmake .. && make -j8 && ./thistle_sim
 | Metric | Value |
 |--------|-------|
 | C source code | ~15,000 lines |
-| Rust kernel code | ~3,500 lines |
+| Rust kernel code | ~5,000 lines |
 | Source files | 160+ |
 | Built-in apps | 14 |
 | HAL drivers | 12 |
@@ -378,8 +388,12 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 - [x] Hardware bringup on T-Deck Pro (e-paper, keyboard, touch working)
 - [x] App loading infrastructure (SPIFFS + SD card scanner)
 - [x] Widget API syscall table (31 functions)
+- [x] Switch kernel from C to Rust implementations
+- [x] thistle-tk: Pure Rust widget toolkit replacing LVGL for e-paper
+- [x] Rust launcher app running on thistle-tk WM
 
 ### In Progress
+- [ ] Port remaining apps from C/LVGL to Rust/thistle-tk
 - [ ] Compile existing drivers as standalone .drv.elf files
 - [ ] Move built-in apps to .app.elf on SPIFFS
 - [ ] Wire display server into boot sequence
@@ -388,7 +402,6 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 ### Planned
 - [ ] First-boot setup wizard (board detection, WM selection, WiFi)
 - [ ] LVGL window manager as loadable .wm.elf
-- [ ] Rust window manager (embedded-graphics based)
 - [ ] Permission enforcement at syscall boundary
 - [ ] Claude API integration in AI assistant
 - [ ] Hardware auto-detection bootloader
@@ -415,6 +428,8 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | hmac | MIT/Apache-2.0 | Rust software HMAC |
 | pbkdf2 | MIT/Apache-2.0 | Rust software PBKDF2 |
 | getrandom | MIT/Apache-2.0 | Rust CSPRNG entropy |
+| embedded-graphics | MIT/Apache-2.0 | Rust 2D graphics primitives |
+| thistle-tk | BSD-3-Clause | Widget toolkit (embedded-graphics based) |
 | FreeRTOS | MIT | RTOS kernel |
 | SDL2 | zlib | Simulator |
 | libcurl | MIT | Simulator HTTP |
