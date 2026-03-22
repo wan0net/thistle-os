@@ -16,6 +16,8 @@ set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
     # HAL
     ${THISTLE_DIR}/components/thistle_hal/src/hal_registry.c
+    # Widget shims (Rust widget.rs → WM vtable bridge)
+    ${THISTLE_DIR}/components/ui/src/widget_shims.c
     # UI (C — stays C, this is the LVGL WM)
     ${THISTLE_DIR}/components/ui/src/manager.c
     ${THISTLE_DIR}/components/ui/src/lvgl_wm.c

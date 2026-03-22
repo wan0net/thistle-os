@@ -106,6 +106,10 @@ int esp_http_client_get_status_code(void *c) { (void)c; return 0; }
 int esp_http_client_close(void *c) { (void)c; return 0; }
 int esp_http_client_cleanup(void *c) { (void)c; return 0; }
 
+/* ── NVS / SPIFFS stubs (simulator has no flash storage) ─────────── */
+int nvs_flash_init_safe(void) { return 0; }
+int spiffs_mount(void) { return 0; }
+
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }
 int drv_a7682e_stop_ppp(void) { return 0; }
