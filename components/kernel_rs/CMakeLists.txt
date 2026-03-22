@@ -6,6 +6,7 @@ idf_component_register(
     REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
              esp_wifi esp_netif esp_event bt mbedtls esp_http_client
              driver spiffs nvs_flash esp_adc sdmmc espressif__elf_loader
+    WHOLE_ARCHIVE
 )
 
 set(RUST_TARGET "xtensa-esp32s3-espidf")
@@ -25,7 +26,7 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-# Link Rust lib in the INTERFACE so consumers (kernel, ui, main) get it.
-# Use --start-group wrapping the Rust lib AND all ESP-IDF libs that
-# it references, so the linker can resolve symbols in any order.
-target_link_libraries(${COMPONENT_LIB} INTERFACE ${RUST_LIB})
+# Add Rust lib directly to the component's LINK_LIBRARIES so it appears
+# inside ESP-IDF's --start-group block at final link time. Using INTERFACE
+# would place it outside the group, causing undefined reference errors.
+target_link_libraries(${COMPONENT_LIB} PUBLIC ${RUST_LIB})
