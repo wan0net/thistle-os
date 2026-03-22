@@ -15,8 +15,9 @@
 
 static const char *TAG = "ui_mgr";
 
-#define DISPLAY_WIDTH   320
-#define DISPLAY_HEIGHT  240
+/* Read dimensions from HAL at runtime instead of hardcoding */
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  320
 #define STATUSBAR_H     24
 #define LVGL_TASK_PERIOD_MS 10
 

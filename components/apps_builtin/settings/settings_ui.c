@@ -39,8 +39,8 @@ static const char *TAG = "settings_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      320
-#define APP_AREA_H      216
+#define APP_AREA_W      240
+#define APP_AREA_H      296
 #define TITLE_BAR_H      30
 #define ITEM_H           30
 #define ITEM_PAD_LEFT     8

@@ -37,8 +37,8 @@ static const char *TAG = "flashlight_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W  320
-#define APP_AREA_H  216
+#define APP_AREA_W  240
+#define APP_AREA_H  296
 
 /* ------------------------------------------------------------------ */
 /* SOS Morse pattern                                                    */

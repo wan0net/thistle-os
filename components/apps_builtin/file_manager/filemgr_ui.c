@@ -19,8 +19,8 @@ static const char *TAG = "filemgr_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      320
-#define APP_AREA_H      216
+#define APP_AREA_W      240
+#define APP_AREA_H      296
 #define TITLE_BAR_H      30
 #define STORAGE_BAR_H    24
 #define LIST_H          (APP_AREA_H - TITLE_BAR_H - STORAGE_BAR_H)

@@ -77,6 +77,6 @@
 #define BOARD_MODEM_EN       GPIO_NUM_41
 #define BOARD_LORA_EN        GPIO_NUM_46
 
-/* === Display === */
-#define BOARD_DISPLAY_WIDTH  320
-#define BOARD_DISPLAY_HEIGHT 240
+/* === Display (portrait — held like BlackBerry) === */
+#define BOARD_DISPLAY_WIDTH  240
+#define BOARD_DISPLAY_HEIGHT 320

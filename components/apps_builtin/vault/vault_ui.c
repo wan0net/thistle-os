@@ -42,8 +42,8 @@ static const char *TAG = "vault_ui";
 /* Constants                                                            */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   320
-#define APP_AREA_H   216
+#define APP_AREA_W   240
+#define APP_AREA_H   296
 #define HEADER_H      30
 #define ITEM_H        32
 #define FIELD_MAX     64

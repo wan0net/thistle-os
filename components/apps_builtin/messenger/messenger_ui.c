@@ -49,9 +49,9 @@ static volatile int s_pending_rx = 0;
 #define MSG_HISTORY      50
 #define MAX_CONVS        MSG_TRANSPORT_COUNT  /* one conversation per transport */
 
-/* Fixed pixel dimensions for 320×216 display */
-#define DISP_W           320
-#define DISP_H           216
+/* Fixed pixel dimensions for 240×296 display */
+#define DISP_W           240
+#define DISP_H           296
 #define HEADER_H         30
 #define INPUT_BAR_H      40
 #define CHAT_LIST_H      (DISP_H - HEADER_H - INPUT_BAR_H)   /* 146 */

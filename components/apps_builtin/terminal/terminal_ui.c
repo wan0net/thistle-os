@@ -43,8 +43,8 @@ static const char *TAG = "terminal_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   320
-#define APP_AREA_H   216
+#define APP_AREA_W   240
+#define APP_AREA_H   296
 #define HEADER_H      30
 #define INPUT_BAR_H   28
 #define OUTPUT_H     (APP_AREA_H - HEADER_H - INPUT_BAR_H)

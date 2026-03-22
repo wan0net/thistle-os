@@ -15,9 +15,9 @@ static const char *TAG = "launcher_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-/* App-area dimensions (full 320x216 after the 24px status bar) */
-#define APP_AREA_W      320
-#define APP_AREA_H      216
+/* App-area dimensions (240x296 portrait after the 24px status bar) */
+#define APP_AREA_W      240
+#define APP_AREA_H      296
 #define DOCK_H           50
 #define APPS_BTN_H       30
 #define ICON_SIZE        38

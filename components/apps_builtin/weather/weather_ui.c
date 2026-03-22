@@ -50,8 +50,8 @@ static const char *TAG = "weather_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W  320
-#define APP_AREA_H  216
+#define APP_AREA_W  240
+#define APP_AREA_H  296
 #define HEADER_H     30
 #define UPDATE_PERIOD_MS  (30 * 1000)
 

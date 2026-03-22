@@ -28,8 +28,8 @@ static const char *TAG = "reader_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      320
-#define APP_AREA_H      216
+#define APP_AREA_W      240
+#define APP_AREA_H      296
 #define TITLE_BAR_H      30
 #define FOOTER_H         24
 #define TEXT_MARGIN_H     8   /* top/bottom margin inside text area */

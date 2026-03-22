@@ -44,8 +44,8 @@ static const char *TAG = "assistant_ui";
 #define CONV_FILE_PATH      THISTLE_SDCARD "/data/assistant/last_conversation.txt"
 #define CONFIG_FILE_PATH    THISTLE_SDCARD "/config/assistant.json"
 
-#define APP_AREA_W  320
-#define APP_AREA_H  216
+#define APP_AREA_W  240
+#define APP_AREA_H  296
 #define HEADER_H     30
 #define INPUT_BAR_H  40
 #define MSG_LIST_H  (APP_AREA_H - HEADER_H - INPUT_BAR_H)  /* 146px */

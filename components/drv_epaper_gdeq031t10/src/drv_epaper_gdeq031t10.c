@@ -20,13 +20,11 @@
 static const char *TAG = "epaper";
 
 /* ── Panel geometry ─────────────────────────────────────────────────────── */
-/* Native UC8253 orientation is portrait: 240 columns × 320 rows.
- * We expose 320×240 (landscape) to the UI and rotate in the flush path. */
-#define EPD_NATIVE_W    240
-#define EPD_NATIVE_H    320
-#define EPD_WIDTH       320   /* user-facing width (landscape) */
-#define EPD_HEIGHT      240   /* user-facing height (landscape) */
-#define EPD_FB_BYTES    (EPD_NATIVE_W * EPD_NATIVE_H / 8)   /* 1-bit packed */
+/* T-Deck Pro is held portrait (like BlackBerry). Native panel matches:
+ * 240 columns × 320 rows. No rotation needed. */
+#define EPD_WIDTH       240
+#define EPD_HEIGHT      320
+#define EPD_FB_BYTES    (EPD_WIDTH * EPD_HEIGHT / 8)   /* 1-bit packed */
 
 /* ── UC8253 command codes ────────────────────────────────────────────────── */
 #define CMD_PANEL_SETTING           0x00
@@ -268,8 +266,7 @@ static esp_err_t gdeq031t10_init(const void *config)
     s_epd.power_on = false;
     memset(s_epd.fb, 0xFF, EPD_FB_BYTES);  /* start with white canvas */
 
-    ESP_LOGI(TAG, "UC8253 initialised (landscape %dx%d, native %dx%d)",
-             EPD_WIDTH, EPD_HEIGHT, EPD_NATIVE_W, EPD_NATIVE_H);
+    ESP_LOGI(TAG, "UC8253 initialised (%dx%d portrait)", EPD_WIDTH, EPD_HEIGHT);
     return ESP_OK;
 
 fail:
@@ -321,22 +318,15 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Copy incoming landscape (320×240) data into native portrait (240×320)
-     * framebuffer with 90° CW rotation.
-     * Landscape (lx, ly) → Native (nx, ny): nx = ly, ny = (EPD_WIDTH-1) - lx */
+    /* Direct copy — no rotation. LVGL renders 240×320 portrait, matching native. */
     uint16_t src_w = x2 - x1 + 1;
-    for (uint16_t ly = y1; ly <= y2; ly++) {
-        for (uint16_t lx = x1; lx <= x2; lx++) {
-            /* Read source bit */
-            uint32_t src_bit_idx = (uint32_t)(ly - y1) * src_w + (lx - x1);
+    for (uint16_t row = y1; row <= y2; row++) {
+        for (uint16_t col = x1; col <= x2; col++) {
+            uint32_t src_bit_idx = (uint32_t)(row - y1) * src_w + (col - x1);
             uint8_t  src_byte    = color_data[src_bit_idx / 8];
             uint8_t  src_bit     = (src_byte >> (7 - (src_bit_idx & 7))) & 1;
 
-            /* Rotate 90° CW to native portrait coordinates */
-            uint16_t nx = ly;
-            uint16_t ny = (EPD_WIDTH - 1) - lx;
-
-            uint32_t dst_bit_idx = (uint32_t)ny * EPD_NATIVE_W + nx;
+            uint32_t dst_bit_idx = (uint32_t)row * EPD_WIDTH + col;
             uint32_t dst_byte    = dst_bit_idx / 8;
             uint8_t  dst_mask    = 0x80u >> (dst_bit_idx & 7);
 
