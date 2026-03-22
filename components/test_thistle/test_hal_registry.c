@@ -23,11 +23,13 @@ static esp_err_t mock_display_flush(const hal_area_t *area, const uint8_t *data)
 static esp_err_t mock_display_brightness(uint8_t pct) { return ESP_OK; }
 static esp_err_t mock_display_sleep(bool enter) { return ESP_OK; }
 static esp_err_t mock_display_refresh_mode(hal_display_refresh_mode_t mode) { return ESP_OK; }
+static esp_err_t mock_display_refresh(void) { return ESP_OK; }
 
 static const hal_display_driver_t mock_display = {
     .init             = mock_display_init,
     .deinit           = mock_display_deinit,
     .flush            = mock_display_flush,
+    .refresh          = mock_display_refresh,
     .set_brightness   = mock_display_brightness,
     .sleep            = mock_display_sleep,
     .set_refresh_mode = mock_display_refresh_mode,

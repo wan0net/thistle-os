@@ -21,6 +21,13 @@ static const char *TAG = "ui_mgr";
 #define STATUSBAR_H     24
 #define LVGL_TASK_PERIOD_MS 10
 
+/* E-paper debounce: wait this many microseconds after the last flush
+ * before committing the framebuffer to the physical panel. */
+#define EPAPER_REFRESH_DEBOUNCE_US  (300 * 1000)   /* 300 ms */
+
+/* Timestamp (microseconds) of the most recent flush callback. */
+static int64_t s_last_flush_time = 0;
+
 /* Draw buffer — placed in PSRAM to save ~76KB of internal DRAM.
  * Double-buffer: allocate two halves so LVGL can render while we flush. */
 #ifdef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
@@ -163,6 +170,9 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
 
         /* Track dirty region for e-paper batching */
         epaper_refresh_mark_dirty(hal_area.x1, hal_area.y1, hal_area.x2, hal_area.y2);
+
+        /* Record timestamp so the render loop can debounce the panel refresh */
+        s_last_flush_time = esp_timer_get_time();
     }
 
     lv_display_flush_ready(disp);
@@ -198,6 +208,28 @@ static void lvgl_task(void *arg)
             lv_timer_handler();
             xSemaphoreGive(s_lvgl_mutex);
         }
+
+        /* ── Debounced e-paper panel refresh ──
+         * After LVGL flushes stop arriving (UI settled for 300 ms), commit
+         * the in-memory framebuffer to the physical e-paper panel once. */
+        if (reg && reg->display &&
+            reg->display->refresh &&   /* deferred-refresh display (e-paper, etc.) */
+            epaper_refresh_is_dirty() &&
+            s_last_flush_time > 0)
+        {
+            int64_t now = esp_timer_get_time();
+            if ((now - s_last_flush_time) >= EPAPER_REFRESH_DEBOUNCE_US) {
+                ESP_LOGI(TAG, "e-paper debounce elapsed, refreshing panel");
+                esp_err_t ref_err = reg->display->refresh();
+                if (ref_err != ESP_OK) {
+                    ESP_LOGE(TAG, "e-paper refresh failed: %s",
+                             esp_err_to_name(ref_err));
+                }
+                epaper_refresh_clear();
+                s_last_flush_time = 0;  /* reset until next flush */
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(LVGL_TASK_PERIOD_MS));
     }
 }
@@ -327,8 +359,10 @@ esp_err_t ui_manager_init(void)
 
     ESP_LOGI(TAG, "UI manager ready (%dx%d)", DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
-    /* 11. Show splash screen for 2 seconds */
-    ui_manager_show_splash(2000);
+    /* 11. Splash screen — disabled for now. On e-paper, every refresh is
+     *     expensive and the splash causes ghosting. Re-enable when we have
+     *     separate WMs for e-paper vs LCD. */
+    /* ui_manager_show_splash(2000); */
 
     /* NOTE: LVGL render task is NOT started here — call ui_manager_start()
      * after all LVGL objects (apps, launcher) are fully created. */
@@ -359,6 +393,12 @@ static void splash_dismiss_cb(void *arg)
     ui_manager_lock();
     lv_obj_delete(splash);
     ui_manager_unlock();
+
+    /* Force the e-paper to do a full refresh (not fast) to clear splash ghosting */
+    const hal_registry_t *dr = hal_get_registry();
+    if (dr && dr->display && dr->display->refresh && dr->display->set_refresh_mode) {
+        dr->display->set_refresh_mode(HAL_DISPLAY_REFRESH_FULL);
+    }
 
     /* Clean up the timer handle so it does not leak. */
     if (s_splash_timer != NULL) {

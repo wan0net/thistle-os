@@ -58,10 +58,16 @@ static esp_err_t mock_vtable_display_refresh_mode(hal_display_refresh_mode_t mod
     return ESP_OK;
 }
 
+static esp_err_t mock_vtable_display_refresh(void)
+{
+    return ESP_OK;
+}
+
 static const hal_display_driver_t s_mock_display_full = {
     .init             = mock_vtable_display_init,
     .deinit           = mock_vtable_display_deinit,
     .flush            = mock_vtable_display_flush,
+    .refresh          = mock_vtable_display_refresh,
     .set_brightness   = mock_vtable_display_brightness,
     .sleep            = mock_vtable_display_sleep,
     .set_refresh_mode = mock_vtable_display_refresh_mode,
@@ -98,6 +104,7 @@ TEST_CASE("test_display_vtable_complete: all display function pointers are non-N
     TEST_ASSERT_NOT_NULL(s_mock_display_full.init);
     TEST_ASSERT_NOT_NULL(s_mock_display_full.deinit);
     TEST_ASSERT_NOT_NULL(s_mock_display_full.flush);
+    TEST_ASSERT_NOT_NULL(s_mock_display_full.refresh);
     TEST_ASSERT_NOT_NULL(s_mock_display_full.set_brightness);
     TEST_ASSERT_NOT_NULL(s_mock_display_full.sleep);
     TEST_ASSERT_NOT_NULL(s_mock_display_full.set_refresh_mode);

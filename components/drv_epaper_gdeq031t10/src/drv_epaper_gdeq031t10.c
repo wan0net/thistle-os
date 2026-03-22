@@ -90,9 +90,11 @@ static struct {
     spi_device_handle_t        spi;
     epaper_gdeq031t10_config_t cfg;
     hal_display_refresh_mode_t refresh_mode;
-    uint8_t                   *fb;          /* 1-bit packed framebuffer */
+    uint8_t                   *fb;          /* 1-bit packed framebuffer (new) */
+    uint8_t                   *fb_old;      /* previous frame (for old data cmd 0x10) */
     bool                       initialised;
     bool                       power_on;
+    bool                       first_refresh_done;
 } s_epd;
 
 /* ── Low-level helpers ───────────────────────────────────────────────────── */
@@ -192,13 +194,17 @@ static esp_err_t gdeq031t10_init(const void *config)
     memcpy(&s_epd.cfg, config, sizeof(epaper_gdeq031t10_config_t));
     s_epd.refresh_mode = HAL_DISPLAY_REFRESH_FULL;
 
-    /* ── Allocate framebuffer ── */
+    /* ── Allocate framebuffers (new + old for differential refresh) ── */
     s_epd.fb = heap_caps_malloc(EPD_FB_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
-    if (!s_epd.fb) {
-        ESP_LOGE(TAG, "framebuffer alloc failed (%u bytes)", EPD_FB_BYTES);
+    s_epd.fb_old = heap_caps_malloc(EPD_FB_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    if (!s_epd.fb || !s_epd.fb_old) {
+        ESP_LOGE(TAG, "framebuffer alloc failed (%u bytes x2)", EPD_FB_BYTES);
+        free(s_epd.fb); free(s_epd.fb_old);
+        s_epd.fb = NULL; s_epd.fb_old = NULL;
         return ESP_ERR_NO_MEM;
     }
-    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);  /* white canvas */
+    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);      /* new = white */
+    memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);   /* old = white */
 
     /* ── GPIO configuration ── */
     gpio_config_t io_conf = {
@@ -264,7 +270,24 @@ static esp_err_t gdeq031t10_init(const void *config)
 
     s_epd.initialised = true;
     s_epd.power_on = false;
-    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);  /* start with white canvas */
+    s_epd.first_refresh_done = false;
+    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);      /* new = white */
+    memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);   /* old = white */
+
+    /* Clear screen to white — wipe any leftover from previous firmware */
+    ESP_LOGI(TAG, "Clearing screen...");
+    ret = epaper_send_cmd(0x10);  /* old data = white */
+    if (ret == ESP_OK) ret = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
+    ret |= epaper_send_cmd(0x13); /* new data = white */
+    if (ret == ESP_OK) ret = epaper_send_data(s_epd.fb, EPD_FB_BYTES);
+    ret |= epaper_send_cmd(0x50); ret |= epaper_send_data_byte(0x97); /* VCOM full */
+    ret |= epaper_send_cmd(CMD_POWER_ON);
+    if (ret == ESP_OK) ret = epaper_wait_busy(5000);
+    ret |= epaper_send_cmd(CMD_DISPLAY_REFRESH);
+    if (ret == ESP_OK) ret = epaper_wait_busy(15000);
+    ret |= epaper_send_cmd(CMD_POWER_OFF);
+    epaper_wait_busy(5000);
+    if (ret != ESP_OK) ESP_LOGW(TAG, "Clear screen failed (non-fatal)");
 
     ESP_LOGI(TAG, "UC8253 initialised (%dx%d portrait)", EPD_WIDTH, EPD_HEIGHT);
     return ESP_OK;
@@ -291,7 +314,9 @@ static void gdeq031t10_deinit(void)
     s_epd.spi = NULL;
 
     free(s_epd.fb);
+    free(s_epd.fb_old);
     s_epd.fb = NULL;
+    s_epd.fb_old = NULL;
 
     s_epd.initialised = false;
     ESP_LOGI(TAG, "deinit complete");
@@ -299,9 +324,8 @@ static void gdeq031t10_deinit(void)
 
 /* ── Flush ───────────────────────────────────────────────────────────────── */
 /*
- * flush() receives landscape-oriented (320×240) 1-bit pixel data.
- * We rotate 90° CW to native portrait (240×320) for the UC8253 controller.
- * Landscape (lx,ly) → native (nx,ny): nx = ly, ny = (EPD_WIDTH-1) - lx
+ * flush() receives 240×320 portrait 1-bit pixel data matching the native panel.
+ * Copies into the in-memory framebuffer only — no SPI/refresh here.
  */
 static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_data)
 {
@@ -318,7 +342,9 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Direct copy — no rotation. LVGL renders 240×320 portrait, matching native. */
+    /* Direct copy — no rotation. LVGL renders 240×320 portrait, matching native.
+     * This only updates the in-memory framebuffer (fast). The actual panel
+     * refresh is triggered separately via gdeq031t10_refresh(). */
     uint16_t src_w = x2 - x1 + 1;
     for (uint16_t row = y1; row <= y2; row++) {
         for (uint16_t col = x1; col <= x2; col++) {
@@ -338,35 +364,66 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
         }
     }
 
-    esp_err_t ret = ESP_OK;
+    return ESP_OK;
+}
 
-    /* Full-frame refresh following GxEPD2 cycle:
-     * soft reset → panel setting → write data → VCOM → power on → refresh → power off */
+/* ── Refresh ─────────────────────────────────────────────────────────────── */
+/*
+ * refresh() sends the in-memory framebuffer to the panel and triggers
+ * a hardware display update.  Called once after the UI has settled
+ * (debounced by the UI manager), NOT on every LVGL flush.
+ *
+ * Full-frame refresh following GxEPD2 cycle:
+ * soft reset → panel setting → write data → VCOM → power on → refresh → power off
+ */
+static esp_err_t gdeq031t10_refresh(void)
+{
+    if (!s_epd.initialised) return ESP_ERR_INVALID_STATE;
+
     esp_err_t err;
+    /* Use fast mode unless: first refresh, or explicitly set to FULL */
+    bool fast = s_epd.first_refresh_done &&
+                s_epd.refresh_mode != HAL_DISPLAY_REFRESH_FULL;
 
-    /* Soft reset via panel setting register (0x00 with bit 0x1E) */
+    /* Soft reset via panel setting register */
     err  = epaper_send_cmd(0x00);
-    err |= epaper_send_data_byte(0x1E);   /* reset bit set */
+    err |= epaper_send_data_byte(0x1E);
     err |= epaper_send_data_byte(0x0D);
     if (err != ESP_OK) return err;
     vTaskDelay(pdMS_TO_TICKS(5));
 
-    /* Panel setting (actual config) */
+    /* Panel setting */
     err  = epaper_send_cmd(0x00);
-    err |= epaper_send_data_byte(0x1F);   /* KW mode, BWOTP */
+    err |= epaper_send_data_byte(0x1F);
     err |= epaper_send_data_byte(0x0D);
     if (err != ESP_OK) return err;
 
-    /* Write framebuffer via cmd 0x13 (new data) */
+    /* Write old framebuffer via cmd 0x10 (previous frame) */
+    err = epaper_send_cmd(0x10);
+    if (err != ESP_OK) return err;
+    err = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
+    if (err != ESP_OK) return err;
+
+    /* Write new framebuffer via cmd 0x13 (current frame) */
     err = epaper_send_cmd(0x13);
     if (err != ESP_OK) return err;
     err = epaper_send_data(s_epd.fb, EPD_FB_BYTES);
     if (err != ESP_OK) return err;
 
-    /* VCOM and data interval */
+    /* VCOM and data interval — different for full vs fast refresh
+     * Full: 0x97 (no flicker reduction), Fast: 0xD7 (partial mode) */
     err  = epaper_send_cmd(0x50);
-    err |= epaper_send_data_byte(0x97);
+    err |= epaper_send_data_byte(fast ? 0xD7 : 0x97);
     if (err != ESP_OK) return err;
+
+    if (fast) {
+        /* Fast refresh: cascade + forced temperature (from GxEPD2 _Update_Part) */
+        err  = epaper_send_cmd(0xE0);
+        err |= epaper_send_data_byte(0x02);   /* TSFIX */
+        err |= epaper_send_cmd(0xE5);
+        err |= epaper_send_data_byte(0x79);   /* temp=121°, faster LUT */
+        if (err != ESP_OK) return err;
+    }
 
     /* Power on */
     err = epaper_send_cmd(CMD_POWER_ON);
@@ -380,7 +437,7 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
     /* Refresh */
     err = epaper_send_cmd(CMD_DISPLAY_REFRESH);
     if (err != ESP_OK) return err;
-    err = epaper_wait_busy(15000);
+    err = epaper_wait_busy(fast ? 5000 : 15000);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Refresh BUSY timeout");
         return err;
@@ -392,6 +449,18 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
     epaper_wait_busy(5000);
     s_epd.power_on = false;
 
+    /* Save current frame as "old" for next differential refresh */
+    memcpy(s_epd.fb_old, s_epd.fb, EPD_FB_BYTES);
+
+    if (!s_epd.first_refresh_done) {
+        s_epd.first_refresh_done = true;
+    }
+    /* After a full refresh, auto-switch back to fast for subsequent updates */
+    if (!fast) {
+        s_epd.refresh_mode = HAL_DISPLAY_REFRESH_FAST;
+    }
+
+    ESP_LOGI(TAG, "panel refresh complete");
     return ESP_OK;
 }
 
@@ -444,6 +513,7 @@ static const hal_display_driver_t gdeq031t10_driver = {
     .init             = gdeq031t10_init,
     .deinit           = gdeq031t10_deinit,
     .flush            = gdeq031t10_flush,
+    .refresh          = gdeq031t10_refresh,
     .set_brightness   = gdeq031t10_set_brightness,
     .sleep            = gdeq031t10_sleep,
     .set_refresh_mode = gdeq031t10_set_refresh_mode,

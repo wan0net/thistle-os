@@ -247,6 +247,7 @@ static const hal_display_driver_t st7789_driver = {
     .init             = st7789_init,
     .deinit           = st7789_deinit,
     .flush            = st7789_flush,
+    .refresh          = NULL,   /* LCD: no deferred refresh needed */
     .set_brightness   = st7789_set_brightness,
     .sleep            = st7789_sleep,
     .set_refresh_mode = st7789_set_refresh_mode,

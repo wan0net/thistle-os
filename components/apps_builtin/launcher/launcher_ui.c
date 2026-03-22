@@ -394,7 +394,7 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(lbl_clock, &lv_font_montserrat_22, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_clock, colors->text, LV_PART_MAIN);
 
-    lv_timer_create(launcher_clock_update, 10000, lbl_clock);
+    lv_timer_create(launcher_clock_update, 60000, lbl_clock); /* 60s — minimize e-paper refreshes */
 
     /* Branding subtitle */
     lv_obj_t *lbl_brand = lv_label_create(wallpaper);

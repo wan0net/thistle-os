@@ -154,6 +154,7 @@ static const hal_display_driver_t sim_display_driver = {
     .init             = sim_display_init,
     .deinit           = sim_display_deinit,
     .flush            = sim_display_flush,
+    .refresh          = NULL,   /* LCD sim: no deferred refresh needed */
     .set_brightness   = sim_display_brightness,
     .sleep            = sim_display_sleep,
     .set_refresh_mode = sim_display_refresh_mode,

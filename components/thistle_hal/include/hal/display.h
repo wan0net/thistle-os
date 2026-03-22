@@ -23,6 +23,7 @@ typedef struct {
     esp_err_t (*init)(const void *config);
     void (*deinit)(void);
     esp_err_t (*flush)(const hal_area_t *area, const uint8_t *color_data);
+    esp_err_t (*refresh)(void);  /* Commit framebuffer to physical display (e-paper) */
     esp_err_t (*set_brightness)(uint8_t percent);
     esp_err_t (*sleep)(bool enter);
     esp_err_t (*set_refresh_mode)(hal_display_refresh_mode_t mode);
