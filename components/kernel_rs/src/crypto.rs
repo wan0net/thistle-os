@@ -27,17 +27,9 @@ const ESP_FAIL: i32 = -1;
 
 type HmacSha256 = Hmac<Sha256>;
 
-// ── HAL crypto driver vtable (matches hal/crypto.h) ─────────────────
+// ── HAL crypto driver vtable — use the type from hal_registry ────────
 
-#[repr(C)]
-struct HalCryptoDriver {
-    sha256: Option<unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32>,
-    aes256_cbc_encrypt: Option<unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32>,
-    aes256_cbc_decrypt: Option<unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32>,
-    hmac_sha256: Option<unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32>,
-    random: Option<unsafe extern "C" fn(*mut u8, usize) -> i32>,
-    name: *const u8,
-}
+use crate::hal_registry::HalCryptoDriver;
 
 // HAL crypto driver access — delegates to Rust registry (not available in test builds)
 #[cfg(not(test))]

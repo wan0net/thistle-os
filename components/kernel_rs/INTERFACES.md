@@ -11,20 +11,23 @@ and areas that need improvement before the kernel can be considered production-r
 ThistleOS splits responsibility at the syscall boundary:
 
 - **Kernelspace (Rust)** — safety-critical subsystems: manifest parsing,
-  permissions, IPC, event bus, version negotiation. Compiled as a static
+  permissions, IPC, event bus, version negotiation, HAL registry, hardware
+  drivers, window manager, app store, network managers. Compiled as a static
   library (`crate-type = ["staticlib"]`) by `cargo +esp` and linked into the
   firmware image via `CMakeLists.txt`.
-- **Userspace / drivers / UI (C)** — LVGL window manager, hardware drivers,
-  board definitions, ELF loader, signing. These call into the Rust kernel
-  through the `rs_*` C FFI functions declared in `thistle/kernel_rs.h`.
+- **Userspace / drivers / UI (C)** — ELF loader, signing glue, board init shims
+  (~180 LOC total: `kernel_shims.c` at 57 LOC weak link stubs, `tk_wm_shims.c`
+  at 123 LOC HAL bridges). These call into the Rust kernel through the `rs_*`
+  C FFI functions declared in `thistle/kernel_rs.h`.
 
-The crate is `thistle-kernel` (version `0.1.0`). The only runtime dependency is
-`log = "0.4"` (currently wired up as a no-op — see Cross-cutting concerns).
-Build depends on `embuild = "0.33"` for ESP-IDF path discovery.
+The crate is `thistle-kernel` (version `0.1.0`). Current runtime dependencies:
+`log = "0.4"`, `ed25519-dalek`, `sha2`, `hmac`, `aes`, `pbkdf2`, `thistle-tk`,
+`embedded-graphics`. Build depends on `embuild = "0.33"` for ESP-IDF path
+discovery.
 
-Modules are migrated from C incrementally. During the dual-existence period both
-the C file and the Rust file can coexist; the CMakeLists.txt for each subsystem
-determines which implementation is actually linked.
+The kernel is now **42 modules, 515 tests** (all `#[cfg(test)]`, host target).
+The migration from C is complete — all subsystems are implemented in Rust. The
+remaining C files are weak-link stubs and HAL bridge shims only.
 
 ---
 
@@ -60,9 +63,11 @@ pub struct Manifest {
     pub min_memory_kb: u32,
     pub hal_interface: String,   // driver-only
     pub changelog: String,       // firmware-only
+    pub compatible_boards: Vec<String>, // optional board ID allowlist
+    pub detection: Option<DetectionSpec>, // component-level hardware detection
 }
 
-pub enum ManifestType { App = 0, Driver = 1, Firmware = 2 }
+pub enum ManifestType { App = 0, Driver = 1, Firmware = 2, Wm = 3 }
 
 pub enum ManifestError {
     NotFound,
@@ -274,6 +279,13 @@ esp_err_t rs_permissions_revoke(const char *app_id, uint32_t perms);
 int32_t   rs_permissions_check(const char *app_id, uint32_t perm);
 
 uint32_t  rs_permissions_get(const char *app_id);
+
+// Parse a comma-separated permission string into a bitmask.
+// "radio,gps" → PERM_RADIO | PERM_GPS
+uint32_t  permissions_parse(const char *perm_str);
+
+// Format a bitmask as a canonical comma-separated string into buf.
+void      permissions_to_string(uint32_t perms, char *buf, size_t buf_size);
 ```
 
 All `app_id` pointers must be valid, non-null, null-terminated C strings.
@@ -648,8 +660,10 @@ esp_err_t thistle_crypto_random(uint8_t *buf, size_t len);
 
 ### HAL Dispatch
 
-The module checks the `hal_crypto_driver_t` vtable (via `hal_get_registry()->crypto`)
-before each operation:
+The module checks the `hal_crypto_driver_t` vtable via the Rust HAL registry
+(`hal_registry::registry().crypto`) before each operation. The HAL registry is
+itself a Rust module (`hal_registry.rs`) — there is no C FFI indirection for
+this lookup. The dispatch is:
 
 - If the vtable pointer is non-null and the relevant function pointer is set, the HAL
   function is called.
@@ -689,24 +703,21 @@ before each operation:
 
 ---
 
-## Module: app_manager (being ported)
+## Module: app_manager
 
-**Source:** `src/app_manager.rs` — **file does not yet exist**. This module is
-the next planned port from `components/kernel/src/app_manager.c`.
+**Source:** `src/app_manager.rs`
 
 ### Purpose
 
 Tracks the lifecycle of loaded apps (slots: created, running, paused, stopped),
 enforces the maximum simultaneous app limit, drives lifecycle callbacks
 (`on_create`, `on_resume`, `on_pause`, `on_destroy`), and implements LRU
-eviction when the system runs low on free slots.
+eviction when the system runs low on free slots. Fully ported to Rust.
 
-### Rust API (planned)
-
-The Rust API will mirror the existing C interface:
+### Rust API
 
 ```rust
-pub const MAX_APP_SLOTS: usize = 8;  // matches current C definition
+pub const MAX_APP_SLOTS: usize = 8;
 
 pub enum AppState { Empty, Created, Running, Paused, Stopped }
 
@@ -714,7 +725,7 @@ pub struct AppSlot {
     pub app_id: [u8; 64],
     pub state: AppState,
     pub last_active_tick: u32,
-    // ... vtable pointers for lifecycle callbacks
+    // vtable pointers for lifecycle callbacks
 }
 
 pub fn app_manager_init() -> i32;
@@ -726,7 +737,7 @@ pub fn app_find(app_id: &str) -> Option<usize>;
 pub fn app_evict_lru() -> i32;
 ```
 
-### C FFI (planned)
+### C FFI
 
 ```c
 esp_err_t rs_app_manager_init(void);
@@ -834,16 +845,52 @@ Unit tests are in `#[cfg(test)]` blocks within each module source file. They
 run on the **host** target (`cargo test`) and do not require an ESP32 or
 ESP-IDF.
 
+**Total: 515 unit tests.** All run on the host target.
+
+Core kernel modules:
+
 | Module | Test count | Notes |
 |--------|-----------|-------|
-| `manifest` | 8 | Covers all three manifest types, error cases, path derivation, compat check |
-| `permissions` | 8 | Covers grant/revoke/check, accumulation, slot exhaustion, parse/format |
+| `manifest` | 8 | Covers all manifest types including WM, error cases, path derivation, compat check |
+| `permissions` | 8 | grant/revoke/check, accumulation, slot exhaustion, parse/format, C FFI exports |
 | `ipc` | 4 | send/recv, handler dispatch, queue full, recv timeout |
 | `event` | 4 | subscribe/publish, unsubscribe, multi-subscriber, invalid type |
 | `crypto` | 5 | SHA-256, HMAC-SHA256, AES-256-CBC roundtrip, PBKDF2, random |
 | `version` | — | Tested indirectly via `manifest` compatibility tests |
+| `hal_registry` | 8+ | Registry init, vtable registration, fallback paths |
+| `app_manager` | — | Lifecycle covered by integration paths |
 
-Total: 29 unit tests. All run on the host target.
+Hardware driver modules (each has unit tests for init, config parsing, mock reads):
+
+| Driver module | Notes |
+|--------------|-------|
+| E-paper (GDEQ031T10) | SPI command sequences, refresh modes |
+| LCD (ST7789) | Init sequence, rotation, partial update |
+| OLED (SSD1306) | I2C init, draw commands |
+| Keyboard (TCA8418) | Key event parsing, I2C protocol |
+| Touch (CST328, FT5x06) | Touch point decoding |
+| GPS (L76K) | NMEA sentence parsing |
+| Accelerometer (LIS3DH) | Register read/write, threshold config |
+| Power (IP5306, AXP2101) | Battery level, charging state |
+| Audio (ES8311) | I2S config, codec init |
+| RTC (PCF8563) | Time set/get, alarm, I2C encoding |
+| SD card | SPI init, mount/unmount |
+| IMU (QMI8658C) | 6-axis read, calibration |
+| Light sensor stub | Returns fixed value, tests stub contract |
+
+App/WM modules:
+
+| Module | Notes |
+|--------|-------|
+| `tk_appstore` | Catalog parsing, category filter, arch filter, rating sort |
+| `tk_wm` / `tk_launcher` | Surface management, focus, input routing |
+| `wifi_manager` | SSID list, connect/disconnect state machine |
+| `ble_manager` | Advertising state, GATT stub |
+| `net_manager` | Interface selection, route priority |
+| `board_config` | JSON parsing for 6 board configs |
+| `driver_manager` | Load order, dependency resolution |
+| `ota` | Version check, download, verify, apply |
+| `appstore_client` | HTTP fetch, manifest parse, install flow |
 
 **ESP-IDF integration testing** (running on target hardware or QEMU) does not
 exist yet. Key gaps: VFS-based manifest file reading, FreeRTOS Condvar
@@ -858,17 +905,26 @@ crate-type = ["staticlib"]
 
 [dependencies]
 log = "0.4"
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+hmac = { version = "0.12", default-features = false }
+aes = { version = "0.8", default-features = false }
+pbkdf2 = { version = "0.12", default-features = false }
+thistle-tk = { path = "../thistle_tk" }
+embedded-graphics = "0.8"
 
 [build-dependencies]
 embuild = "0.33"
 ```
 
 ```
-# Host tests:
-cargo test
+# Host tests (515 tests, all modules):
+cargo test --target aarch64-apple-darwin -- --test-threads=1
 
-# ESP32-S3 target:
+# Multi-arch ESP32 targets:
 cargo +esp build --release --target xtensa-esp32s3-espidf
+cargo +esp build --release --target xtensa-esp32-espidf
+cargo +esp build --release --target riscv32imc-esp-espidf   # C3, C6, H2
 
 # CMakeLists.txt links the resulting libthistle_kernel.a:
 # target_link_libraries(${COMPONENT_LIB} INTERFACE kernel_rs)
@@ -882,25 +938,59 @@ triple and linker flags.
 
 ## Migration Status Table
 
-| Module | C file | Rust file | Status | Host tests |
-|--------|--------|-----------|--------|-----------|
-| manifest | `manifest.c` | `manifest.rs` + `ffi.rs` | Rust | 8 |
-| version | `kernel.h` (constant) | `version.rs` + `ffi.rs` | Rust | via manifest |
-| permissions | `permissions.c` | `permissions.rs` | Rust | 8 |
-| ipc | `ipc.c` | `ipc.rs` | Rust | 4 |
-| event | `event.c` | `event.rs` | Rust | 4 |
-| app_manager | `app_manager.c` | `app_manager.rs` | Rust | — |
-| signing | `signing.c` | `signing.rs` | Rust (Monocypher/Ed25519) | via C tests |
-| elf_loader | `elf_loader.c` | `elf_loader.rs` | Rust | — |
-| driver_loader | `driver_loader.c` | `driver_loader.rs` | Rust | — |
-| kernel | `kernel.c` | `kernel.rs` | Rust (boot sequence) | — |
-| crypto | — | `crypto.rs` + `ffi.rs` | Rust | 5 |
+All modules are implemented in Rust. The remaining C files are weak-link stubs
+(`kernel_shims.c`, 57 LOC) and HAL bridges (`tk_wm_shims.c`, 123 LOC) only.
 
-All modules are now implemented in Rust. The C files listed above are retained
-for reference during the transition period but are no longer linked — the
-`CMakeLists.txt` for each subsystem pulls only from `kernel_rs`. The Rust
-implementations expose `rs_*` and `thistle_*` C FFI symbols consumed by the
-remaining C components (display server, ELF loader glue, board init).
+### Core kernel modules
+
+| Module | Rust file | Status | Host tests |
+|--------|-----------|--------|-----------|
+| manifest | `manifest.rs` + `ffi.rs` | Rust | 8 |
+| version | `version.rs` + `ffi.rs` | Rust | via manifest |
+| permissions | `permissions.rs` | Rust | 8 |
+| ipc | `ipc.rs` | Rust | 4 |
+| event | `event.rs` | Rust | 4 |
+| app_manager | `app_manager.rs` | Rust | — |
+| signing | `signing.rs` | Rust (ed25519-dalek) | via crypto |
+| elf_loader | `elf_loader.rs` | Rust | — |
+| driver_loader | `driver_loader.rs` | Rust | — |
+| driver_manager | `driver_manager.rs` | Rust | covered |
+| board_config | `board_config.rs` | Rust | covered (6 boards) |
+| kernel | `kernel.rs` | Rust (boot sequence) | — |
+| crypto | `crypto.rs` + `ffi.rs` | Rust | 5 |
+| hal_registry | `hal_registry.rs` | Rust | 8+ |
+| ota | `ota.rs` | Rust | covered |
+| appstore_client | `appstore_client.rs` | Rust | covered |
+| wifi_manager | `wifi_manager.rs` | Rust | covered |
+| ble_manager | `ble_manager.rs` | Rust | covered |
+| net_manager | `net_manager.rs` | Rust | covered |
+
+### Hardware driver modules
+
+| Driver | Rust file | Interface | Host tests |
+|--------|-----------|-----------|-----------|
+| E-paper GDEQ031T10 | `drv_epaper.rs` | display | covered |
+| LCD ST7789 | `drv_lcd.rs` | display | covered |
+| OLED SSD1306 | `drv_oled.rs` | display | covered |
+| Keyboard TCA8418 | `drv_keyboard.rs` | input | covered |
+| Touch CST328 | `drv_touch_cst328.rs` | input | covered |
+| Touch FT5x06 | `drv_touch_ft5x06.rs` | input | covered |
+| GPS L76K | `drv_gps.rs` | gps | covered |
+| Accelerometer LIS3DH | `drv_accel.rs` | imu | covered |
+| Power IP5306/AXP2101 | `drv_power.rs` | power | covered |
+| Audio ES8311 | `drv_audio.rs` | audio | covered |
+| RTC PCF8563 | `drv_rtc.rs` | rtc | covered |
+| SD card | `drv_sdcard.rs` | storage | covered |
+| IMU QMI8658C | `drv_imu.rs` | imu | covered |
+| Light sensor (stub) | `drv_light.rs` | — | covered |
+
+### App and WM modules
+
+| Module | Rust file | Status | Host tests |
+|--------|-----------|--------|-----------|
+| thistle-tk WM | `tk_wm.rs` | Rust (default WM) | covered |
+| Launcher | `tk_launcher.rs` | Rust | covered |
+| App store UI | `tk_appstore.rs` | Rust | covered |
 
 ---
 
