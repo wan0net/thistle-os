@@ -25,7 +25,7 @@ add_custom_command(
 
 add_custom_target(kernel_rs_build DEPENDS ${RUST_LIB})
 add_dependencies(${COMPONENT_LIB} kernel_rs_build)
-# Link Rust lib with --start-group/--end-group to handle circular deps
-# with C components (widget_shims, display_server, etc.)
-target_link_libraries(${COMPONENT_LIB} INTERFACE
-    -Wl,--start-group ${RUST_LIB} -Wl,--end-group)
+# Link Rust lib in the INTERFACE so consumers (kernel, ui, main) get it.
+# Use --start-group wrapping the Rust lib AND all ESP-IDF libs that
+# it references, so the linker can resolve symbols in any order.
+target_link_libraries(${COMPONENT_LIB} INTERFACE ${RUST_LIB})
