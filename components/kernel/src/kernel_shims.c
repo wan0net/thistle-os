@@ -24,6 +24,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// ── BLE stubs (TODO: implement real advertising/GATT) ────────────────
+void ble_manager_do_advertise(void) { /* TODO */ }
+void ble_manager_register_gatt_services(void) { /* TODO */ }
+
 __attribute__((weak)) uint32_t wm_widget_get_app_root(void) { return 0; }
 __attribute__((weak)) uint32_t wm_widget_create_container(uint32_t p) { return 0; }
 __attribute__((weak)) uint32_t wm_widget_create_label(uint32_t p, const char *t) { return 0; }
