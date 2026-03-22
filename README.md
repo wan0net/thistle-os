@@ -20,6 +20,8 @@
 
 ---
 
+> **Alpha Software** — ThistleOS is under active development. The e-paper display renders on the T-Deck Pro but the full UI pipeline is still being tuned. Expect rough edges.
+
 ## Why ThistleOS
 
 The ESP32 ecosystem is full of great hardware — T-Deck, T-Beam, M5Stack, Heltec, custom boards — but every project starts from scratch. Different pin assignments, different displays, different radios, all requiring custom firmware.
@@ -279,7 +281,7 @@ Signing and verification at every level — from boot to apps:
 - The **developer** holds the Ed25519 private key (never on-device)
 - The **device** holds only the public key (embedded in Recovery firmware)
 - The device **cannot forge signatures** — it can only verify them
-- Cryptography uses **mbedtls** (built into ESP-IDF) for TLS and Ed25519 verification; symmetric crypto (AES-256, HMAC-SHA256, PBKDF2) goes through the kernel crypto module
+- Cryptography uses **ed25519-dalek** (Rust) for signing and **mbedtls** (ESP-IDF) for TLS; symmetric crypto (AES-256, HMAC-SHA256, PBKDF2) goes through the kernel crypto module
 
 **Kernel crypto module:**
 The kernel contains a platform-independent crypto layer (`components/kernel_rs/src/crypto.rs`). It dispatches through the `hal_crypto_driver_t` vtable first — on ESP32-S3 this can use the hardware AES and SHA accelerators. When no hardware crypto driver is registered (simulator, WASM, or boards without hardware crypto), it falls back to pure Rust software implementations transparently. The Vault app uses this kernel crypto on all platforms, including the SDL2 simulator and the planned WASM web simulator.
@@ -316,7 +318,7 @@ The simulator runs the **real kernel and app code** in an SDL2 window with:
 ## Getting Started
 
 ### Prerequisites
-- [ESP-IDF v5.3+](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/)
+- [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/)
 
 ### Build & Flash
 ```bash
@@ -340,13 +342,13 @@ cmake .. && make -j8 && ./thistle_sim
 
 | Metric | Value |
 |--------|-------|
-| C source code | ~33,000 lines |
-| Rust kernel code | ~2,800 lines |
+| C source code | ~15,000 lines |
+| Rust kernel code | ~3,500 lines |
 | Source files | 160+ |
 | Built-in apps | 14 |
 | HAL drivers | 12 |
 | Board configs | 2 (T-Deck Pro, T-Deck) |
-| Unit tests | 80+ (C) + 37 (Rust) |
+| Unit tests | 80+ (C) + 66 (Rust) |
 | Firmware binary | ~1.6 MB |
 | Commits | 75+ |
 | License | BSD 3-Clause |
@@ -367,18 +369,21 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 ### Completed
 - [x] Ed25519 asymmetric signing (Monocypher)
 - [x] Recovery OS (Rust, compiles clean)
-- [x] Rust kernel — 6 modules ported (manifest, permissions, IPC, events, app manager, version)
+- [x] 100% Rust kernel (20 modules, 66 tests)
 - [x] Unified manifest system for apps, drivers, firmware
 - [x] Boot-from-JSON (board.json driven hardware init)
 - [x] Display server with swappable window managers
 - [x] Driver SDK (C and Rust templates)
 - [x] Expanded syscall table (45 ESP-IDF APIs for runtime drivers)
+- [x] Hardware bringup on T-Deck Pro (e-paper, keyboard, touch working)
+- [x] App loading infrastructure (SPIFFS + SD card scanner)
+- [x] Widget API syscall table (31 functions)
 
 ### In Progress
 - [ ] Compile existing drivers as standalone .drv.elf files
 - [ ] Move built-in apps to .app.elf on SPIFFS
-- [ ] Switch kernel from C to Rust implementations
 - [ ] Wire display server into boot sequence
+- [ ] E-paper display rotation and LVGL rendering
 
 ### Planned
 - [ ] First-boot setup wizard (board detection, WM selection, WiFi)
@@ -403,7 +408,8 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | esp_modem | Apache-2.0 | 4G PPP |
 | esp_lcd | Apache-2.0 | LCD display |
 | NimBLE | Apache-2.0 | BLE |
-| Monocypher | BSD-2-Clause | Ed25519 signing |
+| ed25519-dalek | BSD-3-Clause/MIT | Ed25519 signing |
+| sha2 | MIT/Apache-2.0 | SHA-256 hashing |
 | mbedtls | Apache-2.0 | TLS, AES, hashing |
 | aes | MIT/Apache-2.0 | Rust software AES-256 |
 | hmac | MIT/Apache-2.0 | Rust software HMAC |
