@@ -9,6 +9,8 @@
 
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -19,6 +21,12 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "esp_elf.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#include "driver/i2c_master.h"
+#include "driver/spi_master.h"
 
 // Reference each symbol so the linker pulls it from the ESP-IDF archive.
 // This function is never called — it's dead code that exists only to
@@ -48,10 +56,42 @@ static void _force_link_deps(void) {
     (void)esp_elf_relocate;
     (void)esp_elf_request;
     (void)esp_elf_deinit;
-    // ADC calibration
+    // ADC oneshot + calibration (called by drv_power_tp4065b.rs)
+    (void)adc_oneshot_new_unit;
+    (void)adc_oneshot_del_unit;
+    (void)adc_oneshot_config_channel;
+    (void)adc_oneshot_read;
+    (void)adc_cali_raw_to_voltage;
 #if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
     (void)adc_cali_create_scheme_line_fitting;
     (void)adc_cali_delete_scheme_line_fitting;
 #endif
-    // FreeRTOS (xTaskCreate is a macro in v5.5, may not need this)
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    (void)adc_cali_create_scheme_curve_fitting;
+    (void)adc_cali_delete_scheme_curve_fitting;
+#endif
+    // FreeRTOS (xTaskCreate is a macro wrapping xTaskCreatePinnedToCore)
+    (void)xTaskCreatePinnedToCore;
+    (void)vTaskDelete;
+    (void)vTaskDelay;
+    // UART (called by drv_gps_mia_m10q.rs)
+    (void)uart_driver_install;
+    (void)uart_driver_delete;
+    (void)uart_param_config;
+    (void)uart_set_pin;
+    (void)uart_read_bytes;
+    (void)uart_write_bytes;
+    // GPIO (called by multiple drivers)
+    (void)gpio_set_direction;
+    (void)gpio_set_level;
+    (void)gpio_get_level;
+    (void)gpio_set_pull_mode;
+    (void)gpio_isr_handler_add;
+    (void)gpio_isr_handler_remove;
+    // I2C master (called by keyboard, touch, accel, OLED, IMU, light drivers)
+    (void)i2c_master_bus_add_device;
+    (void)i2c_master_transmit;
+    (void)i2c_master_transmit_receive;
+    // SPI (called by e-paper, SD card drivers)
+    (void)spi_device_polling_transmit;
 }
