@@ -45,6 +45,7 @@ pub mod drv_rtc_pcf8563;
 pub mod drv_accel_qmi8658;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 pub mod gps_track;
 =======
 pub mod data_logger;
@@ -52,4 +53,7 @@ pub mod data_logger;
 =======
 pub mod sos_beacon;
 >>>>>>> feat/sos-beacon
+=======
+pub mod secure_wipe;
+>>>>>>> feat/secure-wipe
 mod ffi;
