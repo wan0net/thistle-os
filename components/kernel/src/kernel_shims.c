@@ -26,6 +26,34 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// ADC calibration shims — on chips that don't support a given scheme, provide
+// a weak stub that returns ESP_ERR_NOT_SUPPORTED so the Rust driver's fallback
+// chain works without linker errors.
+#include "esp_err.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+#if !ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+__attribute__((weak)) int adc_cali_create_scheme_line_fitting(const void *cfg, void **out) {
+    (void)cfg; (void)out;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+__attribute__((weak)) int adc_cali_delete_scheme_line_fitting(void *handle) {
+    (void)handle;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
+
+#if !ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+__attribute__((weak)) int adc_cali_create_scheme_curve_fitting(const void *cfg, void **out) {
+    (void)cfg; (void)out;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+__attribute__((weak)) int adc_cali_delete_scheme_curve_fitting(void *handle) {
+    (void)handle;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+#endif
+
 __attribute__((weak)) uint32_t wm_widget_get_app_root(void) { return 0; }
 __attribute__((weak)) uint32_t wm_widget_create_container(uint32_t p) { return 0; }
 __attribute__((weak)) uint32_t wm_widget_create_label(uint32_t p, const char *t) { return 0; }

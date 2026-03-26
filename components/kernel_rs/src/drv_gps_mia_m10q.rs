@@ -56,13 +56,14 @@ extern "C" {
     fn uart_driver_delete(port: i32) -> i32;
     fn uart_read_bytes(port: i32, buf: *mut u8, len: u32, timeout: u32) -> i32;
     fn uart_write_bytes(port: i32, buf: *const u8, len: usize) -> i32;
-    fn xTaskCreate(
+    fn xTaskCreatePinnedToCore(
         task_fn: unsafe extern "C" fn(*mut c_void),
         name: *const u8,
         stack: u32,
         param: *mut c_void,
         prio: u32,
         handle: *mut *mut c_void,
+        core_id: i32,
     ) -> i32;
     fn vTaskDelete(task: *mut c_void);
     fn vTaskDelay(ticks: u32);
@@ -109,13 +110,14 @@ unsafe fn uart_write_bytes(_port: i32, _buf: *const u8, _len: usize) -> i32 {
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn xTaskCreate(
+unsafe fn xTaskCreatePinnedToCore(
     _task_fn: unsafe extern "C" fn(*mut c_void),
     _name: *const u8,
     _stack: u32,
     _param: *mut c_void,
     _prio: u32,
     handle: *mut *mut c_void,
+    _core_id: i32,
 ) -> i32 {
     // Return a non-null sentinel handle so callers can tell it "worked".
     *handle = 1usize as *mut c_void;
@@ -645,13 +647,14 @@ unsafe extern "C" fn mia_m10q_enable() -> i32 {
         return ESP_OK;
     }
 
-    let rc = xTaskCreate(
+    let rc = xTaskCreatePinnedToCore(
         gps_rx_task,
         b"gps_rx\0".as_ptr(),
         RX_TASK_STACK_SIZE,
         std::ptr::null_mut(),
         RX_TASK_PRIORITY,
         &mut gps.rx_task as *mut *mut c_void,
+        1, // pin to core 1 (app core)
     );
 
     if rc != 1 {
