@@ -43,21 +43,15 @@ pub mod drv_light_ltr553;
 pub mod drv_lcd_st7789;
 pub mod drv_rtc_pcf8563;
 pub mod drv_accel_qmi8658;
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 pub mod gps_track;
-=======
 pub mod data_logger;
->>>>>>> feat/data-logger
-=======
 pub mod sos_beacon;
->>>>>>> feat/sos-beacon
-=======
 pub mod secure_wipe;
->>>>>>> feat/secure-wipe
-=======
 pub mod notification;
->>>>>>> feat/notification-manager
+pub mod contact_manager;
+pub mod ble_scanner;
+pub mod burn_timer;
+pub mod msg_queue;
+pub mod msg_crypto;
+pub mod driver_reload;
 mod ffi;
