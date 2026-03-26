@@ -408,3 +408,309 @@ pub extern "C" fn display_server_tick() {
     drop(lock);
     display_server_composite();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper to create a test surface info
+    fn test_surface(w: u16, h: u16, role: SurfaceRole) -> SurfaceInfo {
+        SurfaceInfo { x: 0, y: 0, width: w, height: h, role: role as u32, visible: true }
+    }
+
+    #[test]
+    fn test_init_creates_server() {
+        display_server_init();
+        let lock = DS.lock().unwrap();
+        assert!(lock.is_some(), "DS should be initialized");
+        let ds = lock.as_ref().unwrap();
+        assert!(ds.initialized, "DisplayServer should have initialized flag set");
+        assert_eq!(ds.surfaces.len(), MAX_SURFACES, "Should have MAX_SURFACES empty slots");
+        assert_eq!(ds.next_id, 1, "next_id should start at 1");
+    }
+
+    #[test]
+    fn test_create_surface_returns_nonzero_id() {
+        display_server_init();
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0, "create_surface should return non-zero ID");
+        assert_eq!(id, 1, "first surface should have ID 1");
+    }
+
+    #[test]
+    fn test_create_surface_allocates_buffer() {
+        display_server_init();
+        let info = test_surface(50, 40, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        let lock = DS.lock().unwrap();
+        let ds = lock.as_ref().unwrap();
+        let surface = &ds.surfaces[0];
+        let expected_size = 50 * 40 * 2; // width * height * 2 bytes (16-bit color)
+        assert_eq!(surface.buffer.len(), expected_size, "buffer should be width*height*2 bytes");
+        assert!(surface.allocated, "surface should be marked as allocated");
+    }
+
+    #[test]
+    fn test_destroy_surface_deallocates() {
+        display_server_init();
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        {
+            let lock = DS.lock().unwrap();
+            assert!(lock.as_ref().unwrap().surfaces[0].allocated);
+        }
+
+        unsafe { display_server_destroy_surface(id); }
+
+        let lock = DS.lock().unwrap();
+        let surface = &lock.as_ref().unwrap().surfaces[0];
+        assert!(!surface.allocated, "surface should be deallocated");
+        assert_eq!(surface.buffer.len(), 0, "buffer should be empty");
+    }
+
+    #[test]
+    fn test_max_surfaces_limit() {
+        display_server_init();
+
+        let mut ids = Vec::new();
+        // Create MAX_SURFACES surfaces
+        for i in 0..MAX_SURFACES {
+            let info = SurfaceInfo {
+                x: 0, y: 0,
+                width: 10 + i as u16, height: 10,
+                role: SurfaceRole::AppContent as u32,
+                visible: true,
+            };
+            let id = unsafe { display_server_create_surface(&info) };
+            assert_ne!(id, 0, "surface {} should be created", i);
+            ids.push(id);
+        }
+
+        // Try to create one more — should fail
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_eq!(id, 0, "create_surface should return 0 when MAX_SURFACES exceeded");
+    }
+
+    #[test]
+    fn test_set_visible() {
+        display_server_init();
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        // Initially visible (from test_surface helper)
+        {
+            let lock = DS.lock().unwrap();
+            assert!(lock.as_ref().unwrap().surfaces[0].info.visible);
+        }
+
+        // Set invisible
+        unsafe { display_server_set_visible(id, false); }
+        {
+            let lock = DS.lock().unwrap();
+            assert!(!lock.as_ref().unwrap().surfaces[0].info.visible);
+        }
+
+        // Set visible again
+        unsafe { display_server_set_visible(id, true); }
+        {
+            let lock = DS.lock().unwrap();
+            assert!(lock.as_ref().unwrap().surfaces[0].info.visible);
+        }
+    }
+
+    #[test]
+    fn test_mark_dirty_merges_regions() {
+        display_server_init();
+        let info = test_surface(320, 240, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        // Mark dirty with area (10, 10, 50, 50)
+        let area1 = HalArea { x1: 10, y1: 10, x2: 50, y2: 50 };
+        unsafe { display_server_mark_dirty(id, &area1); }
+
+        {
+            let lock = DS.lock().unwrap();
+            let surface = &lock.as_ref().unwrap().surfaces[0];
+            assert!(surface.dirty);
+            assert_eq!(surface.dirty_area.x1, 10);
+            assert_eq!(surface.dirty_area.y1, 10);
+            assert_eq!(surface.dirty_area.x2, 50);
+            assert_eq!(surface.dirty_area.y2, 50);
+        }
+
+        // Mark dirty with overlapping area (30, 30, 80, 80)
+        let area2 = HalArea { x1: 30, y1: 30, x2: 80, y2: 80 };
+        unsafe { display_server_mark_dirty(id, &area2); }
+
+        // Result should be merged to (10, 10, 80, 80)
+        {
+            let lock = DS.lock().unwrap();
+            let surface = &lock.as_ref().unwrap().surfaces[0];
+            assert!(surface.dirty);
+            assert_eq!(surface.dirty_area.x1, 10, "merged x1 should be min");
+            assert_eq!(surface.dirty_area.y1, 10, "merged y1 should be min");
+            assert_eq!(surface.dirty_area.x2, 80, "merged x2 should be max");
+            assert_eq!(surface.dirty_area.y2, 80, "merged y2 should be max");
+        }
+    }
+
+    #[test]
+    fn test_mark_dirty_full() {
+        display_server_init();
+        let info = test_surface(320, 240, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        unsafe { display_server_mark_dirty_full(id); }
+
+        let lock = DS.lock().unwrap();
+        let surface = &lock.as_ref().unwrap().surfaces[0];
+        assert!(surface.dirty);
+        assert_eq!(surface.dirty_area.x1, 0);
+        assert_eq!(surface.dirty_area.y1, 0);
+        assert_eq!(surface.dirty_area.x2, 319, "x2 should be width-1");
+        assert_eq!(surface.dirty_area.y2, 239, "y2 should be height-1");
+    }
+
+    #[test]
+    fn test_surface_role_values() {
+        assert_eq!(SurfaceRole::Background as u32, 0);
+        assert_eq!(SurfaceRole::StatusBar as u32, 1);
+        assert_eq!(SurfaceRole::AppContent as u32, 2);
+        assert_eq!(SurfaceRole::Overlay as u32, 3);
+        assert_eq!(SurfaceRole::Dock as u32, 4);
+    }
+
+    #[test]
+    fn test_create_multiple_surfaces_unique_ids() {
+        display_server_init();
+        let mut ids = Vec::new();
+
+        for i in 0..5 {
+            let info = SurfaceInfo {
+                x: 0, y: 0,
+                width: 100, height: 100,
+                role: (i % 5) as u32,
+                visible: true,
+            };
+            let id = unsafe { display_server_create_surface(&info) };
+            assert_ne!(id, 0);
+            ids.push(id);
+        }
+
+        // Check all IDs are unique and incrementing
+        for i in 0..ids.len() {
+            assert_eq!(ids[i], (i + 1) as u32, "IDs should be incrementing from 1");
+            for j in i + 1..ids.len() {
+                assert_ne!(ids[i], ids[j], "IDs should be unique");
+            }
+        }
+    }
+
+    #[test]
+    fn test_surface_empty() {
+        let surface = Surface::empty();
+        assert!(!surface.allocated);
+        assert!(!surface.dirty);
+        assert_eq!(surface.info.x, 0);
+        assert_eq!(surface.info.y, 0);
+        assert_eq!(surface.info.width, 0);
+        assert_eq!(surface.info.height, 0);
+        assert!(!surface.info.visible);
+        assert_eq!(surface.buffer.len(), 0);
+    }
+
+    #[test]
+    fn test_display_server_new() {
+        let ds = DisplayServer::new();
+        assert!(!ds.initialized);
+        assert_eq!(ds.surfaces.len(), MAX_SURFACES);
+        assert_eq!(ds.next_id, 1);
+        assert!(ds.wm.is_none());
+
+        // Verify all surfaces are empty
+        for surface in &ds.surfaces {
+            assert!(!surface.allocated);
+        }
+    }
+
+    #[test]
+    fn test_get_buffer_returns_null_for_unallocated() {
+        display_server_init();
+        let buf = unsafe { display_server_get_buffer(1) };
+        assert!(buf.is_null(), "get_buffer should return null for unallocated surface");
+    }
+
+    #[test]
+    fn test_get_buffer_returns_valid_ptr() {
+        display_server_init();
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        let buf = unsafe { display_server_get_buffer(id) };
+        assert!(!buf.is_null(), "get_buffer should return non-null for allocated surface");
+    }
+
+    #[test]
+    fn test_get_info_returns_surface_info() {
+        display_server_init();
+        let info = SurfaceInfo {
+            x: 10, y: 20,
+            width: 150, height: 200,
+            role: SurfaceRole::StatusBar as u32,
+            visible: true,
+        };
+        let id = unsafe { display_server_create_surface(&info) };
+        assert_ne!(id, 0);
+
+        let retrieved_info = unsafe { display_server_get_info(id) };
+        assert!(!retrieved_info.is_null());
+
+        let retrieved_info = unsafe { *retrieved_info };
+        assert_eq!(retrieved_info.x, 10);
+        assert_eq!(retrieved_info.y, 20);
+        assert_eq!(retrieved_info.width, 150);
+        assert_eq!(retrieved_info.height, 200);
+        assert_eq!(retrieved_info.role, SurfaceRole::StatusBar as u32);
+    }
+
+    #[test]
+    fn test_mark_dirty_invalid_surface() {
+        display_server_init();
+        let area = HalArea { x1: 0, y1: 0, x2: 100, y2: 100 };
+        // Try to mark dirty on non-existent surface — should not panic
+        unsafe { display_server_mark_dirty(999, &area); }
+        // Test passes if no panic
+    }
+
+    #[test]
+    fn test_surface_reuse_after_destroy() {
+        display_server_init();
+
+        // Create, destroy, and recreate in same slot
+        let info = test_surface(100, 100, SurfaceRole::AppContent);
+        let id1 = unsafe { display_server_create_surface(&info) };
+        assert_eq!(id1, 1);
+
+        unsafe { display_server_destroy_surface(id1); }
+
+        let id2 = unsafe { display_server_create_surface(&info) };
+        assert_eq!(id2, 2, "new surface should get next ID, not reuse 1");
+
+        {
+            let lock = DS.lock().unwrap();
+            // Both slots should have surface 2 allocated
+            assert!(lock.as_ref().unwrap().surfaces[0].allocated);
+            assert!(lock.as_ref().unwrap().surfaces[0].info.visible);
+        }
+    }
+}

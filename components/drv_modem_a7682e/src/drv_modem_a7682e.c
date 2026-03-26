@@ -34,6 +34,9 @@ static struct {
     bool             initialized;
     bool             powered_on;
     bool             ppp_connected;
+    a7682e_sms_cb_t  sms_cb;
+    void            *sms_cb_data;
+    bool             sms_initialized;
 } s_modem;
 
 /* =========================================================================
@@ -428,4 +431,226 @@ esp_err_t drv_a7682e_http_get(const char *url, char *buf, size_t buf_len)
     ESP_LOGW(TAG, "http_get: use esp_http_client with PPP active "
              "(works just like WiFi)");
     return ESP_ERR_NOT_SUPPORTED;
+}
+
+/* =========================================================================
+ * Public API — SMS
+ * ====================================================================== */
+
+esp_err_t drv_a7682e_sms_init(void)
+{
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "sms_init: modem not powered on");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool ppp_was_active = s_modem.ppp_connected;
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
+    }
+
+    char resp[64] = {0};
+
+    esp_err_t ret = esp_modem_at(s_modem.dce, "AT+CMGF=1", resp, 2000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "sms_init: AT+CMGF=1 failed: %s", esp_err_to_name(ret));
+        goto restore;
+    }
+    ESP_LOGD(TAG, "sms_init: text mode enabled");
+
+    ret = esp_modem_at(s_modem.dce, "AT+CPMS=\"ME\",\"ME\",\"ME\"", resp, 2000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "sms_init: AT+CPMS failed: %s", esp_err_to_name(ret));
+        goto restore;
+    }
+    ESP_LOGD(TAG, "sms_init: preferred storage set to ME");
+
+    ret = esp_modem_at(s_modem.dce, "AT+CNMI=2,1,0,0,0", resp, 2000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "sms_init: AT+CNMI failed: %s", esp_err_to_name(ret));
+        goto restore;
+    }
+    ESP_LOGD(TAG, "sms_init: +CMTI URC forwarding enabled");
+
+    s_modem.sms_initialized = true;
+    ESP_LOGI(TAG, "sms_init: SMS subsystem ready");
+
+restore:
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
+    }
+    return ret;
+}
+
+esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg)
+{
+    if (!phone || !msg) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(phone) >= 32) {
+        ESP_LOGE(TAG, "send_sms: phone number too long (max 31 chars)");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(msg) > 160) {
+        ESP_LOGE(TAG, "send_sms: message too long (max 160 chars for GSM 7-bit)");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "send_sms: modem not powered on");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool ppp_was_active = s_modem.ppp_connected;
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
+    }
+
+    char resp[128] = {0};
+
+    /* Ensure text mode is active before sending */
+    esp_modem_at(s_modem.dce, "AT+CMGF=1", resp, 2000);
+
+    /* Build combined AT+CMGS command with message body and Ctrl+Z terminator.
+     * The esp_modem AT handler passes the full string to the modem;
+     * the embedded \r triggers the ">" prompt and the modem reads the text
+     * up to the Ctrl+Z (0x1A) as the message body. */
+    char cmd[320] = {0};
+    snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"\r%s\x1A", phone, msg);
+
+    ESP_LOGI(TAG, "send_sms: sending to %s", phone);
+    esp_err_t ret = esp_modem_at(s_modem.dce, cmd, resp, 15000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "send_sms: failed (%s), resp: %s",
+                 esp_err_to_name(ret), resp);
+    } else {
+        ESP_LOGI(TAG, "send_sms: sent successfully, resp: %s", resp);
+    }
+
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
+    }
+    return ret;
+}
+
+esp_err_t drv_a7682e_read_sms(int index, char *sender, size_t sender_len,
+                               char *body, size_t body_len)
+{
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "read_sms: modem not powered on");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool ppp_was_active = s_modem.ppp_connected;
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
+    }
+
+    char cmd[32]   = {0};
+    char resp[512] = {0};
+    snprintf(cmd, sizeof(cmd), "AT+CMGR=%d", index);
+
+    esp_err_t ret = esp_modem_at(s_modem.dce, cmd, resp, 5000);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "read_sms: AT+CMGR=%d failed: %s",
+                 index, esp_err_to_name(ret));
+        ret = ESP_ERR_NOT_FOUND;
+        goto restore;
+    }
+
+    /* Response format (text mode):
+     *   +CMGR: "REC READ","<sender>","","<timestamp>"\r\n
+     *   <message body>\r\n
+     *   \r\nOK
+     */
+    const char *header = strstr(resp, "+CMGR:");
+    if (!header) {
+        ESP_LOGW(TAG, "read_sms: no +CMGR in response: %s", resp);
+        ret = ESP_ERR_NOT_FOUND;
+        goto restore;
+    }
+
+    /* Extract sender: second quoted field on the +CMGR: line */
+    if (sender && sender_len > 0) {
+        const char *q1 = strchr(header, '"');           /* open quote of status */
+        if (q1) {
+            const char *q2 = strchr(q1 + 1, '"');       /* close quote of status */
+            if (q2) {
+                const char *q3 = strchr(q2 + 1, '"');   /* open quote of sender */
+                if (q3) {
+                    const char *q4 = strchr(q3 + 1, '"'); /* close quote of sender */
+                    if (q4) {
+                        size_t len = (size_t)(q4 - q3 - 1);
+                        if (len >= sender_len) {
+                            len = sender_len - 1;
+                        }
+                        memcpy(sender, q3 + 1, len);
+                        sender[len] = '\0';
+                    }
+                }
+            }
+        }
+    }
+
+    /* Extract body: line immediately following the +CMGR: header line */
+    if (body && body_len > 0) {
+        const char *eol = strchr(header, '\n');
+        if (eol) {
+            eol++; /* skip the '\n' */
+            /* Skip a leading '\r' if present */
+            if (*eol == '\r') {
+                eol++;
+            }
+            /* Body ends at the next '\r' or '\n' */
+            const char *end = strpbrk(eol, "\r\n");
+            size_t len = end ? (size_t)(end - eol) : strlen(eol);
+            if (len >= body_len) {
+                len = body_len - 1;
+            }
+            memcpy(body, eol, len);
+            body[len] = '\0';
+        }
+    }
+
+    ESP_LOGD(TAG, "read_sms: index=%d sender='%s'",
+             index, (sender ? sender : "(not requested)"));
+
+restore:
+    if (ppp_was_active) {
+        esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
+    }
+    return ret;
+}
+
+esp_err_t drv_a7682e_delete_sms(int index)
+{
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "delete_sms: modem not powered on");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char cmd[32]  = {0};
+    char resp[64] = {0};
+    snprintf(cmd, sizeof(cmd), "AT+CMGD=%d", index);
+
+    esp_err_t ret = esp_modem_at(s_modem.dce, cmd, resp, 5000);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "delete_sms: AT+CMGD=%d failed: %s",
+                 index, esp_err_to_name(ret));
+    } else {
+        ESP_LOGD(TAG, "delete_sms: index %d deleted", index);
+    }
+    return ret;
+}
+
+void drv_a7682e_register_sms_cb(a7682e_sms_cb_t cb, void *user_data)
+{
+    s_modem.sms_cb      = cb;
+    s_modem.sms_cb_data = user_data;
+    /* TODO: Wire s_modem.sms_cb into an esp_modem URC handler once the
+     * esp_modem library exposes a URC registration API.  The handler should
+     * parse "+CMTI: \"ME\",<index>" lines and invoke sms_cb(index, sms_cb_data).
+     * For now, callers can poll AT+CMGL="ALL" or use AT+CNMI URCs read via a
+     * dedicated UART receive task. */
+    ESP_LOGD(TAG, "register_sms_cb: callback %s",
+             cb ? "registered" : "unregistered");
 }

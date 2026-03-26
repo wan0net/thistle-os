@@ -18,15 +18,13 @@
 //   wifi_manager_do_ntp_sync      → wifi_manager.rs
 //   wifi_ap_record_get_*          → wifi_manager.rs
 //   ble_shim_*                    → ble_manager.rs (direct NimBLE FFI)
+//   ble_manager_do_advertise()    → ble_manager.rs (do_advertise + ble_gap_adv_start)
+//   ble_manager_register_gatt_services() → ble_manager.rs (register_gatt_services)
 //   hal_crypto_get()              → hal_registry.rs
 //   esp_ota_img_pending_verify()  → ota.rs (Rust constant)
 
 #include <stdint.h>
 #include <stdbool.h>
-
-// ── BLE stubs (TODO: implement real advertising/GATT) ────────────────
-void ble_manager_do_advertise(void) { /* TODO */ }
-void ble_manager_register_gatt_services(void) { /* TODO */ }
 
 __attribute__((weak)) uint32_t wm_widget_get_app_root(void) { return 0; }
 __attribute__((weak)) uint32_t wm_widget_create_container(uint32_t p) { return 0; }

@@ -272,3 +272,256 @@ pub extern "C" fn board_config_get_wm_name() -> *const c_char {
     }
     buf.as_ptr() as *const c_char
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── find_array tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_find_array_simple() {
+        let json = r#"{"drivers": [1, 2, 3]}"#;
+        let result = find_array(json, "drivers").unwrap();
+        assert_eq!(result, "[1, 2, 3]");
+    }
+
+    #[test]
+    fn test_find_array_with_whitespace() {
+        let json = r#"{"drivers"  :  [1, 2, 3]}"#;
+        let result = find_array(json, "drivers").unwrap();
+        assert_eq!(result, "[1, 2, 3]");
+    }
+
+    #[test]
+    fn test_find_array_nested_arrays() {
+        let json = r#"{"items": [{"a": [1]}, {"b": 2}]}"#;
+        let result = find_array(json, "items").unwrap();
+        assert_eq!(result, r#"[{"a": [1]}, {"b": 2}]"#);
+    }
+
+    #[test]
+    fn test_find_array_missing_key() {
+        let json = r#"{"drivers": [1, 2, 3]}"#;
+        let result = find_array(json, "nonexistent");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_array_key_not_array() {
+        let json = r#"{"drivers": "not an array"}"#;
+        let result = find_array(json, "drivers");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_array_empty_array() {
+        let json = r#"{"items": []}"#;
+        let result = find_array(json, "items").unwrap();
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_find_array_nested_mixed() {
+        let json = r#"{"config": [{"name": "test", "values": [1, 2, 3]}, {"name": "other"}]}"#;
+        let result = find_array(json, "config").unwrap();
+        assert_eq!(
+            result,
+            r#"[{"name": "test", "values": [1, 2, 3]}, {"name": "other"}]"#
+        );
+    }
+
+    // ─── extract_object tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_object_simple() {
+        let json = r#"{"board": {"name": "tdeck"}}"#;
+        let result = extract_object(json, "board").unwrap();
+        assert_eq!(result, r#"{"name": "tdeck"}"#);
+    }
+
+    #[test]
+    fn test_extract_object_with_whitespace() {
+        let json = r#"{"board"  :  {"name": "tdeck"}}"#;
+        let result = extract_object(json, "board").unwrap();
+        assert_eq!(result, r#"{"name": "tdeck"}"#);
+    }
+
+    #[test]
+    fn test_extract_object_nested_objects() {
+        let json = r#"{"root": {"inner": {"deep": "value"}}}"#;
+        let result = extract_object(json, "root").unwrap();
+        assert_eq!(result, r#"{"inner": {"deep": "value"}}"#);
+    }
+
+    #[test]
+    fn test_extract_object_missing_key() {
+        let json = r#"{"board": {"name": "tdeck"}}"#;
+        let result = extract_object(json, "nonexistent");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_object_key_not_object() {
+        let json = r#"{"board": "not an object"}"#;
+        let result = extract_object(json, "board");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_object_empty_object() {
+        let json = r#"{"empty": {}}"#;
+        let result = extract_object(json, "empty").unwrap();
+        assert_eq!(result, "{}");
+    }
+
+    #[test]
+    fn test_extract_object_with_nested_array() {
+        let json = r#"{"config": {"items": [1, 2, 3], "name": "test"}}"#;
+        let result = extract_object(json, "config").unwrap();
+        assert_eq!(result, r#"{"items": [1, 2, 3], "name": "test"}"#);
+    }
+
+    // ─── nth_object tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_nth_object_first() {
+        let array = r#"[{"a": 1}, {"b": 2}, {"c": 3}]"#;
+        let result = nth_object(array, 0).unwrap();
+        assert_eq!(result, r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn test_nth_object_middle() {
+        let array = r#"[{"a": 1}, {"b": 2}, {"c": 3}]"#;
+        let result = nth_object(array, 1).unwrap();
+        assert_eq!(result, r#"{"b": 2}"#);
+    }
+
+    #[test]
+    fn test_nth_object_last() {
+        let array = r#"[{"a": 1}, {"b": 2}, {"c": 3}]"#;
+        let result = nth_object(array, 2).unwrap();
+        assert_eq!(result, r#"{"c": 3}"#);
+    }
+
+    #[test]
+    fn test_nth_object_out_of_range() {
+        let array = r#"[{"a": 1}, {"b": 2}, {"c": 3}]"#;
+        let result = nth_object(array, 5);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_nth_object_empty_array() {
+        let array = "[]";
+        let result = nth_object(array, 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_nth_object_single_element() {
+        let array = r#"[{"single": true}]"#;
+        let result = nth_object(array, 0).unwrap();
+        assert_eq!(result, r#"{"single": true}"#);
+    }
+
+    #[test]
+    fn test_nth_object_nested_objects() {
+        let array = r#"[{"outer": {"inner": "value"}}, {"other": "data"}]"#;
+        let result = nth_object(array, 0).unwrap();
+        assert_eq!(result, r#"{"outer": {"inner": "value"}}"#);
+    }
+
+    #[test]
+    fn test_nth_object_with_whitespace() {
+        let array = r#"[  {"a": 1}  ,  {"b": 2}  ]"#;
+        let result = nth_object(array, 0).unwrap();
+        assert_eq!(result, r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn test_nth_object_with_whitespace_index_one() {
+        let array = r#"[  {"a": 1}  ,  {"b": 2}  ]"#;
+        let result = nth_object(array, 1).unwrap();
+        assert_eq!(result, r#"{"b": 2}"#);
+    }
+
+    // ─── set_board_name tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_set_board_name_simple() {
+        // Clear BOARD_NAME first
+        if let Ok(mut buf) = BOARD_NAME.lock() {
+            buf[0] = 0;
+        }
+
+        set_board_name("tdeck");
+        let buf = BOARD_NAME.lock().unwrap();
+        let cstr = CStr::from_bytes_until_nul(&buf[..]).unwrap();
+        let name = cstr.to_str().unwrap();
+        assert_eq!(name, "tdeck");
+    }
+
+    #[test]
+    fn test_set_board_name_longer_string() {
+        // Clear BOARD_NAME first
+        if let Ok(mut buf) = BOARD_NAME.lock() {
+            buf[0] = 0;
+        }
+
+        set_board_name("t-display-s3-pro");
+        let buf = BOARD_NAME.lock().unwrap();
+        let cstr = CStr::from_bytes_until_nul(&buf[..]).unwrap();
+        let name = cstr.to_str().unwrap();
+        assert_eq!(name, "t-display-s3-pro");
+    }
+
+    #[test]
+    fn test_set_board_name_truncate() {
+        // Clear BOARD_NAME first
+        if let Ok(mut buf) = BOARD_NAME.lock() {
+            buf[0] = 0;
+        }
+
+        let long_name = "a".repeat(100);
+        set_board_name(&long_name);
+
+        let buf = BOARD_NAME.lock().unwrap();
+        let cstr = CStr::from_bytes_until_nul(&buf[..]).unwrap();
+        let name = cstr.to_str().unwrap();
+        assert_eq!(name.len(), 63);
+        assert_eq!(name, "a".repeat(63));
+    }
+
+    #[test]
+    fn test_set_board_name_empty() {
+        // Clear BOARD_NAME first
+        if let Ok(mut buf) = BOARD_NAME.lock() {
+            buf[0] = 0;
+        }
+
+        set_board_name("");
+        let buf = BOARD_NAME.lock().unwrap();
+        assert_eq!(buf[0], 0);
+    }
+
+    #[test]
+    fn test_set_board_name_overwrite() {
+        // Clear BOARD_NAME first
+        if let Ok(mut buf) = BOARD_NAME.lock() {
+            buf[0] = 0;
+        }
+
+        set_board_name("first");
+        let buf1 = BOARD_NAME.lock().unwrap();
+        let cstr1 = CStr::from_bytes_until_nul(&buf1[..]).unwrap();
+        assert_eq!(cstr1.to_str().unwrap(), "first");
+        drop(buf1);
+
+        set_board_name("second");
+        let buf2 = BOARD_NAME.lock().unwrap();
+        let cstr2 = CStr::from_bytes_until_nul(&buf2[..]).unwrap();
+        assert_eq!(cstr2.to_str().unwrap(), "second");
+    }
+}

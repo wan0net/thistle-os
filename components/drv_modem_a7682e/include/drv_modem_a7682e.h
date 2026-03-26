@@ -178,6 +178,68 @@ esp_err_t drv_a7682e_stop_ppp(void);
  */
 bool drv_a7682e_ppp_connected(void);
 
+/* -------------------------------------------------------------------------
+ * SMS
+ * ---------------------------------------------------------------------- */
+
+/**
+ * @brief Initialise SMS subsystem (text mode, preferred storage).
+ *
+ * Sends AT+CMGF=1 (text mode), AT+CPMS="ME","ME","ME" (modem storage),
+ * and AT+CNMI=2,1,0,0,0 (forward new-message notifications as +CMTI URCs).
+ * Must be called after drv_a7682e_power(true).
+ *
+ * @return ESP_OK on success.
+ */
+esp_err_t drv_a7682e_sms_init(void);
+
+/**
+ * @brief Send an SMS in text mode.
+ *
+ * Temporarily switches to command mode if PPP is active, sends the message,
+ * then restores PPP if it was active.
+ *
+ * @param phone  Destination phone number (E.164 format, e.g. "+15551234567").
+ * @param msg    Message text (max 160 chars for GSM 7-bit encoding).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if phone/msg is NULL,
+ *         ESP_ERR_INVALID_STATE if modem is off.
+ */
+esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg);
+
+/**
+ * @brief Read an SMS by storage index.
+ *
+ * @param index    Message index (from +CMTI URC or AT+CMGL listing).
+ * @param sender   Buffer for sender phone number (at least 32 bytes). May be NULL.
+ * @param sender_len  Size of sender buffer.
+ * @param body     Buffer for message body. May be NULL.
+ * @param body_len Size of body buffer.
+ * @return ESP_OK on success, ESP_ERR_NOT_FOUND if index does not exist.
+ */
+esp_err_t drv_a7682e_read_sms(int index, char *sender, size_t sender_len,
+                               char *body, size_t body_len);
+
+/**
+ * @brief Delete an SMS by storage index.
+ *
+ * @param index  Message index to delete.
+ * @return ESP_OK on success.
+ */
+esp_err_t drv_a7682e_delete_sms(int index);
+
+/**
+ * @brief Register a callback for incoming SMS notifications (+CMTI URCs).
+ *
+ * The callback receives the storage index of the new message. Call
+ * drv_a7682e_read_sms() from the callback (or queue the index for later
+ * processing) to retrieve the message contents.
+ *
+ * @param cb        Callback function, or NULL to unregister.
+ * @param user_data Opaque pointer passed to the callback.
+ */
+typedef void (*a7682e_sms_cb_t)(int index, void *user_data);
+void drv_a7682e_register_sms_cb(a7682e_sms_cb_t cb, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

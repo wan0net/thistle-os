@@ -31,6 +31,8 @@
 #include "thistle/net_manager.h"
 #include "thistle/app_manager.h"
 #include "ui/theme.h"
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 
 static const char *TAG = "assistant_ui";
 
@@ -275,6 +277,248 @@ static void add_message(const char *sender, const char *text, bool is_user)
 }
 
 /* ------------------------------------------------------------------ */
+/* AI API — config, HTTP helpers                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Read assistant configuration from SD card.
+ * File format (JSON):
+ * {
+ *   "api_url": "https://api.anthropic.com/v1/messages",
+ *   "api_key": "sk-ant-...",
+ *   "model": "claude-haiku-4-5-20251001",
+ *   "system_prompt": "You are a helpful assistant on ThistleOS, a portable ESP32 operating system."
+ * }
+ */
+typedef struct {
+    char api_url[256];
+    char api_key[128];
+    char model[64];
+    char system_prompt[256];
+} assistant_config_t;
+
+/* Extract a JSON string value for a given key. Returns length copied, 0 on failure. */
+static size_t json_extract_str(const char *json, const char *key, char *out, size_t out_len)
+{
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return 0;
+    p += strlen(pattern);
+    /* Skip whitespace and colon */
+    while (*p == ' ' || *p == ':' || *p == '\t' || *p == '\n') p++;
+    if (*p != '"') return 0;
+    p++; /* skip opening quote */
+    const char *end = strchr(p, '"');
+    if (!end) return 0;
+    size_t len = (size_t)(end - p);
+    if (len >= out_len) len = out_len - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return len;
+}
+
+static bool load_assistant_config(assistant_config_t *cfg)
+{
+    /* Set defaults */
+    strncpy(cfg->api_url, "https://api.anthropic.com/v1/messages", sizeof(cfg->api_url) - 1);
+    strncpy(cfg->model, "claude-haiku-4-5-20251001", sizeof(cfg->model) - 1);
+    strncpy(cfg->system_prompt,
+            "You are a helpful assistant on ThistleOS, a portable ESP32 operating system.",
+            sizeof(cfg->system_prompt) - 1);
+    cfg->api_key[0] = '\0';
+
+    FILE *f = fopen(CONFIG_FILE_PATH, "r");
+    if (!f) {
+        ESP_LOGW(TAG, "No assistant config at %s", CONFIG_FILE_PATH);
+        return false;
+    }
+
+    char buf[1024];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    json_extract_str(buf, "api_key",     cfg->api_key,      sizeof(cfg->api_key));
+    json_extract_str(buf, "api_url",     cfg->api_url,      sizeof(cfg->api_url));
+    json_extract_str(buf, "model",       cfg->model,        sizeof(cfg->model));
+    json_extract_str(buf, "system_prompt", cfg->system_prompt, sizeof(cfg->system_prompt));
+
+    if (cfg->api_key[0] == '\0') {
+        ESP_LOGW(TAG, "No api_key in %s", CONFIG_FILE_PATH);
+        return false;
+    }
+
+    return true;
+}
+
+/* Accumulates HTTP response body chunks into a caller-provided buffer. */
+typedef struct {
+    char *buf;
+    size_t buf_len;
+    size_t pos;
+} http_resp_t;
+
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    http_resp_t *resp = (http_resp_t *)evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_DATA && resp && evt->data_len > 0) {
+        size_t copy_len = (size_t)evt->data_len;
+        if (resp->pos + copy_len >= resp->buf_len) {
+            copy_len = resp->buf_len - resp->pos - 1;
+        }
+        if (copy_len > 0) {
+            memcpy(resp->buf + resp->pos, evt->data, copy_len);
+            resp->pos += copy_len;
+            resp->buf[resp->pos] = '\0';
+        }
+    }
+    return ESP_OK;
+}
+
+/*
+ * Call the Claude Messages API and write the response text into resp_buf.
+ * Returns ESP_OK on success.
+ */
+static esp_err_t call_claude_api(const assistant_config_t *cfg,
+                                  const char *user_msg,
+                                  char *resp_buf, size_t resp_buf_len)
+{
+    /* ------------------------------------------------------------------
+     * Build JSON request body.
+     * Include up to the last 6 messages for conversation context.
+     * ------------------------------------------------------------------ */
+    char body[2048];
+    int pos = 0;
+
+    pos += snprintf(body + pos, sizeof(body) - pos,
+        "{\"model\":\"%s\",\"max_tokens\":512,\"system\":\"%s\",\"messages\":[",
+        cfg->model, cfg->system_prompt);
+
+    int start = (s_ai.msg_count > 6) ? s_ai.msg_count - 6 : 0;
+    for (int i = start; i < s_ai.msg_count; i++) {
+        int idx = i % MAX_MESSAGES;
+        const char *role = s_ai.messages[idx].is_user ? "user" : "assistant";
+        if (i > start) pos += snprintf(body + pos, sizeof(body) - pos, ",");
+
+        /* Inline-escape the message text: " → \", \ → \\, newline → \n */
+        char escaped[MAX_MSG_TEXT * 2];
+        size_t ep = 0;
+        for (const char *c = s_ai.messages[idx].text; *c && ep + 3 < sizeof(escaped); c++) {
+            if (*c == '"')       { escaped[ep++] = '\\'; escaped[ep++] = '"';  }
+            else if (*c == '\\') { escaped[ep++] = '\\'; escaped[ep++] = '\\'; }
+            else if (*c == '\n') { escaped[ep++] = '\\'; escaped[ep++] = 'n';  }
+            else                 { escaped[ep++] = *c; }
+        }
+        escaped[ep] = '\0';
+
+        pos += snprintf(body + pos, sizeof(body) - pos,
+            "{\"role\":\"%s\",\"content\":\"%s\"}", role, escaped);
+    }
+
+    /* Current user message — also escaped */
+    char escaped_msg[MAX_MSG_TEXT * 2];
+    size_t ep = 0;
+    for (const char *c = user_msg; *c && ep + 3 < sizeof(escaped_msg); c++) {
+        if (*c == '"')       { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = '"';  }
+        else if (*c == '\\') { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = '\\'; }
+        else if (*c == '\n') { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = 'n';  }
+        else                 { escaped_msg[ep++] = *c; }
+    }
+    escaped_msg[ep] = '\0';
+
+    if (s_ai.msg_count > start) pos += snprintf(body + pos, sizeof(body) - pos, ",");
+    pos += snprintf(body + pos, sizeof(body) - pos,
+        "{\"role\":\"user\",\"content\":\"%s\"}]}", escaped_msg);
+
+    /* ------------------------------------------------------------------
+     * HTTP POST
+     * ------------------------------------------------------------------ */
+    char raw_resp[2048] = {0};
+    http_resp_t resp_ctx = { .buf = raw_resp, .buf_len = sizeof(raw_resp), .pos = 0 };
+
+    esp_http_client_config_t http_config = {
+        .url             = cfg->api_url,
+        .timeout_ms      = 30000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .event_handler   = http_event_handler,
+        .user_data       = &resp_ctx,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&http_config);
+    if (!client) {
+        ESP_LOGE(TAG, "Failed to init HTTP client");
+        return ESP_FAIL;
+    }
+
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "x-api-key",           cfg->api_key);
+    esp_http_client_set_header(client, "anthropic-version",   "2023-06-01");
+    esp_http_client_set_header(client, "content-type",        "application/json");
+    esp_http_client_set_post_field(client, body, (int)strlen(body));
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP perform failed: %s", esp_err_to_name(err));
+        return ESP_FAIL;
+    }
+    if (status != 200) {
+        ESP_LOGW(TAG, "API returned HTTP %d: %s", status, raw_resp);
+        /* Try to surface the API error message to the caller */
+        const char *err_key = strstr(raw_resp, "\"message\":\"");
+        if (err_key) {
+            err_key += 11;
+            const char *err_end = strchr(err_key, '"');
+            if (err_end) {
+                size_t elen = (size_t)(err_end - err_key);
+                if (elen >= resp_buf_len) elen = resp_buf_len - 1;
+                memcpy(resp_buf, err_key, elen);
+                resp_buf[elen] = '\0';
+                return ESP_FAIL;
+            }
+        }
+        return ESP_FAIL;
+    }
+
+    /* ------------------------------------------------------------------
+     * Parse response — extract content[0].text
+     * Claude response: {"content":[{"type":"text","text":"..."}],...}
+     * ------------------------------------------------------------------ */
+    const char *text_key = strstr(raw_resp, "\"text\":\"");
+    if (!text_key) {
+        ESP_LOGW(TAG, "No 'text' field in response: %s", raw_resp);
+        return ESP_FAIL;
+    }
+    text_key += 8; /* skip "text":" */
+
+    /* Walk forward, handling \" escapes to find the real closing quote */
+    size_t out_pos = 0;
+    const char *p = text_key;
+    while (*p && out_pos + 1 < resp_buf_len) {
+        if (*p == '\\' && *(p + 1) != '\0') {
+            p++;
+            if      (*p == '"')  { resp_buf[out_pos++] = '"';  }
+            else if (*p == '\\') { resp_buf[out_pos++] = '\\'; }
+            else if (*p == 'n')  { resp_buf[out_pos++] = '\n'; }
+            else if (*p == 'r')  { /* skip CR */ }
+            else                 { resp_buf[out_pos++] = *p;   }
+        } else if (*p == '"') {
+            break; /* unescaped closing quote */
+        } else {
+            resp_buf[out_pos++] = *p;
+        }
+        p++;
+    }
+    resp_buf[out_pos] = '\0';
+
+    ESP_LOGI(TAG, "API response (%zu chars)", out_pos);
+    return (out_pos > 0) ? ESP_OK : ESP_FAIL;
+}
+
+/* ------------------------------------------------------------------ */
 /* AI message sending                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -299,31 +543,27 @@ static void send_to_ai(const char *user_msg)
         lv_label_set_text(s_ai.status_label, "Thinking...");
     }
 
-    /*
-     * TODO: Make HTTP POST to AI API
-     *
-     * When API is implemented:
-     * 1. Read api_url, api_key, model, system_prompt from CONFIG_FILE_PATH
-     * 2. Build JSON request body with conversation history:
-     *    POST https://api.anthropic.com/v1/messages
-     *    Headers: x-api-key: <api_key>
-     *             anthropic-version: 2023-06-01
-     *             content-type: application/json
-     *    Body: { "model": "<model>",
-     *            "system": "<system_prompt>",
-     *            "messages": [ {"role":"user","content":"..."}, ... ],
-     *            "max_tokens": 1024 }
-     * 3. esp_http_client_perform() to API endpoint
-     * 4. Parse JSON response — extract content[0].text
-     * 5. Call add_message("AI", extracted_text, false)
-     *
-     * For now: return a placeholder response describing the setup.
-     */
-    add_message("AI",
-        "I'm running on ThistleOS! API integration coming soon. "
-        "Connect to WiFi and configure " THISTLE_SDCARD "/config/assistant.json "
-        "with your API key to enable real responses.",
-        false);
+    /* Load API config from SD card */
+    assistant_config_t cfg;
+    if (!load_assistant_config(&cfg)) {
+        add_message("AI",
+            "No API key configured. Create " CONFIG_FILE_PATH
+            " with your Anthropic API key.",
+            false);
+        if (s_ai.status_label) {
+            lv_label_set_text(s_ai.status_label, "No API key");
+        }
+        return;
+    }
+
+    /* Call Claude API */
+    char response[MAX_MSG_TEXT];
+    esp_err_t ret = call_claude_api(&cfg, user_msg, response, sizeof(response));
+    if (ret == ESP_OK && response[0] != '\0') {
+        add_message("AI", response, false);
+    } else {
+        add_message("AI", "Sorry, I couldn't reach the API. Check your connection and API key.", false);
+    }
 
     if (s_ai.status_label) {
         lv_label_set_text(s_ai.status_label, "Connected");
