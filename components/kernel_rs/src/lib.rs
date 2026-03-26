@@ -43,4 +43,5 @@ pub mod drv_light_ltr553;
 pub mod drv_lcd_st7789;
 pub mod drv_rtc_pcf8563;
 pub mod drv_accel_qmi8658;
+pub mod sos_beacon;
 mod ffi;
