@@ -35,7 +35,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
           fi
           . "$HOME/.cargo/env"
           if ! command -v espup &> /dev/null; then
@@ -88,9 +88,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
+          key: rust-stable-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          restore-keys: rust-stable-${{ runner.os }}-
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: components/kernel_rs/target
+          key: rust-test-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          restore-keys: rust-test-target-${{ runner.os }}-
+
       - name: Install Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Run Rust kernel tests

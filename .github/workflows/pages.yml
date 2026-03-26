@@ -20,14 +20,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
+          key: rust-wasm-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          restore-keys: rust-wasm-${{ runner.os }}-
+
+      - name: Cache Rust WASM build
+        uses: actions/cache@v4
+        with:
+          path: components/kernel_rs/target
+          key: rust-wasm-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          restore-keys: rust-wasm-target-${{ runner.os }}-
+
+      - name: Cache LVGL
+        uses: actions/cache@v4
+        with:
+          path: managed_components/lvgl__lvgl
+          key: lvgl-v9.2.2
+
       - name: Install Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 3.1.51
+          actions-cache-folder: 'emsdk-cache'
 
       - name: Install Rust + WASM target
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup target add wasm32-unknown-emscripten
 
@@ -38,7 +66,9 @@ jobs:
       - name: Fetch LVGL (needed for WASM build)
         run: |
           mkdir -p managed_components/lvgl__lvgl
-          git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git managed_components/lvgl__lvgl
+          if [ ! -d "managed_components/lvgl__lvgl/src" ]; then
+            git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git managed_components/lvgl__lvgl
+          fi
 
       - name: Build WASM simulator
         run: |
