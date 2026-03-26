@@ -1,0 +1,65 @@
+{
+    "board": {
+        "name": "M5Stack Cardputer",
+        "arch": "esp32s3",
+        "board_id": "cardputer",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": 35,
+                "miso": -1,
+                "sclk": 36,
+                "max_transfer_bytes": 4096
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 1,
+                "scl": 2,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.lcd-st7789",
+            "hal": "display",
+            "entry": "lcd-st7789.drv.elf",
+            "config": {
+                "cs": 37,
+                "dc": 34,
+                "rst": 33,
+                "bl": 38,
+                "spi_bus": 0,
+                "width": 240,
+                "height": 135
+            }
+        },
+        {
+            "id": "com.thistle.drv.kbd-cardkb",
+            "hal": "input",
+            "entry": "kbd-cardkb.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x08"
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_host": 1,
+                "spi_mosi": 14,
+                "spi_miso": 39,
+                "spi_sclk": 40,
+                "pin_cs": 12,
+                "mount_point": "/sdcard"
+            }
+        }
+    ]
+}

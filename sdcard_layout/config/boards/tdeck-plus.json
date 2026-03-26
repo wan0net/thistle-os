@@ -1,0 +1,98 @@
+{
+    "board": {
+        "name": "LilyGo T-Deck Plus",
+        "arch": "esp32s3",
+        "board_id": "tdeck-plus",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": 41,
+                "miso": 38,
+                "sclk": 40,
+                "max_transfer_bytes": 9600
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 18,
+                "scl": 8,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.lcd-st7789",
+            "hal": "display",
+            "entry": "lcd-st7789.drv.elf",
+            "config": {
+                "cs": 12,
+                "dc": 11,
+                "rst": -1,
+                "bl": 15,
+                "spi_bus": 0,
+                "width": 320,
+                "height": 240
+            }
+        },
+        {
+            "id": "com.thistle.drv.kbd-tca8418",
+            "hal": "input",
+            "entry": "kbd-tca8418.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x34",
+                "pin_int": 46
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-cst328",
+            "hal": "input",
+            "entry": "touch-cst328.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x1A",
+                "pin_int": 16,
+                "pin_rst": -1,
+                "max_x": 320,
+                "max_y": 240
+            }
+        },
+        {
+            "id": "com.thistle.drv.radio-sx1262",
+            "hal": "radio",
+            "entry": "radio-sx1262.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "cs": 7,
+                "dio1": 33,
+                "rst": 8,
+                "busy": 34
+            }
+        },
+        {
+            "id": "com.thistle.drv.gps-mia-m10q",
+            "hal": "gps",
+            "entry": "gps-mia-m10q.drv.elf",
+            "config": {
+                "uart_num": 1,
+                "tx": 43,
+                "rx": 44,
+                "baud_rate": 9600
+            }
+        },
+        {
+            "id": "com.thistle.drv.power-tdeck-plus",
+            "hal": "power",
+            "entry": "power-tp4065b.drv.elf",
+            "config": {
+                "adc_pin": 4,
+                "charge_pin": 10
+            }
+        }
+    ]
+}

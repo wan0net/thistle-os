@@ -1,0 +1,34 @@
+{
+    "board": {
+        "name": "RAK WisBlock RAK3312",
+        "arch": "esp32s3",
+        "board_id": "rak3312",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 4,
+                "scl": 5,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.radio-sx1262",
+            "hal": "radio",
+            "entry": "radio-sx1262.drv.elf",
+            "config": {
+                "spi_bus": -1,
+                "cs": -1,
+                "dio1": -1,
+                "rst": -1,
+                "busy": -1,
+                "internal": true
+            }
+        }
+    ]
+}

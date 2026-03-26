@@ -3,7 +3,7 @@
         "name": "CYD ESP32-2432S028",
         "arch": "esp32",
         "board_id": "cyd-2432s028",
-        "version": "1.0"
+        "version": "2.0"
     },
     "buses": {
         "spi": [
@@ -12,7 +12,24 @@
                 "mosi": 13,
                 "miso": 12,
                 "sclk": 14,
-                "max_transfer_bytes": 76800
+                "max_transfer_bytes": 76800,
+                "comment": "HSPI — display (ILI9341)"
+            },
+            {
+                "host": 3,
+                "mosi": 32,
+                "miso": 39,
+                "sclk": 25,
+                "max_transfer_bytes": 256,
+                "comment": "Touch SPI — XPT2046 (separate bus)"
+            },
+            {
+                "host": 2,
+                "mosi": 23,
+                "miso": 19,
+                "sclk": 18,
+                "max_transfer_bytes": 4096,
+                "comment": "VSPI — SD card"
             }
         ],
         "i2c": []
@@ -37,12 +54,45 @@
             "hal": "input",
             "entry": "touch-xpt2046.drv.elf",
             "config": {
+                "spi_bus": 1,
                 "cs": 33,
-                "spi_bus": 0,
                 "irq": 36,
                 "max_x": 320,
-                "max_y": 240
+                "max_y": 240,
+                "cal_x_min": 300,
+                "cal_x_max": 3800,
+                "cal_y_min": 200,
+                "cal_y_max": 3700,
+                "pressure_threshold": 100,
+                "swap_xy": false,
+                "invert_x": false,
+                "invert_y": false
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_host": 2,
+                "pin_cs": 5,
+                "mount_point": "/sdcard"
             }
         }
-    ]
+    ],
+    "peripherals": {
+        "rgb_led": {
+            "red": 4,
+            "green": 16,
+            "blue": 17,
+            "active_low": true
+        },
+        "speaker": {
+            "pin": 26,
+            "amplifier": "SC8002B"
+        },
+        "ldr": {
+            "adc_pin": 34
+        }
+    }
 }
