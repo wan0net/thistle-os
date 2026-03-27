@@ -2,10 +2,12 @@
  * ThistleOS Simulator — SDL2 host application
  *
  * Runs the real ThistleOS UI in an SDL2 window for development/testing.
- * Display: 320x240 scaled 2x to 640x480 window.
+ * Pass --device <name> to simulate a specific hardware target.
+ * Default device: tdeck (320x240, 2x scale).
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
 
@@ -33,12 +35,28 @@
 #include "terminal/terminal_app.h"
 #include "vault/vault_app.h"
 
+/* Defined in board_simulator.c */
+extern void sim_board_set_device(const char *device);
+
 int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    const char *device = "tdeck";  /* default device */
 
-    printf("ThistleOS Simulator starting...\n");
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
+            device = argv[++i];
+        } else if (strncmp(argv[i], "--device=", 9) == 0) {
+            device = argv[i] + 9;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: %s [--device NAME]\n", argv[0]);
+            printf("Devices: tdeck-pro, tdeck, tdeck-plus, tdisplay, heltec-v3,\n");
+            printf("         cardputer, cyd-s022, cyd-s028, t3-s3, c3-mini\n");
+            return 0;
+        }
+    }
+
+    sim_board_set_device(device);
+    printf("ThistleOS Simulator — %s\n", device);
     fflush(stdout);
 
     /* Set up simulated SD card filesystem (symlink to simulator/sdcard/) */
