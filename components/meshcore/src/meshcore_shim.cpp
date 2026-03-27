@@ -11,6 +11,9 @@
 #include <esp_timer.h>
 #include <esp_random.h>
 
+// Suppress ESP32 FS.h include in SimpleMeshTables
+#undef ESP32
+
 // MeshCore headers
 #include <Mesh.h>
 #include <Dispatcher.h>
@@ -19,6 +22,8 @@
 #include <helpers/BaseChatMesh.h>
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
+
+#define ESP32 1
 
 // ThistleOS HAL
 extern "C" {
@@ -260,7 +265,7 @@ static EspRTCClock s_rtc;
 
 #define PACKET_POOL_SIZE 16
 static mesh::StaticPoolPacketManager<PACKET_POOL_SIZE> s_pkt_mgr;
-static mesh::SimpleMeshTables<256> s_tables;
+static SimpleMeshTables s_tables;
 
 static ThistleChatMesh* s_mesh = nullptr;
 static bool s_initialized = false;
@@ -287,10 +292,8 @@ esp_err_t meshcore_init(const char* node_name, uint8_t node_type) {
 
     s_mesh->setName(node_name);
 
-    // Generate or load identity
-    mesh::Identity self_id;
-    self_id.regenerate(s_rng);
-    s_mesh->setIdentity(self_id);
+    // Generate a random identity
+    s_mesh->self_id = mesh::LocalIdentity(&s_rng);
 
     // Start the radio
     s_radio.begin();
@@ -408,7 +411,7 @@ void meshcore_set_contact_callback(meshcore_contact_cb_t cb, void* user_data) {
 
 esp_err_t meshcore_get_self_pub_key(uint8_t* out_key) {
     if (!s_mesh || !out_key) return ESP_ERR_INVALID_ARG;
-    memcpy(out_key, s_mesh->getIdentity().pub_key, MESHCORE_PUBKEY_SIZE);
+    memcpy(out_key, s_mesh->self_id.pub_key, MESHCORE_PUBKEY_SIZE);
     return ESP_OK;
 }
 
