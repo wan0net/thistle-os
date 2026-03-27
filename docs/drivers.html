@@ -63,27 +63,76 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td><a href="#drv_lcd_st7789">drv_lcd_st7789</a></td><td>Display</td><td>ST7789V</td><td>SPI</td><td>Rust / ESP-IDF</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus, T-Display-S3, Cardputer</td></tr>
-          <tr><td><a href="#drv_lcd_ili9341">drv_lcd_ili9341</a></td><td>Display</td><td>ILI9341</td><td>SPI</td><td>Rust / manual init</td><td><span class="badge badge-blue">Fixed</span></td><td>CYD S028</td></tr>
-          <tr><td><a href="#drv_oled_ssd1306">drv_oled_ssd1306</a></td><td>Display</td><td>SSD1306</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>Heltec V3, T3-S3, C3-Mini</td></tr>
-          <tr><td><a href="#drv_epaper_gdeq031t10">drv_epaper_gdeq031t10</a></td><td>Display</td><td>GDEQ031T10</td><td>SPI</td><td>Rust / manual SPI</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_touch_cst328">drv_touch_cst328</a></td><td>Input</td><td>CST328</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
-          <tr><td><a href="#drv_touch_cst816">drv_touch_cst816</a></td><td>Input</td><td>CST816S</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-blue">Fixed</span></td><td>T-Display-S3, CYD S022</td></tr>
-          <tr><td><a href="#drv_touch_xpt2046">drv_touch_xpt2046</a></td><td>Input</td><td>XPT2046</td><td>SPI</td><td>Rust / manual SPI</td><td><span class="badge badge-blue">Fixed</span></td><td>CYD S028</td></tr>
-          <tr><td><a href="#drv_kbd_tca8418">drv_kbd_tca8418</a></td><td>Input</td><td>TCA8418</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
-          <tr><td><a href="#drv_kbd_cardkb">drv_kbd_cardkb</a></td><td>Input</td><td>CardKB (ATmega)</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-blue">Fixed</span></td><td>Cardputer</td></tr>
-          <tr><td><a href="#drv_radio_sx1262">drv_radio_sx1262</a></td><td>Radio</td><td>SX1262</td><td>SPI</td><td>C / RadioLib</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, Heltec V3, T3-S3, RAK3312</td></tr>
-          <tr><td><a href="#drv_gps_mia_m10q">drv_gps_mia_m10q</a></td><td>GPS</td><td>MIA-M10Q</td><td>UART</td><td>Rust / NMEA parser</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
-          <tr><td><a href="#drv_power_tp4065b">drv_power_tp4065b</a></td><td>Power</td><td>TP4065B</td><td>ADC</td><td>Rust / ESP-IDF ADC</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro, T-Deck Plus, Heltec V3</td></tr>
-          <tr><td><a href="#drv_sdcard">drv_sdcard</a></td><td>Storage</td><td>Generic SD</td><td>SPI/SDMMC</td><td>Rust / ESP-IDF SDMMC</td><td><span class="badge badge-green">Proven</span></td><td>Multiple</td></tr>
-          <tr><td><a href="#drv_audio_pcm5102a">drv_audio_pcm5102a</a></td><td>Audio</td><td>PCM5102A</td><td>I2S</td><td>Rust / ESP-IDF I2S</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_imu_bhi260ap">drv_imu_bhi260ap</a></td><td>IMU</td><td>BHI260AP</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-red">Stub</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_light_ltr553">drv_light_ltr553</a></td><td>Light</td><td>LTR-553</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_rtc_pcf8563">drv_rtc_pcf8563</a></td><td>RTC</td><td>PCF8563</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_accel_qmi8658">drv_accel_qmi8658</a></td><td>Accel</td><td>QMI8658C</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-yellow">Partial</span></td><td>T-Deck Pro</td></tr>
-          <tr><td><a href="#drv_modem_a7682e">drv_modem_a7682e</a></td><td>Modem</td><td>A7682E</td><td>UART</td><td>C / esp_modem</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-lcd-st7789">drv_lcd_st7789</a></td><td>Display</td><td>ST7789V</td><td>SPI</td><td>Rust / ESP-IDF</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus, T-Display-S3, Cardputer</td></tr>
+          <tr><td><a href="#drv-lcd-ili9341">drv_lcd_ili9341</a></td><td>Display</td><td>ILI9341</td><td>SPI</td><td>Rust / manual init</td><td><span class="badge badge-blue">Fixed</span></td><td>CYD S028</td></tr>
+          <tr><td><a href="#drv-oled-ssd1306">drv_oled_ssd1306</a></td><td>Display</td><td>SSD1306</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>Heltec V3, T3-S3, C3-Mini</td></tr>
+          <tr><td><a href="#drv-epaper">drv_epaper_gdeq031t10</a></td><td>Display</td><td>GDEQ031T10</td><td>SPI</td><td>Rust / manual SPI</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-touch-cst328">drv_touch_cst328</a></td><td>Input</td><td>CST328</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
+          <tr><td><a href="#drv-touch-cst816">drv_touch_cst816</a></td><td>Input</td><td>CST816S</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-blue">Fixed</span></td><td>T-Display-S3, CYD S022</td></tr>
+          <tr><td><a href="#drv-touch-xpt2046">drv_touch_xpt2046</a></td><td>Input</td><td>XPT2046</td><td>SPI</td><td>Rust / manual SPI</td><td><span class="badge badge-blue">Fixed</span></td><td>CYD S028</td></tr>
+          <tr><td><a href="#drv-kbd-tca8418">drv_kbd_tca8418</a></td><td>Input</td><td>TCA8418</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
+          <tr><td><a href="#drv-kbd-cardkb">drv_kbd_cardkb</a></td><td>Input</td><td>CardKB (ATmega)</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-blue">Fixed</span></td><td>Cardputer</td></tr>
+          <tr><td><a href="#drv-radio-sx1262">drv_radio_sx1262</a></td><td>Radio</td><td>SX1262</td><td>SPI</td><td>C / RadioLib</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, Heltec V3, T3-S3, RAK3312</td></tr>
+          <tr><td><a href="#drv-gps">drv_gps_mia_m10q</a></td><td>GPS</td><td>MIA-M10Q</td><td>UART</td><td>Rust / NMEA parser</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck, T-Deck Plus</td></tr>
+          <tr><td><a href="#drv-power">drv_power_tp4065b</a></td><td>Power</td><td>TP4065B</td><td>ADC</td><td>Rust / ESP-IDF ADC</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro, T-Deck Plus, Heltec V3</td></tr>
+          <tr><td><a href="#drv-sdcard">drv_sdcard</a></td><td>Storage</td><td>Generic SD</td><td>SPI/SDMMC</td><td>Rust / ESP-IDF SDMMC</td><td><span class="badge badge-green">Proven</span></td><td>Multiple</td></tr>
+          <tr><td><a href="#drv-audio">drv_audio_pcm5102a</a></td><td>Audio</td><td>PCM5102A</td><td>I2S</td><td>Rust / ESP-IDF I2S</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-imu">drv_imu_bhi260ap</a></td><td>IMU</td><td>BHI260AP</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-red">Stub</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-light">drv_light_ltr553</a></td><td>Light</td><td>LTR-553</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-rtc">drv_rtc_pcf8563</a></td><td>RTC</td><td>PCF8563</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-accel">drv_accel_qmi8658</a></td><td>Accel</td><td>QMI8658C</td><td>I2C</td><td>Rust / manual I2C</td><td><span class="badge badge-yellow">Partial</span></td><td>T-Deck Pro</td></tr>
+          <tr><td><a href="#drv-modem">drv_modem_a7682e</a></td><td>Modem</td><td>A7682E</td><td>UART</td><td>C / esp_modem</td><td><span class="badge badge-green">Proven</span></td><td>T-Deck Pro</td></tr>
         </tbody>
       </table>
+    </div>
+
+    <h2>Driver × Device Matrix</h2>
+    <p>Which drivers are used by which devices. Click a device name to see its full hardware spec. Click a driver name to jump to its detail section below.</p>
+
+    <div class="table-wrap" style="overflow-x:auto">
+    <table class="data-table matrix-table">
+    <thead>
+    <tr>
+      <th>Driver</th>
+      <th><a href="devices/tdeck-pro.html">Pro</a></th>
+      <th><a href="devices/tdeck.html">T-Deck</a></th>
+      <th><a href="devices/tdeck-plus.html">Plus</a></th>
+      <th><a href="devices/tdisplay-s3.html">TDisp</a></th>
+      <th><a href="devices/t3-s3.html">T3-S3</a></th>
+      <th><a href="devices/heltec-v3.html">Heltec</a></th>
+      <th><a href="devices/cardputer.html">Cardp</a></th>
+      <th><a href="devices/cyd-s022.html">S022</a></th>
+      <th><a href="devices/cyd-s028.html">S028</a></th>
+      <th><a href="devices/c3-mini.html">C3</a></th>
+    </tr>
+    </thead>
+    <tbody>
+    <!-- Display drivers -->
+    <tr><td><a href="#drv-lcd-st7789">ST7789 (SPI)</a></td><td></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td>&#10003;</td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-lcd-ili9341">ILI9341</a></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>&#10003;</td><td></td></tr>
+    <tr><td><a href="#drv-oled-ssd1306">SSD1306</a></td><td></td><td></td><td></td><td></td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td></td><td>&#10003;</td></tr>
+    <tr><td><a href="#drv-epaper">E-Paper</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <!-- Input drivers -->
+    <tr><td><a href="#drv-kbd-tca8418">TCA8418 Kbd</a></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-kbd-cardkb">CardKB</a></td><td></td><td></td><td></td><td></td><td></td><td></td><td>&#10003;</td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-touch-cst328">CST328</a></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-touch-cst816">CST816</a></td><td></td><td></td><td></td><td>&#10003;</td><td></td><td></td><td></td><td>&#10003;</td><td></td><td></td></tr>
+    <tr><td><a href="#drv-touch-xpt2046">XPT2046</a></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>&#10003;</td><td></td></tr>
+    <!-- Radio/GPS -->
+    <tr><td><a href="#drv-radio-sx1262">SX1262 LoRa</a></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-gps">GPS MIA-M10Q</a></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <!-- Power/Storage -->
+    <tr><td><a href="#drv-power">TP4065B Power</a></td><td>&#10003;</td><td></td><td>&#10003;</td><td></td><td></td><td>&#10003;</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-sdcard">SD Card</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td></td></tr>
+    <!-- Audio/Sensor -->
+    <tr><td><a href="#drv-audio">PCM5102A Audio</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-imu">BHI260AP IMU</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-light">LTR-553 Light</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-rtc">PCF8563 RTC</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-accel">QMI8658 Accel</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td><a href="#drv-modem">A7682E Modem</a></td><td>&#10003;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+    </table>
     </div>
 
     <h2>Status legend</h2>
@@ -105,7 +154,7 @@
 
     <h2>Display drivers</h2>
 
-    <h3 id="drv_lcd_st7789">drv_lcd_st7789 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-lcd-st7789">drv_lcd_st7789 <span class="badge badge-green">Proven</span></h3>
     <p>SPI LCD driver for the ST7789V controller. Uses the ESP-IDF <code>esp_lcd</code> component for panel initialization and bitmap flushing. Supports configurable resolution, pixel offsets, and color inversion for different panel modules.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Display</td></tr>
@@ -114,11 +163,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_lcd_st7789.rs</code> (918 lines)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>esp_lcd_new_panel_st7789()</code>, <code>esp_lcd_panel_draw_bitmap()</code></td></tr>
       <tr><th>Tests</th><td>20 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck, T-Deck Plus, T-Display-S3, Cardputer</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck.html">T-Deck</a>, <a href="devices/tdeck-plus.html">T-Deck Plus</a>, <a href="devices/tdisplay-s3.html">T-Display-S3</a>, <a href="devices/cardputer.html">Cardputer</a></td></tr>
       <tr><th>Notes</th><td>Configurable width/height/offset. Cardputer uses 240x135 with x_offset=40, y_offset=52.</td></tr>
     </table>
 
-    <h3 id="drv_lcd_ili9341">drv_lcd_ili9341 <span class="badge badge-blue">Fixed</span></h3>
+    <h3 id="drv-lcd-ili9341">drv_lcd_ili9341 <span class="badge badge-blue">Fixed</span></h3>
     <p>SPI LCD driver for the ILI9341 controller. Uses manual initialization via <code>esp_lcd_panel_io_tx_param()</code> with a ST7789 panel handle, since ILI9341 shares the same draw-bitmap interface but needs a different init sequence.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Display</td></tr>
@@ -127,11 +176,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_lcd_ili9341.rs</code> (1117 lines)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>esp_lcd_panel_io_tx_param()</code>, uses ST7789 panel handle</td></tr>
       <tr><th>Tests</th><td>23 unit tests</td></tr>
-      <tr><th>Boards</th><td>CYD S028</td></tr>
+      <tr><th>Boards</th><td><a href="devices/cyd-s028.html">CYD S028</a></td></tr>
       <tr><th>Notes</th><td>Fixed: manual init sequence aligned with ILI9341 datasheet. Shares draw path with ST7789 driver.</td></tr>
     </table>
 
-    <h3 id="drv_oled_ssd1306">drv_oled_ssd1306 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-oled-ssd1306">drv_oled_ssd1306 <span class="badge badge-green">Proven</span></h3>
     <p>I2C OLED driver for the SSD1306 controller. Sends raw I2C commands for initialization, page addressing, and framebuffer flushing. Supports 128x64 and 128x32 panels.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Display</td></tr>
@@ -140,11 +189,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_oled_ssd1306.rs</code> (871 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C commands</td></tr>
       <tr><th>Tests</th><td>22 unit tests</td></tr>
-      <tr><th>Boards</th><td>Heltec V3, T3-S3, C3-Mini</td></tr>
+      <tr><th>Boards</th><td><a href="devices/heltec-v3.html">Heltec V3</a>, <a href="devices/t3-s3.html">T3-S3</a>, <a href="devices/c3-mini.html">C3-Mini</a></td></tr>
       <tr><th>Notes</th><td>Monochrome 1-bit display. Kernel converts RGB565 framebuffer data to 1-bit pages before flushing.</td></tr>
     </table>
 
-    <h3 id="drv_epaper_gdeq031t10">drv_epaper_gdeq031t10 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-epaper">drv_epaper_gdeq031t10 <span class="badge badge-green">Proven</span></h3>
     <p>SPI e-paper driver for the GDEQ031T10 (Good Display 3.1" 4-gray). Manual SPI command sequences for full refresh, partial refresh, and fast mode. Integrated with the kernel's epaper_refresh module for coalesced updates.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Display</td></tr>
@@ -153,7 +202,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_epaper_gdeq031t10.rs</code> (1153 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual SPI commands with DC/CS/BUSY GPIO</td></tr>
       <tr><th>Tests</th><td>17 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>Supports full, partial, and fast refresh modes. 4-gray LUT. BUSY pin polling for refresh completion.</td></tr>
     </table>
 
@@ -161,7 +210,7 @@
 
     <h2>Input drivers</h2>
 
-    <h3 id="drv_touch_cst328">drv_touch_cst328 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-touch-cst328">drv_touch_cst328 <span class="badge badge-green">Proven</span></h3>
     <p>I2C capacitive touch driver for the Hynitron CST328. Reads touch coordinates from registers and reports them through the HAL input callback.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Input</td></tr>
@@ -170,11 +219,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_touch_cst328.rs</code> (797 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads</td></tr>
       <tr><th>Tests</th><td>10 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck, T-Deck Plus</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck.html">T-Deck</a>, <a href="devices/tdeck-plus.html">T-Deck Plus</a></td></tr>
       <tr><th>Notes</th><td>Multi-touch capable but ThistleOS currently uses single-touch only.</td></tr>
     </table>
 
-    <h3 id="drv_touch_cst816">drv_touch_cst816 <span class="badge badge-blue">Fixed</span></h3>
+    <h3 id="drv-touch-cst816">drv_touch_cst816 <span class="badge badge-blue">Fixed</span></h3>
     <p>I2C capacitive touch driver for the Hynitron CST816S. Required several fixes during hardware bringup: cold-boot probe sequence, auto-sleep disable, and gesture register reads.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Input</td></tr>
@@ -183,11 +232,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_touch_cst816.rs</code> (797 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads</td></tr>
       <tr><th>Tests</th><td>14 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Display-S3, CYD S022</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdisplay-s3.html">T-Display-S3</a>, <a href="devices/cyd-s022.html">CYD S022</a></td></tr>
       <tr><th>Notes</th><td>Fixed: cold-boot probe at register 0xA7, auto-sleep disable via register 0xFE, gesture read from register 0x01.</td></tr>
     </table>
 
-    <h3 id="drv_touch_xpt2046">drv_touch_xpt2046 <span class="badge badge-blue">Fixed</span></h3>
+    <h3 id="drv-touch-xpt2046">drv_touch_xpt2046 <span class="badge badge-blue">Fixed</span></h3>
     <p>SPI resistive touch driver for the XPT2046 ADC. Extensively fixed: pressure calculation, IRQ masking, interleaved X/Y sampling, outlier rejection, and debounce filtering.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Input</td></tr>
@@ -196,11 +245,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_touch_xpt2046.rs</code> (1514 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual SPI ADC reads</td></tr>
       <tr><th>Tests</th><td>31 unit tests</td></tr>
-      <tr><th>Boards</th><td>CYD S028</td></tr>
+      <tr><th>Boards</th><td><a href="devices/cyd-s028.html">CYD S028</a></td></tr>
       <tr><th>Notes</th><td>Fixed: Z1+Z2 pressure formula per datasheet, IRQ masking in control byte, interleaved X/Y sampling to reduce noise, median-of-3 outlier rejection, 50ms debounce.</td></tr>
     </table>
 
-    <h3 id="drv_kbd_tca8418">drv_kbd_tca8418 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-kbd-tca8418">drv_kbd_tca8418 <span class="badge badge-green">Proven</span></h3>
     <p>I2C keyboard controller driver for the TI TCA8418. Register-based key scanning with GPIO interrupt for key-press notification.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Input</td></tr>
@@ -209,11 +258,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_kbd_tca8418.rs</code> (706 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads</td></tr>
       <tr><th>Tests</th><td>12 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck, T-Deck Plus</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck.html">T-Deck</a>, <a href="devices/tdeck-plus.html">T-Deck Plus</a></td></tr>
       <tr><th>Notes</th><td>Reads key events from the TCA8418 FIFO. GPIO interrupt triggers polling rather than continuous I2C traffic.</td></tr>
     </table>
 
-    <h3 id="drv_kbd_cardkb">drv_kbd_cardkb <span class="badge badge-blue">Fixed</span></h3>
+    <h3 id="drv-kbd-cardkb">drv_kbd_cardkb <span class="badge badge-blue">Fixed</span></h3>
     <p>I2C keyboard driver for the M5Stack CardKB unit (ATmega-based). Simple single-byte read protocol at I2C address 0x5F.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Input</td></tr>
@@ -222,7 +271,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_kbd_cardkb.rs</code> (776 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; single-byte I2C read at 0x5F</td></tr>
       <tr><th>Tests</th><td>16 unit tests</td></tr>
-      <tr><th>Boards</th><td>Cardputer</td></tr>
+      <tr><th>Boards</th><td><a href="devices/cardputer.html">Cardputer</a></td></tr>
       <tr><th>Notes</th><td>Fixed: I2C address corrected from 0x08 to 0x5F. Arrow key codes mapped to 0xB4-0xB7 per M5Stack documentation.</td></tr>
     </table>
 
@@ -230,7 +279,7 @@
 
     <h2>Radio drivers</h2>
 
-    <h3 id="drv_radio_sx1262">drv_radio_sx1262 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-radio-sx1262">drv_radio_sx1262 <span class="badge badge-green">Proven</span></h3>
     <p>SPI LoRa radio driver for the Semtech SX1262. Wraps the RadioLib C++ library for modem configuration, packet TX/RX, and frequency/power management.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Radio</td></tr>
@@ -239,7 +288,7 @@
       <tr><th>Source</th><td><code>components/drv_radio_sx1262/</code> (C)</td></tr>
       <tr><th>Wraps</th><td>RadioLib (C++ library, C bindings)</td></tr>
       <tr><th>Tests</th><td>Hardware-tested on multiple boards</td></tr>
-      <tr><th>Boards</th><td>T-Deck, Heltec V3, T3-S3, RAK3312</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck.html">T-Deck</a>, <a href="devices/heltec-v3.html">Heltec V3</a>, <a href="devices/t3-s3.html">T3-S3</a>, RAK3312</td></tr>
       <tr><th>Notes</th><td>C driver &mdash; one of two non-Rust drivers. RadioLib provides robust LoRa modem support including spreading factor, bandwidth, and coding rate configuration.</td></tr>
     </table>
 
@@ -247,7 +296,7 @@
 
     <h2>GPS drivers</h2>
 
-    <h3 id="drv_gps_mia_m10q">drv_gps_mia_m10q <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-gps">drv_gps_mia_m10q <span class="badge badge-green">Proven</span></h3>
     <p>UART GPS driver for the u-blox MIA-M10Q. Parses NMEA sentences (GGA, RMC) in a dedicated FreeRTOS task and updates the HAL GPS position struct.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>GPS</td></tr>
@@ -256,7 +305,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_gps_mia_m10q.rs</code> (1211 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; Rust NMEA parser with FreeRTOS UART task</td></tr>
       <tr><th>Tests</th><td>42 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck, T-Deck Plus</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck.html">T-Deck</a>, <a href="devices/tdeck-plus.html">T-Deck Plus</a></td></tr>
       <tr><th>Notes</th><td>Largest test suite of any driver. Parses latitude, longitude, altitude, speed, heading, satellite count, and fix quality from standard NMEA sentences.</td></tr>
     </table>
 
@@ -264,7 +313,7 @@
 
     <h2>Power drivers</h2>
 
-    <h3 id="drv_power_tp4065b">drv_power_tp4065b <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-power">drv_power_tp4065b <span class="badge badge-green">Proven</span></h3>
     <p>ADC-based battery monitor for LiPo cells charged by the TP4065B. Reads raw ADC voltage via the ESP-IDF oneshot ADC API and maps it to a percentage using a LiPo discharge curve.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Power</td></tr>
@@ -273,7 +322,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_power_tp4065b.rs</code> (967 lines)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>adc_oneshot_read()</code>, <code>adc_cali_raw_to_voltage()</code></td></tr>
       <tr><th>Tests</th><td>27 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro, T-Deck Plus, Heltec V3</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a>, <a href="devices/tdeck-plus.html">T-Deck Plus</a>, <a href="devices/heltec-v3.html">Heltec V3</a></td></tr>
       <tr><th>Notes</th><td>Configurable voltage divider ratio. LiPo discharge curve maps mV to percentage with 7-point piecewise linear interpolation.</td></tr>
     </table>
 
@@ -281,7 +330,7 @@
 
     <h2>Storage drivers</h2>
 
-    <h3 id="drv_sdcard">drv_sdcard <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-sdcard">drv_sdcard <span class="badge badge-green">Proven</span></h3>
     <p>SD card driver supporting both SPI and SDMMC interfaces. Wraps the ESP-IDF SDMMC/VFS layer to mount the card as a POSIX filesystem at <code>/sdcard</code>.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Storage</td></tr>
@@ -290,7 +339,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_sdcard.rs</code> (679 lines)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>sdmmc_host_init()</code>, <code>esp_vfs_fat_sdmmc_mount()</code></td></tr>
       <tr><th>Tests</th><td>21 unit tests</td></tr>
-      <tr><th>Boards</th><td>Multiple</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a>, <a href="devices/cardputer.html">Cardputer</a>, <a href="devices/cyd-s022.html">CYD S022</a>, <a href="devices/cyd-s028.html">CYD S028</a></td></tr>
       <tr><th>Notes</th><td>Auto-detects SPI vs SDMMC mode from board.json config. After mount, all file access uses standard POSIX calls (fopen, fread, etc.).</td></tr>
     </table>
 
@@ -298,7 +347,7 @@
 
     <h2>Audio drivers</h2>
 
-    <h3 id="drv_audio_pcm5102a">drv_audio_pcm5102a <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-audio">drv_audio_pcm5102a <span class="badge badge-green">Proven</span></h3>
     <p>I2S audio DAC driver for the PCM5102A. Wraps the ESP-IDF I2S API to stream PCM audio data to the DAC.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Audio</td></tr>
@@ -307,7 +356,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_audio_pcm5102a.rs</code> (1086 lines)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>i2s_channel_write()</code>, <code>i2s_new_channel()</code></td></tr>
       <tr><th>Tests</th><td>29 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>Supports 16-bit and 32-bit PCM at 8/16/44.1/48 kHz sample rates. Volume control via software scaling before I2S write.</td></tr>
     </table>
 
@@ -315,7 +364,7 @@
 
     <h2>Sensor drivers</h2>
 
-    <h3 id="drv_imu_bhi260ap">drv_imu_bhi260ap <span class="badge badge-red">Stub</span></h3>
+    <h3 id="drv-imu">drv_imu_bhi260ap <span class="badge badge-red">Stub</span></h3>
     <p>IMU driver for the Bosch BHI260AP smart sensor hub. Currently a stub &mdash; the vtable is registered but hardware calls are no-ops.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>IMU</td></tr>
@@ -324,11 +373,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_imu_bhi260ap.rs</code> (368 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; stub, manual I2C registers planned</td></tr>
       <tr><th>Tests</th><td>13 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>The BHI260AP is a complex sensor hub requiring firmware upload. Full implementation is planned for a future release.</td></tr>
     </table>
 
-    <h3 id="drv_light_ltr553">drv_light_ltr553 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-light">drv_light_ltr553 <span class="badge badge-green">Proven</span></h3>
     <p>Ambient light and proximity sensor driver for the LTR-553ALS. Reads lux and proximity values from I2C registers.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Light</td></tr>
@@ -337,11 +386,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_light_ltr553.rs</code> (324 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads</td></tr>
       <tr><th>Tests</th><td>11 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>Provides ambient light (lux) and proximity distance. Used by the kernel for automatic display brightness adjustment.</td></tr>
     </table>
 
-    <h3 id="drv_rtc_pcf8563">drv_rtc_pcf8563 <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-rtc">drv_rtc_pcf8563 <span class="badge badge-green">Proven</span></h3>
     <p>Real-time clock driver for the NXP PCF8563. Provides battery-backed timekeeping via I2C register reads and writes.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>RTC</td></tr>
@@ -350,11 +399,11 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_rtc_pcf8563.rs</code> (823 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads/writes</td></tr>
       <tr><th>Tests</th><td>25 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>BCD-encoded time registers. Supports get/set time and alarm with interrupt output. Falls back to system tick when RTC is absent.</td></tr>
     </table>
 
-    <h3 id="drv_accel_qmi8658">drv_accel_qmi8658 <span class="badge badge-yellow">Partial</span></h3>
+    <h3 id="drv-accel">drv_accel_qmi8658 <span class="badge badge-yellow">Partial</span></h3>
     <p>Accelerometer/gyroscope driver for the QST QMI8658C 6-axis IMU. Basic accelerometer and gyroscope reads are implemented; advanced features like step counter and tap detection are not yet enabled.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Accel</td></tr>
@@ -363,7 +412,7 @@
       <tr><th>Source</th><td><code>components/kernel_rs/src/drv_accel_qmi8658.rs</code> (891 lines)</td></tr>
       <tr><th>Wraps</th><td>None &mdash; manual I2C register reads</td></tr>
       <tr><th>Tests</th><td>32 unit tests</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>Accelerometer and gyroscope data reads work. Step counter, tap detection, and any-motion interrupt are not yet implemented.</td></tr>
     </table>
 
@@ -371,7 +420,7 @@
 
     <h2>Modem drivers</h2>
 
-    <h3 id="drv_modem_a7682e">drv_modem_a7682e <span class="badge badge-green">Proven</span></h3>
+    <h3 id="drv-modem">drv_modem_a7682e <span class="badge badge-green">Proven</span></h3>
     <p>Cellular modem driver for the SIMCOM A7682E (4G LTE Cat-1). Wraps the Espressif <code>esp_modem</code> component for AT command handling, PPP data mode, and SMS.</p>
     <table class="detail-table">
       <tr><th>HAL Type</th><td>Modem</td></tr>
@@ -380,7 +429,7 @@
       <tr><th>Source</th><td><code>components/drv_modem_a7682e/</code> (C)</td></tr>
       <tr><th>Wraps</th><td>ESP-IDF <code>esp_modem</code> managed component</td></tr>
       <tr><th>Tests</th><td>Hardware-tested on T-Deck Pro</td></tr>
-      <tr><th>Boards</th><td>T-Deck Pro</td></tr>
+      <tr><th>Boards</th><td><a href="devices/tdeck-pro.html">T-Deck Pro</a></td></tr>
       <tr><th>Notes</th><td>C driver &mdash; one of two non-Rust drivers. Handles AT commands, PPP data mode for IP connectivity, and SMS send/receive. SIM card required.</td></tr>
     </table>
 

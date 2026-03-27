@@ -580,3 +580,11 @@ td code {
 .detail-table th { width: 120px; padding: 6px 12px; color: var(--text-dim); font-size: 13px; font-weight: 500; text-align: left; vertical-align: top; }
 .detail-table td { padding: 6px 12px; font-size: 14px; }
 .badge-blue { background: rgba(37, 99, 235, 0.15); color: #60a5fa; }
+
+/* ── Matrix table (driver × device) ──────────────────────── */
+
+.matrix-table td { text-align: center; width: 60px; min-width: 60px; }
+.matrix-table td:first-child { text-align: left; width: auto; min-width: 140px; font-weight: 500; }
+.matrix-table th { font-size: 11px; padding: 8px 6px; }
+.matrix-table th a { color: var(--text-dim); }
+.matrix-table th a:hover { color: var(--primary); }
