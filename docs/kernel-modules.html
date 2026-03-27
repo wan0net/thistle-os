@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel Modules — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+        <a href="board-support.html">Board Support</a>
+        <a href="devices.html">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="kernel-modules.html" class="active">Kernel Modules</a>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Kernel Modules</div>
+      <h1>Kernel Modules</h1>
+      <p class="lead">11 new Rust kernel modules providing messaging, navigation, data management, system services, and BLE capabilities. 136 FFI exports, 528 tests, all pure Rust with C-compatible interfaces.</p>
+      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/kernel-modules.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-title">Overview</div>
+      All modules live in <code>components/kernel_rs/src/</code> and expose <code>rs_*</code> FFI functions through the syscall table. Each module is self-contained with its own test suite and can be used independently.
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Modules</th><th>FFI Exports</th><th>Tests</th></tr></thead>
+        <tbody>
+          <tr><td>Messaging</td><td>4</td><td>55</td><td>213</td></tr>
+          <tr><td>Navigation &amp; Location</td><td>2</td><td>16</td><td>92</td></tr>
+          <tr><td>Data &amp; Storage</td><td>2</td><td>26</td><td>86</td></tr>
+          <tr><td>System Services</td><td>2</td><td>26</td><td>92</td></tr>
+          <tr><td>BLE</td><td>1</td><td>13</td><td>45</td></tr>
+          <tr><td><strong>Total</strong></td><td><strong>11</strong></td><td><strong>136</strong></td><td><strong>528</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <h2>Messaging</h2>
+
+    <h3>Contact Manager</h3>
+    <p><code>contact_manager.rs</code> — Address book with name, callsign, device ID, phone number, BLE address, and Ed25519 public key. JSON persistence to SD card, vCard 3.0 import/export.</p>
+    <ul>
+      <li>Per-contact fields: name, callsign, device ID, phone, BLE address, Ed25519 public key</li>
+      <li>JSON persistence with <code>rs_contact_save()</code></li>
+      <li>vCard 3.0 import/export for interoperability</li>
+      <li>Search by name, device ID, or phone number</li>
+      <li>Emergency contact designation</li>
+    </ul>
+    <p><span class="badge badge-purple">16 FFI exports</span> <span class="badge badge-green">65 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_manager_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_add</span>(info: *<span class="tok-keyword">const</span> <span class="tok-type">CContactInfo</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_remove</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_find_by_device_id</span>(...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_save</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_export_vcard</span>(...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_contact_import_vcard</span>(...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <h3>Burn Timer</h3>
+    <p><code>burn_timer.rs</code> — Auto-delete messages after a configurable duration. Supports per-conversation policies with a monotonic time model to prevent clock-manipulation attacks.</p>
+    <ul>
+      <li>Per-message burn timers with millisecond precision</li>
+      <li>Per-conversation default policies</li>
+      <li>Monotonic time model — immune to system clock changes</li>
+      <li>Bulk cancel by conversation</li>
+      <li>Active timer count and remaining time queries</li>
+    </ul>
+    <p><span class="badge badge-purple">12 FFI exports</span> <span class="badge badge-green">47 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_set</span>(conv_id: <span class="tok-type">u8</span>, msg_idx: <span class="tok-type">u8</span>, burn_after_ms: <span class="tok-type">u64</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_cancel</span>(conv_id: <span class="tok-type">u8</span>, msg_idx: <span class="tok-type">u8</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_set_policy</span>(conv_id: <span class="tok-type">u8</span>, burn_ms: <span class="tok-type">u64</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_tick</span>(now_ms: <span class="tok-type">u64</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_burn_timer_remaining</span>(conv_id: <span class="tok-type">u8</span>, msg_idx: <span class="tok-type">u8</span>) -> <span class="tok-type">i64</span>;</code></pre>
+
+    <h3>Message Queue</h3>
+    <p><code>msg_queue.rs</code> — Store-and-forward message queue with exponential backoff retry. Priority ordering (Urgent/High/Normal) ensures critical messages are sent first. SD card persistence.</p>
+    <ul>
+      <li>Three priority levels: Urgent, High, Normal</li>
+      <li>Exponential backoff retry with configurable max retries</li>
+      <li>TTL-based message expiry</li>
+      <li>SD card persistence with <code>rs_msg_queue_save()</code></li>
+      <li>Completed message purging</li>
+    </ul>
+    <p><span class="badge badge-purple">15 FFI exports</span> <span class="badge badge-green">53 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_tick</span>(now_ms: <span class="tok-type">u64</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_mark_sent</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_mark_failed</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_save</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_set_defaults</span>(max_retries: <span class="tok-type">u32</span>, ttl_ms: <span class="tok-type">u64</span>) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <h3>Message Crypto</h3>
+    <p><code>msg_crypto.rs</code> — End-to-end message encryption using AES-256-CTR + HMAC-SHA256. PBKDF2 key derivation from shared secrets. Per-message nonces with only 49 bytes overhead per encrypted message.</p>
+    <ul>
+      <li>AES-256-CTR encryption with HMAC-SHA256 authentication</li>
+      <li>PBKDF2 key derivation from shared secrets</li>
+      <li>Per-message unique nonces</li>
+      <li>49 bytes overhead per encrypted message</li>
+      <li>Per-contact crypto channels with session statistics</li>
+    </ul>
+    <p><span class="badge badge-purple">12 FFI exports</span> <span class="badge badge-green">48 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_establish</span>(contact_id: <span class="tok-type">u32</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_encrypt</span>(...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_decrypt</span>(...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_get_overhead</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_crypto_derive_key</span>(...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <h2>Navigation &amp; Location</h2>
+
+    <h3>GPS Track</h3>
+    <p><code>gps_track.rs</code> — Track recording with waypoint management and GPX 1.1 XML export. Haversine distance calculation for accurate total distance over recorded tracks.</p>
+    <ul>
+      <li>Track point recording with latitude, longitude, altitude, timestamp</li>
+      <li>Named waypoint support</li>
+      <li>GPX 1.1 XML export</li>
+      <li>Haversine distance calculation (total km)</li>
+    </ul>
+    <p><span class="badge badge-purple">7 FFI exports</span> <span class="badge badge-green">44 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_gps_track_create</span>(name: *<span class="tok-keyword">const</span> <span class="tok-type">c_char</span>) -> *<span class="tok-keyword">mut</span> <span class="tok-type">GpsTrack</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_gps_track_add_point</span>(track: *<span class="tok-keyword">mut</span> <span class="tok-type">GpsTrack</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_gps_track_add_waypoint</span>(track: *<span class="tok-keyword">mut</span> <span class="tok-type">GpsTrack</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_gps_track_to_gpx</span>(track: *<span class="tok-keyword">const</span> <span class="tok-type">GpsTrack</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_gps_track_distance_km</span>(track: *<span class="tok-keyword">const</span> <span class="tok-type">GpsTrack</span>) -> <span class="tok-type">f64</span>;</code></pre>
+
+    <h3>SOS Beacon</h3>
+    <p><code>sos_beacon.rs</code> — Emergency beacon protocol using compact 109-byte LoRa packets. 6 status modes (OK, Moving, Stationary, Injured, Immobile, MayDay). CRC-16 checksum for packet integrity.</p>
+    <ul>
+      <li>109-byte LoRa emergency packets</li>
+      <li>6 status modes: OK, Moving, Stationary, Injured, Immobile, MayDay</li>
+      <li>CRC-16 checksum verification</li>
+      <li>Position and battery level updates</li>
+      <li>Configurable broadcast interval</li>
+    </ul>
+    <p><span class="badge badge-purple">9 FFI exports</span> <span class="badge badge-green">48 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_sos_beacon_create</span>(device_id: *<span class="tok-keyword">const</span> <span class="tok-type">u8</span>) -> *<span class="tok-keyword">mut</span> <span class="tok-type">SosBeacon</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_sos_beacon_activate</span>(beacon: *<span class="tok-keyword">mut</span> <span class="tok-type">SosBeacon</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_sos_beacon_cancel</span>(beacon: *<span class="tok-keyword">mut</span> <span class="tok-type">SosBeacon</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_sos_beacon_update_position</span>(beacon: *<span class="tok-keyword">mut</span> <span class="tok-type">SosBeacon</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_sos_beacon_next_packet</span>(beacon: *<span class="tok-keyword">mut</span> <span class="tok-type">SosBeacon</span>, ...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <h2>Data &amp; Storage</h2>
+
+    <h3>Data Logger</h3>
+    <p><code>data_logger.rs</code> — Structured CSV logging with typed columns (Int, Float, Text, Bool). Schema locking after first row. Column statistics for numeric types.</p>
+    <ul>
+      <li>Typed columns: Int, Float, Text, Bool</li>
+      <li>Schema locking after first row commit</li>
+      <li>CSV export with <code>rs_data_logger_to_csv()</code></li>
+      <li>Row and column count queries</li>
+      <li>Per-column statistics for numeric types</li>
+    </ul>
+    <p><span class="badge badge-purple">14 FFI exports</span> <span class="badge badge-green">42 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_create</span>(name: *<span class="tok-keyword">const</span> <span class="tok-type">c_char</span>) -> *<span class="tok-keyword">mut</span> <span class="tok-type">DataLogger</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_add_column</span>(logger: *<span class="tok-keyword">mut</span> <span class="tok-type">DataLogger</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_begin_row</span>(logger: *<span class="tok-keyword">mut</span> <span class="tok-type">DataLogger</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_set_float</span>(logger: *<span class="tok-keyword">mut</span> <span class="tok-type">DataLogger</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_commit_row</span>(logger: *<span class="tok-keyword">mut</span> <span class="tok-type">DataLogger</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_data_logger_to_csv</span>(logger: *<span class="tok-keyword">const</span> <span class="tok-type">DataLogger</span>, ...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <h3>Secure Wipe</h3>
+    <p><code>secure_wipe.rs</code> — Secure data erasure with 5 overwrite patterns (Zeros, Ones, Random, DoD 5220.22-M, Gutmann). Priority ordering for wipe targets. Progress tracking for long operations.</p>
+    <ul>
+      <li>5 overwrite patterns: Zeros, Ones, Random, DoD 5220.22-M, Gutmann</li>
+      <li>Priority ordering for wipe targets</li>
+      <li>Progress tracking (0-100%)</li>
+      <li>Completion and failure status per target</li>
+      <li>Pattern block generation for direct I/O</li>
+    </ul>
+    <p><span class="badge badge-purple">12 FFI exports</span> <span class="badge badge-green">44 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_wipe_plan_create</span>(pattern: <span class="tok-type">i32</span>) -> *<span class="tok-keyword">mut</span> <span class="tok-type">WipePlan</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_wipe_plan_add_target</span>(plan: *<span class="tok-keyword">mut</span> <span class="tok-type">WipePlan</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_wipe_plan_next_pending</span>(plan: *<span class="tok-keyword">const</span> <span class="tok-type">WipePlan</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_wipe_plan_progress</span>(plan: *<span class="tok-keyword">const</span> <span class="tok-type">WipePlan</span>) -> <span class="tok-type">u8</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_wipe_plan_generate_block</span>(plan: *<span class="tok-keyword">const</span> <span class="tok-type">WipePlan</span>, ...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <h2>System Services</h2>
+
+    <h3>Notification Manager</h3>
+    <p><code>notification.rs</code> — Priority queue for system and app notifications. 4 priority levels (Low, Normal, High, Urgent), 5 categories, auto-expiry, and per-app filtering.</p>
+    <ul>
+      <li>4 priority levels: Low, Normal, High, Urgent</li>
+      <li>5 notification categories</li>
+      <li>Auto-expiry with configurable TTL</li>
+      <li>Per-app notification filtering</li>
+      <li>Progress notifications with update support</li>
+      <li>Unread count and urgent notification queries</li>
+    </ul>
+    <p><span class="badge badge-purple">10 FFI exports</span> <span class="badge badge-green">38 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_manager_create</span>(max: <span class="tok-type">u32</span>) -> *<span class="tok-keyword">mut</span> <span class="tok-type">NotificationManager</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_post</span>(mgr: *<span class="tok-keyword">mut</span> <span class="tok-type">NotificationManager</span>, ...) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_mark_read</span>(mgr: *<span class="tok-keyword">mut</span> <span class="tok-type">NotificationManager</span>, id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_dismiss</span>(mgr: *<span class="tok-keyword">mut</span> <span class="tok-type">NotificationManager</span>, id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_unread_count</span>(mgr: *<span class="tok-keyword">const</span> <span class="tok-type">NotificationManager</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">unsafe</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_notification_expire</span>(mgr: *<span class="tok-keyword">mut</span> <span class="tok-type">NotificationManager</span>, ...) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <h3>Driver Reload</h3>
+    <p><code>driver_reload.rs</code> — Hot-reload state machine for drivers. Manages lifecycle transitions (Empty, Loaded, Running, Stopped) across 10 HAL types. Enables driver updates without rebooting.</p>
+    <ul>
+      <li>State machine: Empty, Loaded, Running, Stopped</li>
+      <li>10 HAL driver types supported</li>
+      <li>Load, unload, reload, start, stop lifecycle operations</li>
+      <li>State queries per registered driver</li>
+      <li>Safe transitions with validation</li>
+    </ul>
+    <p><span class="badge badge-purple">16 FFI exports</span> <span class="badge badge-green">54 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_load</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_unload</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_reload</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_start</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_driver_reload_get_state</span>(id: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;</code></pre>
+
+    <!-- ════════════════════════════════════════════════════════ -->
+    <h2>BLE</h2>
+
+    <h3>BLE Scanner</h3>
+    <p><code>ble_scanner.rs</code> — BLE device discovery with advertising data TLV parser. RSSI filtering to ignore distant devices. NimBLE integration for ESP32 hardware scanning.</p>
+    <ul>
+      <li>Active and passive scan modes</li>
+      <li>Advertising data TLV parser (device name, service UUIDs, manufacturer data)</li>
+      <li>RSSI threshold filtering</li>
+      <li>Sort results by signal strength</li>
+      <li>NimBLE stack integration</li>
+    </ul>
+    <p><span class="badge badge-purple">13 FFI exports</span> <span class="badge badge-green">45 tests</span></p>
+
+    <pre><code><span class="tok-comment">// Key FFI function signatures</span>
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_init</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_start</span>(scan_type: <span class="tok-type">u8</span>, duration_ms: <span class="tok-type">u32</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_stop</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_is_scanning</span>() -> <span class="tok-type">bool</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_get_count</span>() -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_set_rssi_filter</span>(min_rssi: <span class="tok-type">i8</span>) -> <span class="tok-type">i32</span>;
+<span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_ble_scanner_sort_by_rssi</span>() -> <span class="tok-type">i32</span>;</code></pre>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -27,6 +27,13 @@ typedef enum {
     HTTP_EVENT_ON_DATA = 0,
 } esp_http_client_event_id_t;
 
+typedef enum {
+    HTTP_METHOD_GET  = 0,
+    HTTP_METHOD_POST = 1,
+    HTTP_METHOD_PUT  = 2,
+    HTTP_METHOD_DELETE = 3,
+} esp_http_client_method_t;
+
 typedef struct {
     esp_http_client_event_id_t event_id;
     void *data;
@@ -69,4 +76,17 @@ static inline esp_err_t esp_http_client_close(esp_http_client_handle_t c) {
 
 static inline void esp_http_client_cleanup(esp_http_client_handle_t c) {
     sim_http_client_cleanup(c);
+}
+
+/* Additional stubs used by assistant_ui.c — no-ops in simulator */
+static inline esp_err_t esp_http_client_set_method(esp_http_client_handle_t c, esp_http_client_method_t m) {
+    (void)c; (void)m; return ESP_OK;
+}
+
+static inline esp_err_t esp_http_client_set_header(esp_http_client_handle_t c, const char *key, const char *val) {
+    (void)c; (void)key; (void)val; return ESP_OK;
+}
+
+static inline esp_err_t esp_http_client_set_post_field(esp_http_client_handle_t c, const char *data, int len) {
+    (void)c; (void)data; (void)len; return ESP_OK;
 }
