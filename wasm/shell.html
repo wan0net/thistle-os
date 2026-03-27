@@ -48,7 +48,22 @@
 <body>
 <div class="layout">
   <div class="device-panel">
-    <div class="device-header"><h1>ThistleOS</h1><p>Browser Simulator</p></div>
+    <div class="device-header">
+      <h1>ThistleOS</h1>
+      <p>Browser Simulator</p>
+      <select id="device-select" style="margin-top:10px;padding:6px 12px;background:#232322;border:1px solid #343432;border-radius:6px;color:#ededed;font-size:13px;cursor:pointer;">
+        <option value="tdeck">T-Deck (320×240 LCD)</option>
+        <option value="tdeck-pro">T-Deck Pro (320×240 E-Paper)</option>
+        <option value="tdeck-plus">T-Deck Plus (320×240 LCD+GPS)</option>
+        <option value="tdisplay">T-Display-S3 (320×170 LCD)</option>
+        <option value="heltec-v3">Heltec V3 (128×64 OLED)</option>
+        <option value="cardputer">Cardputer (240×135 LCD)</option>
+        <option value="cyd-s022">CYD S022 (240×320 LCD)</option>
+        <option value="cyd-s028">CYD S028 (320×240 LCD)</option>
+        <option value="t3-s3">T3-S3 (128×64 OLED)</option>
+        <option value="c3-mini">C3-Mini (128×64 OLED)</option>
+      </select>
+    </div>
     <div id="canvas-container"><canvas id="canvas" width="640" height="480" oncontextmenu="event.preventDefault()"></canvas></div>
     <p id="device-status" class="loading">Loading ThistleOS...</p>
   </div>
@@ -180,6 +195,19 @@ function radioRx() {
   setTimeout(function(){document.getElementById('radio-status').textContent='Idle'},1000);
 }
 initWifi(); initBle();
+/* Device selector — reload with ?device=xxx */
+document.getElementById('device-select').addEventListener('change', function() {
+  var dev = this.value;
+  var url = new URL(window.location);
+  url.searchParams.set('device', dev);
+  window.location.href = url.toString();
+});
+/* Set initial dropdown from URL */
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var dev = params.get('device');
+  if (dev) { document.getElementById('device-select').value = dev; }
+})();
 var Module={
   canvas:document.getElementById('canvas'),
   onRuntimeInitialized:function(){
