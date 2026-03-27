@@ -32,7 +32,7 @@ typedef struct {
 /* === System calls (resolved at load time by ELF loader) === */
 
 /* System */
-extern void     thistle_log(const char *tag, const char *fmt, ...);
+extern void     thistle_log(const char *tag, const char *msg);
 extern uint32_t thistle_millis(void);
 extern void     thistle_delay(uint32_t ms);
 extern void    *thistle_malloc(size_t size);
@@ -54,11 +54,11 @@ extern int thistle_radio_set_freq(uint32_t freq_hz);
 extern int thistle_gps_enable(void);
 extern int thistle_gps_get_lat_lon(double *lat, double *lon);
 
-/* Storage */
-extern int thistle_fs_open(const char *path, int flags);
-extern int thistle_fs_read(int fd, void *buf, size_t len);
-extern int thistle_fs_write(int fd, const void *buf, size_t len);
-extern int thistle_fs_close(int fd);
+/* Storage (fopen/fread/fwrite/fclose semantics) */
+extern void *thistle_fs_open(const char *path, const char *mode);
+extern int   thistle_fs_read(void *buf, size_t size, size_t count, void *stream);
+extern int   thistle_fs_write(const void *buf, size_t size, size_t count, void *stream);
+extern int   thistle_fs_close(void *stream);
 
 /* IPC */
 extern int thistle_msg_send(uint32_t dst_app, uint32_t type, const void *data, size_t len);
