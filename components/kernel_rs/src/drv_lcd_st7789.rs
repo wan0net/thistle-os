@@ -25,8 +25,8 @@ const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 
 // ── Panel geometry ────────────────────────────────────────────────────────────
 
-const LCD_WIDTH: u16 = 320;
-const LCD_HEIGHT: u16 = 240;
+const LCD_DEFAULT_WIDTH: u16 = 320;
+const LCD_DEFAULT_HEIGHT: u16 = 240;
 
 // ── LEDC backlight constants ──────────────────────────────────────────────────
 
@@ -61,6 +61,14 @@ pub struct LcdSt7789Config {
     pub pin_bl: i32,
     /// SPI clock speed in Hz (0 = use default 40 MHz)
     pub spi_clock_hz: i32,
+    /// Panel width in pixels (0 = use default 320)
+    pub width: u16,
+    /// Panel height in pixels (0 = use default 240)
+    pub height: u16,
+    /// X offset for sub-window panels (e.g. 40 for Cardputer 240x135)
+    pub x_offset: u16,
+    /// Y offset for sub-window panels (e.g. 52 for Cardputer 240x135)
+    pub y_offset: u16,
 }
 
 impl Default for LcdSt7789Config {
@@ -72,6 +80,10 @@ impl Default for LcdSt7789Config {
             pin_rst: -1,
             pin_bl: -1,
             spi_clock_hz: 40_000_000,
+            width: 0,
+            height: 0,
+            x_offset: 0,
+            y_offset: 0,
         }
     }
 }
@@ -100,6 +112,10 @@ impl LcdState {
                 pin_rst: -1,
                 pin_bl: -1,
                 spi_clock_hz: 0,
+                width: 0,
+                height: 0,
+                x_offset: 0,
+                y_offset: 0,
             },
             io: std::ptr::null_mut(),
             panel: std::ptr::null_mut(),
@@ -201,6 +217,7 @@ mod platform {
         pub fn esp_lcd_panel_reset(panel: *mut c_void) -> i32;
         pub fn esp_lcd_panel_init(panel: *mut c_void) -> i32;
         pub fn esp_lcd_panel_invert_color(panel: *mut c_void, invert: bool) -> i32;
+        pub fn esp_lcd_panel_set_gap(panel: *mut c_void, x_gap: i32, y_gap: i32) -> i32;
         pub fn esp_lcd_panel_disp_on_off(panel: *mut c_void, on: bool) -> i32;
         pub fn esp_lcd_panel_draw_bitmap(
             panel: *mut c_void,
@@ -377,6 +394,13 @@ unsafe fn lcd_panel_invert_color(panel: *mut c_void, invert: bool) -> i32 {
     { let _ = (panel, invert); ESP_OK }
 }
 
+unsafe fn lcd_panel_set_gap(panel: *mut c_void, x_gap: i32, y_gap: i32) -> i32 {
+    #[cfg(target_os = "espidf")]
+    { return platform::esp_lcd_panel_set_gap(panel, x_gap, y_gap); }
+    #[cfg(not(target_os = "espidf"))]
+    { let _ = (panel, x_gap, y_gap); ESP_OK }
+}
+
 unsafe fn lcd_panel_disp_on_off(panel: *mut c_void, on: bool) -> i32 {
     #[cfg(target_os = "espidf")]
     { return platform::esp_lcd_panel_disp_on_off(panel, on); }
@@ -471,6 +495,18 @@ pub unsafe extern "C" fn st7789_init(config: *const c_void) -> i32 {
 
     // Most ST7789 TFT panels require colour inversion for correct colours
     lcd_panel_invert_color(s.panel, true);
+
+    // Set display gap for sub-window panels (e.g. Cardputer 240x135 at offset 40,52)
+    if s.cfg.x_offset > 0 || s.cfg.y_offset > 0 {
+        lcd_panel_set_gap(s.panel, s.cfg.x_offset as i32, s.cfg.y_offset as i32);
+    }
+
+    // Update vtable dimensions from config (default if not specified)
+    let w = if s.cfg.width > 0 { s.cfg.width } else { LCD_DEFAULT_WIDTH };
+    let h = if s.cfg.height > 0 { s.cfg.height } else { LCD_DEFAULT_HEIGHT };
+    // SAFETY: vtable is written during single-threaded init before any reader.
+    LCD_DRIVER.width = w;
+    LCD_DRIVER.height = h;
 
     lcd_panel_disp_on_off(s.panel, true);
 
@@ -590,7 +626,7 @@ static DRIVER_NAME: &[u8] = b"ST7789 (esp_lcd)\0";
 /// `refresh` is None — LCD pushes pixels immediately; no deferred refresh
 /// is needed.  This is the signal used by tk_wm to distinguish LCD from
 /// e-paper.
-static LCD_DRIVER: HalDisplayDriver = HalDisplayDriver {
+static mut LCD_DRIVER: HalDisplayDriver = HalDisplayDriver {
     init: Some(st7789_init),
     deinit: Some(st7789_deinit),
     flush: Some(st7789_flush),
@@ -598,8 +634,8 @@ static LCD_DRIVER: HalDisplayDriver = HalDisplayDriver {
     set_brightness: Some(st7789_set_brightness),
     sleep: Some(st7789_sleep),
     set_refresh_mode: Some(st7789_set_refresh_mode),
-    width: LCD_WIDTH,
-    height: LCD_HEIGHT,
+    width: LCD_DEFAULT_WIDTH,
+    height: LCD_DEFAULT_HEIGHT,
     display_type: HalDisplayType::Lcd,
     name: DRIVER_NAME.as_ptr() as *const c_char,
 };
@@ -612,7 +648,9 @@ static LCD_DRIVER: HalDisplayDriver = HalDisplayDriver {
 /// The returned pointer is valid for the lifetime of the program.
 #[no_mangle]
 pub extern "C" fn drv_lcd_st7789_get() -> *const HalDisplayDriver {
-    &LCD_DRIVER as *const HalDisplayDriver
+    // SAFETY: LCD_DRIVER is mutable static so width/height can be set at init time.
+    // The pointer remains valid for the program lifetime.
+    unsafe { &LCD_DRIVER as *const HalDisplayDriver }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
