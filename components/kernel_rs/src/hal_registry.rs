@@ -330,6 +330,8 @@ pub struct HalCryptoDriver {
         ) -> i32,
     >,
     pub random: Option<unsafe extern "C" fn(buf: *mut u8, len: usize) -> i32>,
+    pub aes128_ecb_encrypt: Option<unsafe extern "C" fn(key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32>,
+    pub aes128_ecb_decrypt: Option<unsafe extern "C" fn(key: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8) -> i32>,
     pub name: *const c_char,
 }
 

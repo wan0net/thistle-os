@@ -119,6 +119,48 @@ static esp_err_t hw_random(uint8_t *buf, size_t len)
     return ESP_OK;
 }
 
+static esp_err_t hw_aes128_ecb_encrypt(const uint8_t *key, const uint8_t *plaintext,
+                                        size_t len, uint8_t *ciphertext_out)
+{
+    if (!key || !plaintext || !ciphertext_out) return ESP_ERR_INVALID_ARG;
+    if (len == 0 || len % 16 != 0) return ESP_ERR_INVALID_SIZE;
+
+    mbedtls_aes_context ctx;
+    mbedtls_aes_init(&ctx);
+    if (mbedtls_aes_setkey_enc(&ctx, key, 128) != 0) {
+        mbedtls_aes_free(&ctx);
+        return ESP_FAIL;
+    }
+
+    for (size_t i = 0; i < len; i += 16) {
+        mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_ENCRYPT, plaintext + i, ciphertext_out + i);
+    }
+
+    mbedtls_aes_free(&ctx);
+    return ESP_OK;
+}
+
+static esp_err_t hw_aes128_ecb_decrypt(const uint8_t *key, const uint8_t *ciphertext,
+                                        size_t len, uint8_t *plaintext_out)
+{
+    if (!key || !ciphertext || !plaintext_out) return ESP_ERR_INVALID_ARG;
+    if (len == 0 || len % 16 != 0) return ESP_ERR_INVALID_SIZE;
+
+    mbedtls_aes_context ctx;
+    mbedtls_aes_init(&ctx);
+    if (mbedtls_aes_setkey_dec(&ctx, key, 128) != 0) {
+        mbedtls_aes_free(&ctx);
+        return ESP_FAIL;
+    }
+
+    for (size_t i = 0; i < len; i += 16) {
+        mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_DECRYPT, ciphertext + i, plaintext_out + i);
+    }
+
+    mbedtls_aes_free(&ctx);
+    return ESP_OK;
+}
+
 // ---------------------------------------------------------------------------
 // vtable + get
 // ---------------------------------------------------------------------------
@@ -129,6 +171,8 @@ static const hal_crypto_driver_t s_vtable = {
     .aes256_cbc_decrypt = hw_aes256_cbc_decrypt,
     .hmac_sha256        = hw_hmac_sha256,
     .random             = hw_random,
+    .aes128_ecb_encrypt = hw_aes128_ecb_encrypt,
+    .aes128_ecb_decrypt = hw_aes128_ecb_decrypt,
     .name               = "mbedtls (HW-accelerated)",
 };
 

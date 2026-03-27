@@ -254,7 +254,13 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_encrypt(
     if key.is_null() || plaintext.is_null() || ciphertext_out.is_null() { return ESP_ERR_INVALID_ARG; }
     if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
 
-    // Software only — no aes128_ecb fields in HalCryptoDriver
+    // Try hardware
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.aes128_ecb_encrypt {
+            return f(key, plaintext, len, ciphertext_out);
+        }
+    }
+    // Software fallback
     let k = &*(key as *const [u8; 16]);
     let pt = std::slice::from_raw_parts(plaintext, len);
     let ct = std::slice::from_raw_parts_mut(ciphertext_out, len);
@@ -273,7 +279,13 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_decrypt(
     if key.is_null() || ciphertext.is_null() || plaintext_out.is_null() { return ESP_ERR_INVALID_ARG; }
     if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
 
-    // Software only — no aes128_ecb fields in HalCryptoDriver
+    // Try hardware
+    if let Some(hw) = get_hw_crypto() {
+        if let Some(f) = hw.aes128_ecb_decrypt {
+            return f(key, ciphertext, len, plaintext_out);
+        }
+    }
+    // Software fallback
     let k = &*(key as *const [u8; 16]);
     let ct = std::slice::from_raw_parts(ciphertext, len);
     let pt = std::slice::from_raw_parts_mut(plaintext_out, len);

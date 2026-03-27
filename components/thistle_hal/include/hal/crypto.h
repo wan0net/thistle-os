@@ -27,5 +27,10 @@ typedef struct {
 
     esp_err_t (*random)(uint8_t *buf, size_t len);
 
+    esp_err_t (*aes128_ecb_encrypt)(const uint8_t *key, const uint8_t *plaintext,
+                                     size_t len, uint8_t *ciphertext_out);
+    esp_err_t (*aes128_ecb_decrypt)(const uint8_t *key, const uint8_t *ciphertext,
+                                     size_t len, uint8_t *plaintext_out);
+
     const char *name;  /* "ESP32-S3 Hardware", "Software (Rust)", etc. */
 } hal_crypto_driver_t;
