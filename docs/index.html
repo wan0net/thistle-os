@@ -28,8 +28,7 @@
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
         <a href="drivers.html">Driver Reference</a>
-        <a href="board-support.html">Board Support</a>
-        <a href="devices.html">Supported Devices</a>
+        <a href="devices.html">Devices</a>
 
         <div class="nav-label">System</div>
         <a href="kernel-modules.html">Kernel Modules</a>
@@ -109,15 +108,10 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
         <div class="card-title">App Store</div>
         <div class="card-desc">Catalog JSON schema, hosting your own catalog, download and verification flow.</div>
       </a>
-      <a href="board-support.html" class="card">
-        <div class="card-icon">&#128290;</div>
-        <div class="card-title">Board Support</div>
-        <div class="card-desc">Adding new hardware: pin assignments, board component, driver registration.</div>
-      </a>
       <a href="devices.html" class="card">
         <div class="card-icon">&#128187;</div>
-        <div class="card-title">Supported Devices</div>
-        <div class="card-desc">All 6 supported boards, chip support table, 14 Rust driver details, hardware detection flow.</div>
+        <div class="card-title">Devices</div>
+        <div class="card-desc">All 10 supported boards, chip support table, hardware detection flow, and how to add a new board.</div>
       </a>
       <a href="security.html" class="card">
         <div class="card-icon">&#128274;</div>
@@ -154,7 +148,7 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
 
     <h2>Supported Hardware</h2>
     <p>ThistleOS runs on 6 boards across the ESP32 family. The primary board is the <strong>LilyGo T-Deck Pro</strong> (ESP32-S3, 3.1" e-paper, QWERTY keyboard, LoRa, GPS, IMU, RTC). Other supported boards include the T-Deck (LCD), T-Display-S3, T3-S3 (LoRa), CYD (ESP32), and ESP32-C3 SuperMini.</p>
-    <p>See <a href="devices.html">Supported Devices</a> for the full hardware breakdown and driver table. See <a href="board-support.html">Board Support</a> for how to add your own board.</p>
+    <p>See <a href="devices.html">Devices</a> for the full hardware breakdown, driver table, and how to add your own board.</p>
 
     <h2>License</h2>
     <p>ThistleOS is released under the <strong>BSD 3-Clause License</strong>. All source files in <code>components/</code>, <code>app_sdk/</code>, and <code>recovery/</code> carry the SPDX identifier <code>BSD-3-Clause</code>. Third-party managed components (LVGL, RadioLib, esp-modem) retain their own licenses.</p>
