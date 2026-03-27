@@ -583,8 +583,26 @@ td code {
 
 /* ── Matrix table (driver × device) ──────────────────────── */
 
-.matrix-table td { text-align: center; width: 60px; min-width: 60px; }
-.matrix-table td:first-child { text-align: left; width: auto; min-width: 140px; font-weight: 500; }
-.matrix-table th { font-size: 11px; padding: 8px 6px; }
+/* ── Table search + sort ─────────────────────────────────────────── */
+.table-search-wrap { margin-bottom: 12px; }
+.table-search {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 14px;
+  font-size: 14px;
+  width: 280px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.table-search:focus { border-color: var(--primary, #2563eb); }
+.table-search::placeholder { color: var(--text-dim); }
+.sort-arrow { font-size: 10px; opacity: 0.3; }
+
+.matrix-table { font-size: 14px; }
+.matrix-table td { text-align: center; width: 80px; min-width: 70px; padding: 12px 10px; }
+.matrix-table td:first-child { text-align: left; width: auto; min-width: 180px; font-weight: 500; }
+.matrix-table th { font-size: 13px; padding: 12px 10px; white-space: nowrap; }
 .matrix-table th a { color: var(--text-dim); }
 .matrix-table th a:hover { color: var(--primary); }
