@@ -1,0 +1,3 @@
+"Consider the features not implemented yet. Have the personas review the entire project and running versions, and suggest new features. Have a seperate persona
+  to build those features. Document  everything. Keep looping round. don't ask me for permission or questions. if you have questions, document them, move on. also make sure to check the
+  github build that nothing breaks. implement test cases. do not merge feature back yet."

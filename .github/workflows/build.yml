@@ -137,8 +137,7 @@ jobs:
           echo "::group::Semgrep scan results"
           semgrep scan \
             --config auto \
-            --config p/c-audit \
-            --config p/security-audit \
+            --config p/default \
             --config .github/semgrep.yml \
             --error \
             --severity ERROR \
@@ -152,8 +151,7 @@ jobs:
         run: |
           semgrep scan \
             --config auto \
-            --config p/c-audit \
-            --config p/security-audit \
+            --config p/default \
             --config .github/semgrep.yml \
             --sarif --output semgrep-results.sarif \
             components/ main/ || true

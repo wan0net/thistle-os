@@ -75,3 +75,125 @@ rules:
     severity: INFO
     metadata:
       category: security
+
+  # ── Buffer overflow risks ──────────────────────────────────────────
+
+  - id: thistle-sprintf-no-bounds
+    patterns:
+      - pattern: sprintf($BUF, ...)
+      - pattern-not: snprintf(...)
+    message: >
+      Use snprintf() instead of sprintf() to prevent buffer overflow.
+    languages: [c]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-120
+
+  - id: thistle-strcpy-no-bounds
+    patterns:
+      - pattern: strcpy($DST, $SRC)
+      - pattern-not: strncpy(...)
+    message: >
+      Use strncpy() or strlcpy() instead of strcpy() to prevent
+      buffer overflow.
+    languages: [c]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-120
+
+  - id: thistle-strcat-no-bounds
+    pattern: strcat($DST, $SRC)
+    message: >
+      Use strncat() instead of strcat() to prevent buffer overflow.
+    languages: [c]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-120
+
+  # ── Memory safety ─────────────────────────────────────────────────
+
+  - id: thistle-malloc-no-null-check
+    patterns:
+      - pattern: |
+          $P = malloc(...);
+          ...
+          $P->$FIELD
+      - pattern-not: |
+          $P = malloc(...);
+          ...
+          if ($P == NULL) { ... }
+          ...
+          $P->$FIELD
+    message: >
+      malloc() return value not checked for NULL before dereference.
+    languages: [c]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-476
+
+  # ── Crypto ────────────────────────────────────────────────────────
+
+  - id: thistle-hardcoded-key
+    patterns:
+      - pattern-regex: '(aes_key|secret_key|private_key|password)\s*=\s*"[^"]{8,}"'
+    message: >
+      Possible hardcoded cryptographic key or password. Keys should
+      be generated at runtime or loaded from secure storage.
+    languages: [c]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-798
+
+  # ── Rust-specific ─────────────────────────────────────────────────
+
+  - id: thistle-rust-unwrap-in-ffi
+    patterns:
+      - pattern: |
+          pub extern "C" fn $FN(...) -> ... {
+            ...
+            $X.unwrap()
+            ...
+          }
+      - pattern-not: |
+          pub extern "C" fn $FN(...) -> ... {
+            ...
+            $X.lock().unwrap()
+            ...
+          }
+    message: >
+      unwrap() in an extern "C" FFI function will panic and abort the
+      ESP32. Use match or unwrap_or instead.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: reliability
+
+  - id: thistle-rust-panic-in-ffi
+    pattern: |
+      pub extern "C" fn $FN(...) -> ... {
+        ...
+        panic!(...)
+        ...
+      }
+    message: >
+      panic!() in an extern "C" FFI function will abort the ESP32.
+      Return an error code instead.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: reliability
+
+  - id: thistle-rust-println-embedded
+    pattern: println!(...)
+    message: >
+      println!() is not available on ESP32. Use esp_log_write() via
+      FFI or remove the print statement.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: correctness
