@@ -13,10 +13,13 @@
 
 typedef sim_http_client_handle_t esp_http_client_handle_t;
 
+typedef esp_err_t (*crt_bundle_attach_fn)(void *);
+
 typedef struct {
     const char *url;
-    void       *event_handler;  /* ignored in simulator */
-    void       *user_data;      /* ignored in simulator */
+    void       *event_handler;      /* ignored in simulator */
+    void       *user_data;          /* ignored in simulator */
+    crt_bundle_attach_fn crt_bundle_attach; /* ignored in simulator */
     int         timeout_ms;
 } esp_http_client_config_t;
 
