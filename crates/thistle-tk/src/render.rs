@@ -122,6 +122,21 @@ fn render_node<D, M>(
         Widget::Image(img) => {
             draw_image(img, theme, mapper, target);
         }
+        Widget::ListItem(li) => {
+            draw_list_item(li, theme, mapper, target);
+        }
+        Widget::ProgressBar(pb) => {
+            draw_progress_bar(pb, theme, mapper, target);
+        }
+        Widget::Divider(d) => {
+            draw_divider(d, theme, mapper, target);
+        }
+        Widget::Spacer(_) => {
+            // Spacers take up space but render nothing.
+        }
+        Widget::StatusBar(sb) => {
+            draw_status_bar(sb, theme, mapper, target);
+        }
     }
 
     // Render children in order (painter's algorithm — last child on top).
@@ -293,6 +308,151 @@ fn draw_image<D, M>(
             )
             .draw(target);
         }
+    }
+}
+
+fn draw_list_item<D, M>(
+    li: &crate::widget::ListItemWidget,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &li.common;
+
+    // Selected highlight background
+    if li.selected {
+        let bg = mapper.map(Color::Surface, theme);
+        let rect = Rectangle::new(
+            Point::new(c.pos.x, c.pos.y),
+            embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+        );
+        let style = PrimitiveStyleBuilder::new().fill_color(bg).build();
+        let _ = rect.into_styled(style).draw(target);
+    }
+
+    // Title
+    let title_color = mapper.map(li.title_color, theme);
+    let title_style = MonoTextStyle::new(&FONT_6X10, title_color);
+    let tx = c.pos.x + 4;
+    let ty = c.pos.y + 12;
+    let _ = Text::new(li.title.as_str(), Point::new(tx, ty), title_style).draw(target);
+
+    // Subtitle (below title, dimmer)
+    if !li.subtitle.is_empty() {
+        let sub_color = mapper.map(li.subtitle_color, theme);
+        let sub_style = MonoTextStyle::new(&FONT_6X10, sub_color);
+        let _ = Text::new(li.subtitle.as_str(), Point::new(tx, ty + 12), sub_style).draw(target);
+    }
+
+    // Badge (right-aligned)
+    if !li.badge.is_empty() {
+        let badge_color = mapper.map(li.badge_color, theme);
+        let badge_style = MonoTextStyle::new(&FONT_6X10, badge_color);
+        let badge_w = li.badge.len() as i32 * 6;
+        let bx = c.pos.x + c.size.w as i32 - badge_w - 6;
+        let _ = Text::new(li.badge.as_str(), Point::new(bx, ty), badge_style).draw(target);
+    }
+}
+
+fn draw_progress_bar<D, M>(
+    pb: &crate::widget::ProgressBarWidget,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &pb.common;
+
+    // Track
+    let track_color = mapper.map(pb.track_color, theme);
+    let rect = Rectangle::new(
+        Point::new(c.pos.x, c.pos.y),
+        embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+    );
+    let track_style = PrimitiveStyleBuilder::new().fill_color(track_color).build();
+    let _ = rect.into_styled(track_style).draw(target);
+
+    // Filled portion
+    let max = if pb.max_value == 0 { 100 } else { pb.max_value as u32 };
+    let fill_w = (c.size.w * pb.value.min(pb.max_value) as u32) / max;
+    if fill_w > 0 {
+        let bar_color = mapper.map(pb.bar_color, theme);
+        let fill_rect = Rectangle::new(
+            Point::new(c.pos.x, c.pos.y),
+            embedded_graphics::geometry::Size::new(fill_w, c.size.h),
+        );
+        let bar_style = PrimitiveStyleBuilder::new().fill_color(bar_color).build();
+        let _ = fill_rect.into_styled(bar_style).draw(target);
+    }
+}
+
+fn draw_divider<D, M>(
+    d: &crate::widget::DividerWidget,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &d.common;
+    let color = mapper.map(d.color, theme);
+    let style = PrimitiveStyleBuilder::new().stroke_color(color).stroke_width(d.thickness as u32).build();
+    let start = Point::new(c.pos.x, c.pos.y);
+    let end = if matches!(d.direction, crate::layout::Direction::Row) {
+        Point::new(c.pos.x + c.size.w as i32, c.pos.y)
+    } else {
+        Point::new(c.pos.x, c.pos.y + c.size.h as i32)
+    };
+    let _ = Line::new(start, end).into_styled(style).draw(target);
+}
+
+fn draw_status_bar<D, M>(
+    sb: &crate::widget::StatusBarWidget,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &sb.common;
+
+    // Background fill
+    let bg = mapper.map(sb.bg_color, theme);
+    let rect = Rectangle::new(
+        Point::new(c.pos.x, c.pos.y),
+        embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+    );
+    let bg_style = PrimitiveStyleBuilder::new().fill_color(bg).build();
+    let _ = rect.into_styled(bg_style).draw(target);
+
+    let text_color = mapper.map(sb.text_color, theme);
+    let text_style = MonoTextStyle::new(&FONT_6X10, text_color);
+    let ty = c.pos.y + ((c.size.h as i32 - 10) / 2) + 10;
+
+    // Left text
+    if !sb.left_text.is_empty() {
+        let _ = Text::new(sb.left_text.as_str(), Point::new(c.pos.x + 4, ty), text_style).draw(target);
+    }
+
+    // Center text
+    if !sb.center_text.is_empty() {
+        let tw = sb.center_text.len() as i32 * 6;
+        let cx = c.pos.x + (c.size.w as i32 - tw) / 2;
+        let _ = Text::new(sb.center_text.as_str(), Point::new(cx, ty), text_style).draw(target);
+    }
+
+    // Right text
+    if !sb.right_text.is_empty() {
+        let tw = sb.right_text.len() as i32 * 6;
+        let rx = c.pos.x + c.size.w as i32 - tw - 4;
+        let _ = Text::new(sb.right_text.as_str(), Point::new(rx, ty), text_style).draw(target);
     }
 }
 

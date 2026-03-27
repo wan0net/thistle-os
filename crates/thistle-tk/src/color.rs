@@ -24,6 +24,10 @@ pub enum Color {
     Accent,
     /// Error / destructive action color.
     Error,
+    /// Success / positive action color (green).
+    Success,
+    /// Warning / caution color (amber).
+    Warning,
 
     // -- Explicit colors --
     /// Explicit RGB value. On e-paper the renderer thresholds to B/W.

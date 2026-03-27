@@ -256,6 +256,130 @@ impl Default for ImageWidget {
 unsafe impl Send for ImageWidget {}
 
 // ---------------------------------------------------------------------------
+// ListItem — contact rows, message previews, settings items
+// ---------------------------------------------------------------------------
+
+/// A list row with title, subtitle, optional badge, and press handler.
+#[derive(Clone, Debug)]
+pub struct ListItemWidget {
+    pub common: CommonProps,
+    pub title: HString<64>,
+    pub subtitle: HString<128>,
+    pub badge: HString<8>,
+    pub title_color: Color,
+    pub subtitle_color: Color,
+    pub badge_color: Color,
+    pub selected: bool,
+    pub on_press: Option<OnPress>,
+}
+
+impl Default for ListItemWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps { height_hint: SizeHint::Fixed(40), ..CommonProps::default() },
+            title: HString::new(),
+            subtitle: HString::new(),
+            badge: HString::new(),
+            title_color: Color::Text,
+            subtitle_color: Color::TextSecondary,
+            badge_color: Color::Primary,
+            selected: false,
+            on_press: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgressBar — battery, signal, transfer progress
+// ---------------------------------------------------------------------------
+
+/// Horizontal progress bar with optional percentage text.
+#[derive(Clone, Debug)]
+pub struct ProgressBarWidget {
+    pub common: CommonProps,
+    pub value: u8,
+    pub max_value: u8,
+    pub bar_color: Color,
+    pub track_color: Color,
+    pub show_text: bool,
+}
+
+impl Default for ProgressBarWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps { height_hint: SizeHint::Fixed(8), ..CommonProps::default() },
+            value: 0,
+            max_value: 100,
+            bar_color: Color::Primary,
+            track_color: Color::Surface,
+            show_text: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Divider — horizontal or vertical separator
+// ---------------------------------------------------------------------------
+
+/// A thin separator line.
+#[derive(Clone, Debug)]
+pub struct DividerWidget {
+    pub common: CommonProps,
+    pub color: Color,
+    pub thickness: u16,
+    pub direction: Direction,
+}
+
+impl Default for DividerWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps { height_hint: SizeHint::Fixed(1), ..CommonProps::default() },
+            color: Color::Surface,
+            thickness: 1,
+            direction: Direction::Row, // horizontal
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spacer — empty flex space
+// ---------------------------------------------------------------------------
+
+/// Takes up space in a flex layout without rendering anything.
+#[derive(Clone, Debug, Default)]
+pub struct SpacerWidget {
+    pub common: CommonProps,
+}
+
+// ---------------------------------------------------------------------------
+// StatusBar — fixed top bar with left/center/right text
+// ---------------------------------------------------------------------------
+
+/// Fixed-height bar with three text regions.
+#[derive(Clone, Debug)]
+pub struct StatusBarWidget {
+    pub common: CommonProps,
+    pub left_text: HString<32>,
+    pub center_text: HString<32>,
+    pub right_text: HString<32>,
+    pub bg_color: Color,
+    pub text_color: Color,
+}
+
+impl Default for StatusBarWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps { height_hint: SizeHint::Fixed(16), ..CommonProps::default() },
+            left_text: HString::new(),
+            center_text: HString::new(),
+            right_text: HString::new(),
+            bg_color: Color::Surface,
+            text_color: Color::Text,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Widget enum
 // ---------------------------------------------------------------------------
 
@@ -267,6 +391,11 @@ pub enum Widget {
     Button(ButtonWidget),
     TextInput(TextInputWidget),
     Image(ImageWidget),
+    ListItem(ListItemWidget),
+    ProgressBar(ProgressBarWidget),
+    Divider(DividerWidget),
+    Spacer(SpacerWidget),
+    StatusBar(StatusBarWidget),
 }
 
 impl Widget {
@@ -278,6 +407,11 @@ impl Widget {
             Widget::Button(w) => &w.common,
             Widget::TextInput(w) => &w.common,
             Widget::Image(w) => &w.common,
+            Widget::ListItem(w) => &w.common,
+            Widget::ProgressBar(w) => &w.common,
+            Widget::Divider(w) => &w.common,
+            Widget::Spacer(w) => &w.common,
+            Widget::StatusBar(w) => &w.common,
         }
     }
 
@@ -289,6 +423,11 @@ impl Widget {
             Widget::Button(w) => &mut w.common,
             Widget::TextInput(w) => &mut w.common,
             Widget::Image(w) => &mut w.common,
+            Widget::ListItem(w) => &mut w.common,
+            Widget::ProgressBar(w) => &mut w.common,
+            Widget::Divider(w) => &mut w.common,
+            Widget::Spacer(w) => &mut w.common,
+            Widget::StatusBar(w) => &mut w.common,
         }
     }
 }

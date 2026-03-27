@@ -23,6 +23,8 @@ pub struct Theme {
     pub text_secondary: (u8, u8, u8),
     pub accent: (u8, u8, u8),
     pub error: (u8, u8, u8),
+    pub success: (u8, u8, u8),
+    pub warning: (u8, u8, u8),
 
     pub font_size_small: u32,
     pub font_size_normal: u32,
@@ -40,6 +42,8 @@ impl Theme {
             text_secondary: (96, 96, 96),
             accent: (0, 0, 0),
             error: (0, 0, 0),
+            success: (0, 0, 0),
+            warning: (0, 0, 0),
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,
@@ -56,6 +60,27 @@ impl Theme {
             text_secondary: (160, 160, 160),
             accent: (3, 218, 198),      // teal
             error: (207, 102, 121),     // muted red
+            success: (76, 175, 80),     // green
+            warning: (255, 183, 77),    // amber
+            font_size_small: 10,
+            font_size_normal: 14,
+            font_size_large: 20,
+        }
+    }
+
+    /// Link42 dark theme — deep black background with blue primary and
+    /// thistle-purple accent.
+    pub const fn link42() -> Self {
+        Self {
+            primary: (37, 99, 235),       // #2563EB
+            background: (17, 17, 16),     // #111110
+            surface: (28, 28, 27),        // #1C1C1B
+            text: (237, 237, 237),        // #EDEDED
+            text_secondary: (160, 159, 155), // #A09F9B
+            accent: (157, 78, 221),       // #9D4EDD (thistle purple)
+            error: (239, 68, 68),         // #EF4444
+            success: (34, 197, 94),       // #22C55E
+            warning: (245, 158, 11),      // #F59E0B
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,
@@ -73,6 +98,8 @@ impl Theme {
             Color::TextSecondary => self.text_secondary,
             Color::Accent => self.accent,
             Color::Error => self.error,
+            Color::Success => self.success,
+            Color::Warning => self.warning,
             Color::Rgb(r, g, b) => (r, g, b),
             Color::Black => (0, 0, 0),
             Color::White => (255, 255, 255),
