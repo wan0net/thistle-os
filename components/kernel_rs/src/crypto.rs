@@ -372,6 +372,51 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_derive_public(
     ESP_OK
 }
 
+// ── X25519 key exchange (Ed25519 → X25519 conversion + ECDH) ─────────
+
+/// X25519 Diffie-Hellman key exchange.
+/// Converts Ed25519 keys to X25519 format, then performs ECDH.
+/// ed25519_private_key: 32 bytes (Ed25519 seed)
+/// other_ed25519_public_key: 32 bytes (Ed25519 public key)
+/// shared_secret_out: 32 bytes
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_x25519_key_exchange(
+    ed25519_private_key: *const u8,      // 32 bytes seed
+    other_ed25519_public_key: *const u8,  // 32 bytes
+    shared_secret_out: *mut u8,           // 32 bytes
+) -> i32 {
+    if ed25519_private_key.is_null() || other_ed25519_public_key.is_null() || shared_secret_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let seed = std::slice::from_raw_parts(ed25519_private_key, 32);
+
+    // Ed25519 → X25519 private key conversion: SHA-512(seed)[0..32], clamped
+    use sha2::{Sha512, Digest as Sha512Digest};
+    let hash = Sha512::digest(seed);
+    let mut x_prv = [0u8; 32];
+    x_prv.copy_from_slice(&hash[..32]);
+    x_prv[0] &= 248;
+    x_prv[31] &= 127;
+    x_prv[31] |= 64;
+
+    let secret = x25519_dalek::StaticSecret::from(x_prv);
+
+    // Ed25519 → X25519 public key conversion: Edwards → Montgomery
+    let ed_pub_bytes = &*(other_ed25519_public_key as *const [u8; 32]);
+    let compressed = curve25519_dalek::edwards::CompressedEdwardsY(*ed_pub_bytes);
+    match compressed.decompress() {
+        Some(edwards) => {
+            let montgomery = edwards.to_montgomery();
+            let x25519_pub = x25519_dalek::PublicKey::from(montgomery.to_bytes());
+            let shared = secret.diffie_hellman(&x25519_pub);
+            std::ptr::copy_nonoverlapping(shared.as_bytes().as_ptr(), shared_secret_out, 32);
+            ESP_OK
+        }
+        None => ESP_FAIL,
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -740,6 +785,45 @@ mod tests {
         assert_eq!(r, ESP_ERR_INVALID_ARG);
 
         let r = unsafe { thistle_crypto_ed25519_derive_public(std::ptr::null(), out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+    }
+
+    #[test]
+    fn test_x25519_key_exchange() {
+        // Generate two keypairs
+        let mut prv_a = [0u8; 32];
+        let mut pub_a = [0u8; 32];
+        let mut prv_b = [0u8; 32];
+        let mut pub_b = [0u8; 32];
+        unsafe {
+            thistle_crypto_ed25519_keygen(prv_a.as_mut_ptr(), pub_a.as_mut_ptr());
+            thistle_crypto_ed25519_keygen(prv_b.as_mut_ptr(), pub_b.as_mut_ptr());
+        }
+
+        // Both sides compute shared secret
+        let mut secret_ab = [0u8; 32];
+        let mut secret_ba = [0u8; 32];
+        let ret1 = unsafe {
+            thistle_crypto_x25519_key_exchange(prv_a.as_ptr(), pub_b.as_ptr(), secret_ab.as_mut_ptr())
+        };
+        let ret2 = unsafe {
+            thistle_crypto_x25519_key_exchange(prv_b.as_ptr(), pub_a.as_ptr(), secret_ba.as_mut_ptr())
+        };
+        assert_eq!(ret1, ESP_OK);
+        assert_eq!(ret2, ESP_OK);
+        assert_eq!(secret_ab, secret_ba, "both sides must derive the same shared secret");
+        assert_ne!(secret_ab, [0u8; 32], "shared secret must not be zero");
+    }
+
+    #[test]
+    fn test_x25519_null_args() {
+        let dummy = [0u8; 32];
+        let mut out = [0u8; 32];
+        let r = unsafe { thistle_crypto_x25519_key_exchange(std::ptr::null(), dummy.as_ptr(), out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+        let r = unsafe { thistle_crypto_x25519_key_exchange(dummy.as_ptr(), std::ptr::null(), out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+        let r = unsafe { thistle_crypto_x25519_key_exchange(dummy.as_ptr(), dummy.as_ptr(), std::ptr::null_mut()) };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
     }
 }

@@ -222,6 +222,7 @@ extern "C" {
     fn thistle_crypto_ed25519_sign(private_key: *const u8, message: *const u8, msg_len: usize, signature_out: *mut u8) -> i32;
     fn thistle_crypto_ed25519_verify(public_key: *const u8, message: *const u8, msg_len: usize, signature: *const u8) -> i32;
     fn thistle_crypto_ed25519_derive_public(private_key: *const u8, public_key_out: *mut u8) -> i32;
+    fn thistle_crypto_x25519_key_exchange(ed25519_private_key: *const u8, other_ed25519_public_key: *const u8, shared_secret_out: *mut u8) -> i32;
 }
 
 // Mesh service (Rust, in mesh_manager.rs) — wrappers around rs_mesh_* functions
@@ -492,6 +493,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
     entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+    entry!("thistle_crypto_x25519_key_exchange",  thistle_crypto_x25519_key_exchange  as unsafe extern "C" fn(*const u8, *const u8, *mut u8) -> i32),
 
     // Mesh service
     entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),
@@ -635,6 +637,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
     entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+    entry!("thistle_crypto_x25519_key_exchange",  thistle_crypto_x25519_key_exchange  as unsafe extern "C" fn(*const u8, *const u8, *mut u8) -> i32),
 
     // Mesh service
     entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),

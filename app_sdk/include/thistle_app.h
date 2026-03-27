@@ -82,6 +82,7 @@ extern int thistle_crypto_ed25519_keygen(uint8_t *private_key_out, uint8_t *publ
 extern int thistle_crypto_ed25519_sign(const uint8_t *private_key, const uint8_t *message, size_t msg_len, uint8_t *signature_out);
 extern int thistle_crypto_ed25519_verify(const uint8_t *public_key, const uint8_t *message, size_t msg_len, const uint8_t *signature);
 extern int thistle_crypto_ed25519_derive_public(const uint8_t *private_key, uint8_t *public_key_out);
+extern int thistle_crypto_x25519_key_exchange(const uint8_t *ed25519_private_key, const uint8_t *other_ed25519_public_key, uint8_t *shared_secret_out);
 
 /* Mesh service */
 

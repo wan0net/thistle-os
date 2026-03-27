@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ed25519.h stub — wraps mbedtls Ed25519 for MeshCore on ESP-IDF.
-// MeshCore only uses Ed25519::verify() for signature validation.
+// Ed25519.h — C++ wrapper calling ThistleOS kernel Ed25519 syscalls.
+// MeshCore uses this class for signature verification and signing.
 #pragma once
 
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 
-// Stubbed Ed25519 — MeshCore uses this for verify only.
-// TODO: Implement real Ed25519 verify via mbedtls or our kernel crypto.
-// For now, accept all signatures to allow mesh connectivity.
+// Kernel crypto syscalls (linked at firmware build time)
+extern "C" {
+    int thistle_crypto_ed25519_verify(const uint8_t *public_key, const uint8_t *message, size_t msg_len, const uint8_t *signature);
+    int thistle_crypto_ed25519_sign(const uint8_t *private_key, const uint8_t *message, size_t msg_len, uint8_t *signature_out);
+    int thistle_crypto_ed25519_keygen(uint8_t *private_key_out, uint8_t *public_key_out);
+    int thistle_crypto_ed25519_derive_public(const uint8_t *private_key, uint8_t *public_key_out);
+}
+
 class Ed25519 {
 public:
     static bool verify(const uint8_t signature[64],
@@ -17,13 +22,8 @@ public:
                        const void* message,
                        size_t len)
     {
-        (void)signature;
-        (void)publicKey;
-        (void)message;
-        (void)len;
-        // TODO: Wire to real Ed25519 verification.
-        // Accepting all signatures for initial mesh bringup.
-        return true;
+        return thistle_crypto_ed25519_verify(
+            publicKey, (const uint8_t*)message, len, signature) == 0;
     }
 
     static void sign(uint8_t signature[64],
@@ -32,25 +32,24 @@ public:
                      const void* message,
                      size_t len)
     {
-        (void)privateKey;
         (void)publicKey;
-        (void)message;
-        (void)len;
-        // TODO: Wire to real Ed25519 signing.
-        memset(signature, 0, 64);
+        // MeshCore uses 64-byte private keys (first 32 = seed)
+        thistle_crypto_ed25519_sign(
+            privateKey, (const uint8_t*)message, len, signature);
     }
 
     static void generatePrivateKey(uint8_t privateKey[64])
     {
-        // TODO: Generate real Ed25519 keypair
-        memset(privateKey, 0, 64);
+        uint8_t pub[32];
+        // Generate seed into first 32 bytes, public key into last 32
+        thistle_crypto_ed25519_keygen(privateKey, pub);
+        memcpy(privateKey + 32, pub, 32);
     }
 
     static void derivePublicKey(uint8_t publicKey[32],
                                 const uint8_t privateKey[64])
     {
-        (void)privateKey;
-        // TODO: Derive from private key
-        memset(publicKey, 0, 32);
+        // Seed is first 32 bytes of the 64-byte private key
+        thistle_crypto_ed25519_derive_public(privateKey, publicKey);
     }
 };
