@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LilyGo T3-S3 — ThistleOS</title>
+  <title>drv_oled_ssd1306 — ThistleOS</title>
   <link rel="stylesheet" href="../style.css">
   <script src="../table-interactive.js" defer></script>
 </head>
@@ -36,13 +36,11 @@
         <div class="nav-label">Getting Started</div>
         <a href="../index.html">Overview</a>
         <a href="../architecture.html">Architecture</a>
-
         <div class="nav-label">Development</div>
         <a href="../app-development.html">Building Apps</a>
         <a href="../driver-development.html">Building Drivers</a>
-        <a href="../drivers.html">Driver Reference</a>
-        <a href="../devices.html" class="active">Devices</a>
-
+        <a href="../drivers.html" class="active">Driver Reference</a>
+        <a href="../devices.html">Devices</a>
         <div class="nav-label">System</div>
         <a href="../kernel-modules.html">Kernel Modules</a>
         <a href="../app-store.html">App Store</a>
@@ -54,44 +52,52 @@
 
   <main class="main-content">
     <div class="page-header">
-      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / T3-S3</div>
-      <h1>LilyGo T3-S3</h1>
-      <p class="lead">Compact LoRa board with OLED display. ESP32-S3 with SSD1306 and SX1262 radio.</p>
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../drivers.html">Drivers</a> / drv_oled_ssd1306</div>
+      <h1>drv_oled_ssd1306</h1>
+      <p class="lead">I2C OLED driver for the SSD1306 controller. Sends raw I2C commands for initialization, page addressing, and framebuffer flushing.</p>
     </div>
 
-    <h2>Overview</h2>
+    <h2>Overview <span class="badge badge-green">Proven</span></h2>
     <div class="table-wrap">
       <table>
         <tbody>
-          <tr><td><strong>MCU</strong></td><td>ESP32-S3 (dual-core Xtensa LX7, 240 MHz)</td></tr>
-          <tr><td><strong>Flash</strong></td><td>16 MB</td></tr>
-          <tr><td><strong>PSRAM</strong></td><td>8 MB</td></tr>
-          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip)</td></tr>
-          <tr><td><strong>Status</strong></td><td><span class="badge badge-green">Supported</span></td></tr>
+          <tr><td><strong>HAL Type</strong></td><td>Display</td></tr>
+          <tr><td><strong>Chip</strong></td><td>SSD1306</td></tr>
+          <tr><td><strong>Interface</strong></td><td>I2C</td></tr>
+          <tr><td><strong>Description</strong></td><td>Monochrome 1-bit OLED. Kernel converts RGB565 framebuffer data to 1-bit pages before flushing.</td></tr>
         </tbody>
       </table>
     </div>
 
-    <h2>Components</h2>
+    <h2>Implementation</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td>OLED display</td><td>SSD1306 128&times;64</td><td>I2C 0x3C</td><td><code><a href="../drivers.html#drv-oled-ssd1306">drv_oled_ssd1306</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
-          <tr><td>LoRa radio</td><td>SX1262</td><td>SPI</td><td><code><a href="../drivers.html#drv-radio-sx1262">drv_radio_sx1262</a></code> (C/RadioLib)</td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><strong>Source</strong></td><td><code>components/kernel_rs/src/drv_oled_ssd1306.rs</code> (871 lines)</td></tr>
+          <tr><td><strong>Wraps</strong></td><td>None &mdash; manual I2C commands</td></tr>
+          <tr><td><strong>Tests</strong></td><td>22 unit tests</td></tr>
         </tbody>
       </table>
     </div>
 
-    <h2>Board config</h2>
-    <p>Config file: <code>t3-s3.json</code></p>
-    <p>Located at <code>sdcard_layout/config/boards/t3-s3.json</code> in the source tree.</p>
+    <h2>Devices</h2>
+    <p>Boards that use this driver:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Device</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><a href="../devices/heltec-v3.html">Heltec V3</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/t3-s3.html">T3-S3</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/c3-mini.html">C3-Mini</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+        </tbody>
+      </table>
+    </div>
 
-    <h2>Notes</h2>
-    <ul>
-      <li>No input devices &mdash; suitable for headless LoRa node or sensor hub operation.</li>
-      <li>Small OLED display is useful for status output and diagnostics.</li>
-    </ul>
+    <h2>Configuration</h2>
+    <p>Configured via <code>board.json</code>: I2C address (0x3C), <code>pin_sda</code>, <code>pin_scl</code>, optional <code>pin_vext</code> for Heltec V3 external power control.</p>
+
+    <h2>Known Issues</h2>
+    <p>128x64 only. No 128x32 support currently. Heltec V3 requires <code>pin_vext</code> to power the OLED externally.</p>
 
     <div class="page-footer">
       <span>ThistleOS &mdash; BSD 3-Clause</span>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>drv_sdcard — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+  <script src="../table-interactive.js" defer></script>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/kernel-modules.html">Modules</a>
+      <a href="/thistle-os/simulator/">Simulator</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </div>
+</nav>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../drivers.html" class="active">Driver Reference</a>
+        <a href="../devices.html">Devices</a>
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../drivers.html">Drivers</a> / drv_sdcard</div>
+      <h1>drv_sdcard</h1>
+      <p class="lead">SD card driver supporting both SPI and SDMMC interfaces. Wraps ESP-IDF SDMMC/VFS layer.</p>
+    </div>
+
+    <h2>Overview <span class="badge badge-green">Proven</span></h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>HAL Type</strong></td><td>Storage</td></tr>
+          <tr><td><strong>Chip</strong></td><td>Generic SD</td></tr>
+          <tr><td><strong>Interface</strong></td><td>SPI / SDMMC</td></tr>
+          <tr><td><strong>Description</strong></td><td>Mounts SD card as a POSIX filesystem at /sdcard. Auto-detects SPI vs SDMMC mode from board.json config.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Implementation</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>Source</strong></td><td><code>components/kernel_rs/src/drv_sdcard.rs</code> (679 lines)</td></tr>
+          <tr><td><strong>Wraps</strong></td><td>ESP-IDF <code>sdmmc_host_init()</code>, <code>esp_vfs_fat_sdmmc_mount()</code></td></tr>
+          <tr><td><strong>Tests</strong></td><td>21 unit tests</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Devices</h2>
+    <p>Boards that use this driver:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Device</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><a href="../devices/tdeck-pro.html">T-Deck Pro</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/cardputer.html">Cardputer</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/cyd-s022.html">CYD S022</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/cyd-s028.html">CYD S028</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Configuration</h2>
+    <p>Configured via <code>board.json</code>: SPI pins or SDMMC data lines, <code>pin_cs</code>, <code>pin_cd</code> (card detect, optional).</p>
+
+    <h2>Known Issues</h2>
+    <p>No known issues. After mount, all file access uses standard POSIX calls.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

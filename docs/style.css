@@ -52,8 +52,8 @@ body {
   background: var(--surface);
   border-right: 1px solid var(--border);
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 45px;
+  height: calc(100vh - 45px);
   overflow-y: auto;
   padding: 0;
 }
@@ -606,3 +606,40 @@ td code {
 .matrix-table th { font-size: 13px; padding: 12px 10px; white-space: nowrap; }
 .matrix-table th a { color: var(--text-dim); }
 .matrix-table th a:hover { color: var(--primary); }
+
+/* ── Top navbar (matches homepage) ───────────────────────────────── */
+.top-nav {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+.top-nav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.top-nav-brand {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  text-decoration: none;
+}
+.top-nav-links {
+  display: flex;
+  gap: 24px;
+}
+.top-nav-links a {
+  font-size: 14px;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.top-nav-links a:hover {
+  color: var(--text);
+}
