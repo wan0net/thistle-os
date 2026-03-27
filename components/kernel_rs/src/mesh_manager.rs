@@ -650,6 +650,87 @@ pub extern "C" fn rs_mesh_get_stats(out: *mut CMeshStats) -> i32 {
     }
 }
 
+// ── Syscall wrappers (thistle_mesh_* → rs_mesh_*) ───────────────────
+//
+// These provide the thistle_* naming convention for the app syscall table.
+// The underlying rs_mesh_* functions are kept for backward compatibility
+// with the built-in tk_meshchat app during the transition period.
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_init(name: *const c_char, node_type: u8) -> i32 {
+    rs_mesh_init(name, node_type)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_deinit() -> i32 {
+    rs_mesh_deinit()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_loop() -> i32 {
+    rs_mesh_loop()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_send(dest_key: *const u8, text: *const c_char) -> i32 {
+    rs_mesh_send(dest_key, text)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_send_advert() -> i32 {
+    rs_mesh_send_advert()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_send_advert_pos(lat: f64, lon: f64) -> i32 {
+    rs_mesh_send_advert_pos(lat, lon)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_contact_count() -> i32 {
+    rs_mesh_get_contact_count()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_contact(index: i32, out: *mut CMeshContact) -> i32 {
+    rs_mesh_get_contact(index, out)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_find_contact(pub_key: *const u8) -> i32 {
+    rs_mesh_find_contact(pub_key)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_inbox_count() -> i32 {
+    rs_mesh_get_inbox_count()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_inbox_message(index: i32, out: *mut CMeshMessage) -> i32 {
+    rs_mesh_get_inbox_message(index, out)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_clear_inbox() -> i32 {
+    rs_mesh_clear_inbox()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_self_key(out: *mut u8) -> i32 {
+    rs_mesh_get_self_key(out)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_self_name() -> *const c_char {
+    rs_mesh_get_self_name()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_mesh_get_stats(out: *mut CMeshStats) -> i32 {
+    rs_mesh_get_stats(out)
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ use hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::{Sha256, Digest};
 use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit, generic_array::GenericArray};
+use ed25519_dalek::{Signer, Verifier};
 
 const ESP_OK: i32 = 0;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
@@ -84,6 +85,20 @@ fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]
 
 fn sw_random(buf: &mut [u8]) -> bool {
     getrandom::getrandom(buf).is_ok()
+}
+
+fn sw_aes128_ecb_encrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
+    let cipher = aes::Aes128::new(GenericArray::from_slice(key));
+    let mut ga = GenericArray::clone_from_slice(block_in);
+    cipher.encrypt_block(&mut ga);
+    block_out.copy_from_slice(ga.as_slice());
+}
+
+fn sw_aes128_ecb_decrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
+    let cipher = aes::Aes128::new(GenericArray::from_slice(key));
+    let mut ga = GenericArray::clone_from_slice(block_in);
+    cipher.decrypt_block(&mut ga);
+    block_out.copy_from_slice(ga.as_slice());
 }
 
 // ── FFI exports (dispatch: hardware first, software fallback) ───────
@@ -230,6 +245,131 @@ pub unsafe extern "C" fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32 
 
     let slice = std::slice::from_raw_parts_mut(buf, len);
     if sw_random(slice) { ESP_OK } else { ESP_FAIL }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_aes128_ecb_encrypt(
+    key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8,
+) -> i32 {
+    if key.is_null() || plaintext.is_null() || ciphertext_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+
+    // Software only — no aes128_ecb fields in HalCryptoDriver
+    let k = &*(key as *const [u8; 16]);
+    let pt = std::slice::from_raw_parts(plaintext, len);
+    let ct = std::slice::from_raw_parts_mut(ciphertext_out, len);
+    for i in (0..len).step_by(16) {
+        let block_in: &[u8; 16] = pt[i..i+16].try_into().unwrap();
+        let block_out: &mut [u8; 16] = (&mut ct[i..i+16]).try_into().unwrap();
+        sw_aes128_ecb_encrypt_block(k, block_in, block_out);
+    }
+    ESP_OK
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_aes128_ecb_decrypt(
+    key: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8,
+) -> i32 {
+    if key.is_null() || ciphertext.is_null() || plaintext_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+
+    // Software only — no aes128_ecb fields in HalCryptoDriver
+    let k = &*(key as *const [u8; 16]);
+    let ct = std::slice::from_raw_parts(ciphertext, len);
+    let pt = std::slice::from_raw_parts_mut(plaintext_out, len);
+    for i in (0..len).step_by(16) {
+        let block_in: &[u8; 16] = ct[i..i+16].try_into().unwrap();
+        let block_out: &mut [u8; 16] = (&mut pt[i..i+16]).try_into().unwrap();
+        sw_aes128_ecb_decrypt_block(k, block_in, block_out);
+    }
+    ESP_OK
+}
+
+// ── Ed25519 (software-only, uses ed25519-dalek) ─────────────────────
+
+/// Generate a new Ed25519 keypair.
+/// private_key_out: 32 bytes (seed)
+/// public_key_out: 32 bytes
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_ed25519_keygen(
+    private_key_out: *mut u8,  // 32 bytes seed
+    public_key_out: *mut u8,   // 32 bytes
+) -> i32 {
+    if private_key_out.is_null() || public_key_out.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    // Generate 32 random bytes for the seed
+    let mut seed = [0u8; 32];
+    let ret = thistle_crypto_random(seed.as_mut_ptr(), 32);
+    if ret != ESP_OK { return ret; }
+
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let verifying_key = signing_key.verifying_key();
+
+    std::ptr::copy_nonoverlapping(seed.as_ptr(), private_key_out, 32);
+    std::ptr::copy_nonoverlapping(verifying_key.as_bytes().as_ptr(), public_key_out, 32);
+    ESP_OK
+}
+
+/// Sign a message with Ed25519.
+/// private_key: 32 bytes (seed)
+/// signature_out: 64 bytes
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_ed25519_sign(
+    private_key: *const u8,    // 32 bytes seed
+    message: *const u8, msg_len: usize,
+    signature_out: *mut u8,    // 64 bytes
+) -> i32 {
+    if private_key.is_null() || message.is_null() || signature_out.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    let seed = &*(private_key as *const [u8; 32]);
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
+    let msg = std::slice::from_raw_parts(message, msg_len);
+    let sig = signing_key.sign(msg);
+    std::ptr::copy_nonoverlapping(sig.to_bytes().as_ptr(), signature_out, 64);
+    ESP_OK
+}
+
+/// Verify an Ed25519 signature.
+/// Returns ESP_OK (0) if valid, 1 if invalid.
+/// public_key: 32 bytes
+/// signature: 64 bytes
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_ed25519_verify(
+    public_key: *const u8,     // 32 bytes
+    message: *const u8, msg_len: usize,
+    signature: *const u8,      // 64 bytes
+) -> i32 {
+    if public_key.is_null() || message.is_null() || signature.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    let pk_bytes = &*(public_key as *const [u8; 32]);
+    let verifying_key = match ed25519_dalek::VerifyingKey::from_bytes(pk_bytes) {
+        Ok(vk) => vk,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+    let sig_bytes = &*(signature as *const [u8; 64]);
+    let sig = ed25519_dalek::Signature::from_bytes(sig_bytes);
+    let msg = std::slice::from_raw_parts(message, msg_len);
+    match verifying_key.verify(msg, &sig) {
+        Ok(()) => 0,  // Valid
+        Err(_) => 1,  // Invalid signature
+    }
+}
+
+/// Derive public key from private key (seed).
+/// private_key: 32 bytes (seed)
+/// public_key_out: 32 bytes
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_ed25519_derive_public(
+    private_key: *const u8,    // 32 bytes seed
+    public_key_out: *mut u8,   // 32 bytes
+) -> i32 {
+    if private_key.is_null() || public_key_out.is_null() { return ESP_ERR_INVALID_ARG; }
+
+    let seed = &*(private_key as *const [u8; 32]);
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
+    let verifying_key = signing_key.verifying_key();
+    std::ptr::copy_nonoverlapping(verifying_key.as_bytes().as_ptr(), public_key_out, 32);
+    ESP_OK
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -478,6 +618,128 @@ mod tests {
 
         // random: null buf
         let r = unsafe { thistle_crypto_random(std::ptr::null_mut(), 32) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+    }
+
+    #[test]
+    fn test_aes128_ecb_roundtrip() {
+        let key = [0x42u8; 16];
+        let plaintext = [0xABu8; 32]; // two blocks
+        let mut ciphertext = [0u8; 32];
+        let mut decrypted = [0u8; 32];
+
+        let ret = unsafe {
+            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 32, ciphertext.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_OK);
+        assert_ne!(ciphertext, plaintext);
+        // ECB: identical plaintext blocks produce identical ciphertext blocks
+        assert_eq!(ciphertext[..16], ciphertext[16..32]);
+
+        let ret = unsafe {
+            thistle_crypto_aes128_ecb_decrypt(key.as_ptr(), ciphertext.as_ptr(), 32, decrypted.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_OK);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_aes128_ecb_single_block() {
+        let key = [0x01u8; 16];
+        let plaintext = b"1234567890abcdef";
+        let mut ciphertext = [0u8; 16];
+        let mut decrypted = [0u8; 16];
+
+        let ret = unsafe {
+            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 16, ciphertext.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_OK);
+        assert_ne!(&ciphertext, plaintext);
+
+        let ret = unsafe {
+            thistle_crypto_aes128_ecb_decrypt(key.as_ptr(), ciphertext.as_ptr(), 16, decrypted.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_OK);
+        assert_eq!(&decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_aes128_ecb_bad_length() {
+        let key = [0u8; 16];
+        let plaintext = [0u8; 15];
+        let mut ciphertext = [0u8; 16];
+        let ret = unsafe {
+            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 15, ciphertext.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_ERR_INVALID_SIZE);
+    }
+
+    #[test]
+    fn test_ed25519_sign_verify() {
+        let mut privkey = [0u8; 32];
+        let mut pubkey = [0u8; 32];
+        let ret = unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
+        assert_eq!(ret, ESP_OK);
+        assert_ne!(privkey, [0u8; 32]);
+        assert_ne!(pubkey, [0u8; 32]);
+
+        let message = b"hello ThistleOS";
+        let mut signature = [0u8; 64];
+        let ret = unsafe {
+            thistle_crypto_ed25519_sign(privkey.as_ptr(), message.as_ptr(), message.len(), signature.as_mut_ptr())
+        };
+        assert_eq!(ret, ESP_OK);
+
+        // Verify valid signature
+        let ret = unsafe {
+            thistle_crypto_ed25519_verify(pubkey.as_ptr(), message.as_ptr(), message.len(), signature.as_ptr())
+        };
+        assert_eq!(ret, 0, "valid signature must verify");
+
+        // Tamper with signature
+        let mut bad_sig = signature;
+        bad_sig[0] ^= 0xFF;
+        let ret = unsafe {
+            thistle_crypto_ed25519_verify(pubkey.as_ptr(), message.as_ptr(), message.len(), bad_sig.as_ptr())
+        };
+        assert_eq!(ret, 1, "tampered signature must fail");
+
+        // Wrong message
+        let wrong_msg = b"wrong message!!";
+        let ret = unsafe {
+            thistle_crypto_ed25519_verify(pubkey.as_ptr(), wrong_msg.as_ptr(), wrong_msg.len(), signature.as_ptr())
+        };
+        assert_eq!(ret, 1, "wrong message must fail");
+    }
+
+    #[test]
+    fn test_ed25519_derive_public() {
+        let mut privkey = [0u8; 32];
+        let mut pubkey = [0u8; 32];
+        let ret = unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
+        assert_eq!(ret, ESP_OK);
+
+        let mut derived = [0u8; 32];
+        let ret = unsafe { thistle_crypto_ed25519_derive_public(privkey.as_ptr(), derived.as_mut_ptr()) };
+        assert_eq!(ret, ESP_OK);
+        assert_eq!(pubkey, derived, "derived public key must match keygen output");
+    }
+
+    #[test]
+    fn test_ed25519_null_args() {
+        let mut out = [0u8; 64];
+        let dummy = [0u8; 32];
+
+        let r = unsafe { thistle_crypto_ed25519_keygen(std::ptr::null_mut(), out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        let r = unsafe { thistle_crypto_ed25519_sign(std::ptr::null(), dummy.as_ptr(), 4, out.as_mut_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        let r = unsafe { thistle_crypto_ed25519_verify(std::ptr::null(), dummy.as_ptr(), 4, dummy.as_ptr()) };
+        assert_eq!(r, ESP_ERR_INVALID_ARG);
+
+        let r = unsafe { thistle_crypto_ed25519_derive_public(std::ptr::null(), out.as_mut_ptr()) };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
     }
 }

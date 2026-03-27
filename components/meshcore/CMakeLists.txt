@@ -3,6 +3,14 @@
 #
 # Builds the MeshCore C++ library as an ESP-IDF component.
 # We compile only the core protocol files (not examples or UI helpers).
+#
+# NOTE: MeshCore is built for the Arduino framework on ESP32. Since the
+# mesh app is a standalone .app.elf loaded from SPIFFS/SD (not linked
+# into the kernel firmware), LGPL static-linking concerns don't apply.
+# We shim the Arduino APIs (include/Arduino.h, include/Stream.h, etc.)
+# with lightweight ESP-IDF-backed stubs rather than pulling in the
+# entire arduino-esp32 component — ~200 LOC of shims vs a large
+# dependency we don't otherwise need.
 
 set(MESHCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/MeshCore/src)
 

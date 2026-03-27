@@ -68,6 +68,70 @@ extern int thistle_msg_recv(uint32_t *src_app, uint32_t *type, void *data, size_
 extern uint16_t thistle_power_get_battery_mv(void);
 extern uint8_t  thistle_power_get_battery_pct(void);
 
+/* Crypto */
+extern int thistle_crypto_sha256(const uint8_t *data, size_t len, uint8_t *hash_out);
+extern int thistle_crypto_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, uint8_t *mac_out);
+extern int thistle_crypto_hmac_verify(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, const uint8_t *expected_mac);
+extern int thistle_crypto_aes256_cbc_encrypt(const uint8_t *key, const uint8_t *iv, const uint8_t *plaintext, size_t len, uint8_t *ciphertext_out);
+extern int thistle_crypto_aes256_cbc_decrypt(const uint8_t *key, const uint8_t *iv, const uint8_t *ciphertext, size_t len, uint8_t *plaintext_out);
+extern int thistle_crypto_aes128_ecb_encrypt(const uint8_t *key, const uint8_t *plaintext, size_t len, uint8_t *ciphertext_out);
+extern int thistle_crypto_aes128_ecb_decrypt(const uint8_t *key, const uint8_t *ciphertext, size_t len, uint8_t *plaintext_out);
+extern int thistle_crypto_pbkdf2_sha256(const char *password, const uint8_t *salt, size_t salt_len, uint32_t iterations, uint8_t *key_out, size_t key_len);
+extern int thistle_crypto_random(uint8_t *buf, size_t len);
+extern int thistle_crypto_ed25519_keygen(uint8_t *private_key_out, uint8_t *public_key_out);
+extern int thistle_crypto_ed25519_sign(const uint8_t *private_key, const uint8_t *message, size_t msg_len, uint8_t *signature_out);
+extern int thistle_crypto_ed25519_verify(const uint8_t *public_key, const uint8_t *message, size_t msg_len, const uint8_t *signature);
+extern int thistle_crypto_ed25519_derive_public(const uint8_t *private_key, uint8_t *public_key_out);
+
+/* Mesh service */
+
+typedef struct {
+    uint8_t  pub_key[32];
+    uint8_t  name[32];
+    uint8_t  name_len;
+    uint8_t  node_type;
+    int8_t   last_rssi;
+    uint8_t  path_len;
+    uint32_t last_seen;
+    double   lat;
+    double   lon;
+    _Bool    has_position;
+} thistle_mesh_contact_t;
+
+typedef struct {
+    uint8_t  sender_key[32];
+    uint8_t  sender_name[32];
+    uint8_t  sender_name_len;
+    uint32_t timestamp;
+    uint8_t  text[200];
+    uint16_t text_len;
+} thistle_mesh_message_t;
+
+typedef struct {
+    uint32_t packets_sent;
+    uint32_t packets_received;
+    uint32_t packets_forwarded;
+    uint32_t messages_sent;
+    uint32_t messages_received;
+    uint32_t contacts_discovered;
+} thistle_mesh_stats_t;
+
+extern int         thistle_mesh_init(const char *name, uint8_t node_type);
+extern int         thistle_mesh_deinit(void);
+extern int         thistle_mesh_loop(void);
+extern int         thistle_mesh_send(const uint8_t *dest_key, const char *text);
+extern int         thistle_mesh_send_advert(void);
+extern int         thistle_mesh_send_advert_pos(double lat, double lon);
+extern int         thistle_mesh_get_contact_count(void);
+extern int         thistle_mesh_get_contact(int index, thistle_mesh_contact_t *out);
+extern int         thistle_mesh_find_contact(const uint8_t *pub_key);
+extern int         thistle_mesh_get_inbox_count(void);
+extern int         thistle_mesh_get_inbox_message(int index, thistle_mesh_message_t *out);
+extern int         thistle_mesh_clear_inbox(void);
+extern int         thistle_mesh_get_self_key(uint8_t *out);
+extern const char *thistle_mesh_get_self_name(void);
+extern int         thistle_mesh_get_stats(thistle_mesh_stats_t *out);
+
 /* === Widget API (toolkit-agnostic UI — implemented by window manager) === */
 
 typedef uint32_t thistle_widget_t;

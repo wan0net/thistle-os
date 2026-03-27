@@ -207,6 +207,42 @@ unsafe extern "C" fn thistle_event_publish(event: *const c_void) -> i32 {
     event_publish(event)
 }
 
+// Crypto (Rust, in crypto.rs) — pure Rust with optional hardware dispatch
+extern "C" {
+    fn thistle_crypto_sha256(data: *const u8, len: usize, hash_out: *mut u8) -> i32;
+    fn thistle_crypto_hmac_sha256(key: *const u8, key_len: usize, data: *const u8, data_len: usize, mac_out: *mut u8) -> i32;
+    fn thistle_crypto_hmac_verify(key: *const u8, key_len: usize, data: *const u8, data_len: usize, expected_mac: *const u8) -> i32;
+    fn thistle_crypto_aes256_cbc_encrypt(key: *const u8, iv: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32;
+    fn thistle_crypto_aes256_cbc_decrypt(key: *const u8, iv: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8) -> i32;
+    fn thistle_crypto_pbkdf2_sha256(password: *const c_char, salt: *const u8, salt_len: usize, iterations: u32, key_out: *mut u8, key_len: usize) -> i32;
+    fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32;
+    fn thistle_crypto_aes128_ecb_encrypt(key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32;
+    fn thistle_crypto_aes128_ecb_decrypt(key: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8) -> i32;
+    fn thistle_crypto_ed25519_keygen(private_key_out: *mut u8, public_key_out: *mut u8) -> i32;
+    fn thistle_crypto_ed25519_sign(private_key: *const u8, message: *const u8, msg_len: usize, signature_out: *mut u8) -> i32;
+    fn thistle_crypto_ed25519_verify(public_key: *const u8, message: *const u8, msg_len: usize, signature: *const u8) -> i32;
+    fn thistle_crypto_ed25519_derive_public(private_key: *const u8, public_key_out: *mut u8) -> i32;
+}
+
+// Mesh service (Rust, in mesh_manager.rs) — wrappers around rs_mesh_* functions
+extern "C" {
+    fn thistle_mesh_init(name: *const c_char, node_type: u8) -> i32;
+    fn thistle_mesh_deinit() -> i32;
+    fn thistle_mesh_loop() -> i32;
+    fn thistle_mesh_send(dest_key: *const u8, text: *const c_char) -> i32;
+    fn thistle_mesh_send_advert() -> i32;
+    fn thistle_mesh_send_advert_pos(lat: f64, lon: f64) -> i32;
+    fn thistle_mesh_get_contact_count() -> i32;
+    fn thistle_mesh_get_contact(index: i32, out: *mut c_void) -> i32;
+    fn thistle_mesh_find_contact(pub_key: *const u8) -> i32;
+    fn thistle_mesh_get_inbox_count() -> i32;
+    fn thistle_mesh_get_inbox_message(index: i32, out: *mut c_void) -> i32;
+    fn thistle_mesh_clear_inbox() -> i32;
+    fn thistle_mesh_get_self_key(out: *mut u8) -> i32;
+    fn thistle_mesh_get_self_name() -> *const c_char;
+    fn thistle_mesh_get_stats(out: *mut c_void) -> i32;
+}
+
 // libc memory allocation — available in both espidf and simulator
 extern "C" {
     fn malloc(size: usize) -> *mut c_void;
@@ -442,6 +478,38 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
     entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
 
+    // Crypto
+    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
+    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
+    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes128_ecb_decrypt", thistle_crypto_aes128_ecb_decrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+
+    // Mesh service
+    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),
+    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32),
+    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32),
+    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32),
+    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32),
+    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char),
+    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32),
+
     // HAL registration
     entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
@@ -552,6 +620,38 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     // Power
     entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
     entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
+
+    // Crypto
+    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
+    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
+    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes128_ecb_decrypt", thistle_crypto_aes128_ecb_decrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+
+    // Mesh service
+    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),
+    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32),
+    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32),
+    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32),
+    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32),
+    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32),
+    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char),
+    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32),
 
     // HAL registration (all Rust FFI exports in hal_registry.rs)
     entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
@@ -715,6 +815,30 @@ mod tests {
         assert!(
             !ptr.is_null(),
             "syscall_resolve(\"thistle_malloc\") must return a non-null address"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // test_resolve_thistle_crypto_sha256
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_thistle_crypto_sha256() {
+        let name = b"thistle_crypto_sha256\0";
+        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
+        assert!(
+            !ptr.is_null(),
+            "syscall_resolve(\"thistle_crypto_sha256\") must return a non-null address"
+        );
+    }
+
+    #[test]
+    fn test_resolve_thistle_crypto_random() {
+        let name = b"thistle_crypto_random\0";
+        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
+        assert!(
+            !ptr.is_null(),
+            "syscall_resolve(\"thistle_crypto_random\") must return a non-null address"
         );
     }
 
