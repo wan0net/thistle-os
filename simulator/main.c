@@ -76,21 +76,29 @@ int main(int argc, char **argv)
     printf("display_server_register_wm: %d\n", err);
     fflush(stdout);
 
-    /* Register and launch built-in apps */
+    /* Register built-in apps (always available) */
     launcher_app_register();
     settings_app_register();
     filemgr_app_register();
     reader_app_register();
-    messenger_app_register();
-    navigator_app_register();
     notes_app_register();
-    appstore_app_register();
-    assistant_app_register();
-    wifiscanner_app_register();
     flashlight_app_register();
-    weather_app_register();
-    terminal_app_register();
     vault_app_register();
+    appstore_app_register();
+    terminal_app_register();
+    assistant_app_register();
+    weather_app_register();
+
+    /* Conditional apps based on device capabilities */
+    extern bool sim_board_has_radio(void);
+    extern bool sim_board_has_gps(void);
+    if (sim_board_has_radio()) {
+        messenger_app_register();
+        wifiscanner_app_register();
+    }
+    if (sim_board_has_gps()) {
+        navigator_app_register();
+    }
     app_manager_launch("com.thistle.launcher");
     printf("Launcher launched\n");
     fflush(stdout);

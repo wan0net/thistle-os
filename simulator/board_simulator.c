@@ -72,3 +72,10 @@ esp_err_t board_init(void)
 
     return ESP_OK;
 }
+
+/* Query device capabilities from main.c for conditional app loading */
+bool sim_board_has_radio(void) { return find_device(s_device)->has_radio; }
+bool sim_board_has_gps(void) { return find_device(s_device)->has_gps; }
+bool sim_board_has_keyboard(void) { return find_device(s_device)->has_keyboard; }
+bool sim_board_has_touch(void) { return find_device(s_device)->has_touch; }
+bool sim_board_is_epaper(void) { return find_device(s_device)->is_epaper; }

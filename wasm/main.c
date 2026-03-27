@@ -54,6 +54,13 @@ static void main_loop(void)
 
 /* Import from board_simulator.c */
 extern void sim_board_set_device(const char *device);
+extern bool sim_board_has_radio(void);
+extern bool sim_board_has_gps(void);
+extern bool sim_board_has_keyboard(void);
+
+/* MeshChat Rust app */
+extern int rs_meshchat_init(void);
+extern int rs_meshchat_update(void);
 
 int main(void)
 {
@@ -89,21 +96,33 @@ int main(void)
     ret = display_server_register_wm(lvgl_lcd_wm_get());
     printf("display_server_register_wm: %d\n", ret);
 
-    /* Register built-in apps */
+    /* Register built-in apps (always available) */
     launcher_app_register();
     settings_app_register();
     filemgr_app_register();
     reader_app_register();
-    messenger_app_register();
-    navigator_app_register();
     notes_app_register();
-    appstore_app_register();
-    assistant_app_register();
-    wifiscanner_app_register();
     flashlight_app_register();
-    weather_app_register();
-    terminal_app_register();
     vault_app_register();
+    appstore_app_register();
+    terminal_app_register();
+
+    /* Conditional apps based on device capabilities */
+    if (sim_board_has_radio()) {
+        messenger_app_register();
+        wifiscanner_app_register();
+        printf("  + Messenger, WiFi Scanner (radio)\n");
+    }
+    if (sim_board_has_gps()) {
+        navigator_app_register();
+        printf("  + Navigator (GPS)\n");
+    }
+    assistant_app_register();  /* works on any device with network */
+    weather_app_register();
+
+    printf("%d apps registered for %s\n",
+        9 + (sim_board_has_radio() ? 2 : 0) + (sim_board_has_gps() ? 1 : 0) + 2,
+        device_buf);
 
     /* Grant permissions */
     permissions_grant("com.thistle.launcher",   0x7F);
