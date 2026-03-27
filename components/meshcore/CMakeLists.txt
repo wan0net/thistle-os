@@ -35,5 +35,5 @@ idf_component_register(
 # Suppress warnings in third-party MeshCore code
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-unused-parameter -Wno-sign-compare -Wno-reorder
-    -Wno-missing-field-initializers -Wno-type-limits
+    -Wno-missing-field-initializers -Wno-type-limits -Wno-format
 )

@@ -108,10 +108,8 @@ public:
 
 class EspRNG : public mesh::RNG {
 public:
-    uint32_t nextInt() override { return esp_random(); }
-    bool random(uint8_t* dest, size_t len) override {
-        esp_fill_random(dest, len);
-        return true;
+    void random(uint8_t* dest, size_t sz) override {
+        esp_fill_random(dest, sz);
     }
 };
 
@@ -163,20 +161,17 @@ public:
     static void toContact(const ContactInfo& ci, meshcore_contact_t* out) {
         memcpy(out->pub_key, ci.id.pub_key, MESHCORE_PUBKEY_SIZE);
         memset(out->name, 0, MESHCORE_NAME_MAX);
-        if (ci.name_len > 0) {
-            int n = (ci.name_len < MESHCORE_NAME_MAX - 1) ? ci.name_len : MESHCORE_NAME_MAX - 1;
-            memcpy(out->name, ci.advert_name, n);
-            out->name_len = n;
-        } else {
-            out->name_len = 0;
-        }
+        size_t nlen = strlen(ci.name);
+        if (nlen > MESHCORE_NAME_MAX - 1) nlen = MESHCORE_NAME_MAX - 1;
+        memcpy(out->name, ci.name, nlen);
+        out->name_len = (uint8_t)nlen;
         out->type = ci.type;
-        out->last_rssi = (int8_t)ci.last_rssi;
+        out->last_rssi = 0; // ContactInfo doesn't track RSSI per-contact
         out->path_len = ci.out_path_len;
-        out->last_seen = ci.last_seen;
-        out->lat = ci.lastLat;
-        out->lon = ci.lastLon;
-        out->has_position = (ci.lastLat != 0 || ci.lastLon != 0);
+        out->last_seen = ci.lastmod;
+        out->lat = ci.gps_lat / 1000000.0;
+        out->lon = ci.gps_lon / 1000000.0;
+        out->has_position = (ci.gps_lat != 0 || ci.gps_lon != 0);
     }
 
 protected:
@@ -353,7 +348,7 @@ esp_err_t meshcore_send_advert(void) {
     if (!s_mesh) return ESP_ERR_INVALID_STATE;
     mesh::Packet* pkt = s_mesh->createSelfAdvert(s_mesh->getName());
     if (!pkt) return ESP_ERR_NO_MEM;
-    s_mesh->startSendRaw(pkt);
+    s_mesh->sendPacket(pkt, 1);
     s_mesh->stats()->packets_sent++;
     return ESP_OK;
 }
@@ -362,7 +357,7 @@ esp_err_t meshcore_send_advert_with_position(double lat, double lon) {
     if (!s_mesh) return ESP_ERR_INVALID_STATE;
     mesh::Packet* pkt = s_mesh->createSelfAdvert(s_mesh->getName(), lat, lon);
     if (!pkt) return ESP_ERR_NO_MEM;
-    s_mesh->startSendRaw(pkt);
+    s_mesh->sendPacket(pkt, 1);
     s_mesh->stats()->packets_sent++;
     return ESP_OK;
 }
