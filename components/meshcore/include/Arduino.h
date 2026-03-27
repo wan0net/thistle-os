@@ -20,14 +20,15 @@ static inline void delay(unsigned long ms) {
     vTaskDelay(ms / portTICK_PERIOD_MS);
 }
 
-// Arduino random() — can't be named "random" in C++ as it conflicts
-// with libc. MeshCore's RNG class uses its own virtual nextInt(), so
-// these are only needed for stray Arduino-isms.
-static inline long arduino_random(long max) {
-    if (max <= 0) return 0;
-    return (long)(esp_random() % (uint32_t)max);
+// ltoa stub (used by TxtDataHelpers)
+static inline char* ltoa(long val, char* buf, int radix) {
+    if (radix == 10) { sprintf(buf, "%ld", val); }
+    else if (radix == 16) { sprintf(buf, "%lx", val); }
+    else { buf[0] = '\0'; }
+    return buf;
 }
-#define random(x) arduino_random(x)
+
+#include <stdio.h>
 
 // Serial stub — MeshCore uses Serial.print for debug logging
 class FakeSerial {

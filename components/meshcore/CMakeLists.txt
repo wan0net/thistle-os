@@ -15,9 +15,10 @@ set(MESHCORE_SRCS
     ${MESHCORE_DIR}/helpers/BaseChatMesh.cpp
     ${MESHCORE_DIR}/helpers/AdvertDataHelpers.cpp
     ${MESHCORE_DIR}/helpers/TxtDataHelpers.cpp
-    ${MESHCORE_DIR}/helpers/IdentityStore.cpp
+    # IdentityStore.cpp and TransportKeyStore.cpp omitted — they use Arduino
+    # filesystem APIs (File, FILESYSTEM). We handle identity persistence in
+    # our Rust mesh_manager module instead.
     ${MESHCORE_DIR}/helpers/StaticPoolPacketManager.cpp
-    ${MESHCORE_DIR}/helpers/TransportKeyStore.cpp
     # Our shim files
     src/meshcore_shim.cpp
 )
