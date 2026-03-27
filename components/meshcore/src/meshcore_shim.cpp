@@ -264,7 +264,7 @@ static EspRNG s_rng;
 static EspRTCClock s_rtc;
 
 #define PACKET_POOL_SIZE 16
-static mesh::StaticPoolPacketManager<PACKET_POOL_SIZE> s_pkt_mgr;
+static StaticPoolPacketManager s_pkt_mgr(PACKET_POOL_SIZE);
 static SimpleMeshTables s_tables;
 
 static ThistleChatMesh* s_mesh = nullptr;

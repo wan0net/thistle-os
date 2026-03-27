@@ -36,4 +36,5 @@ idf_component_register(
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-unused-parameter -Wno-sign-compare -Wno-reorder
     -Wno-missing-field-initializers -Wno-type-limits -Wno-format
+    -Wno-delete-non-virtual-dtor
 )
