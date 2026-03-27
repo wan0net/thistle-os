@@ -33,4 +33,41 @@ public:
     }
 
     const uint8_t* hash() const { return _hash; }
+
+    // HMAC-SHA256 support (Arduino Crypto API)
+    void resetHMAC(const uint8_t* key, size_t key_len) {
+        // HMAC = H((K ^ opad) || H((K ^ ipad) || message))
+        // For simplicity, use mbedtls md for HMAC
+        reset();
+        // Store key for finalize — simplified: just reset with key XOR ipad
+        uint8_t k_ipad[64];
+        memset(k_ipad, 0x36, 64);
+        size_t kl = (key_len > 64) ? 64 : key_len;
+        for (size_t i = 0; i < kl; i++) k_ipad[i] ^= key[i];
+        update(k_ipad, 64);
+        // Store key for opad in _opad_key
+        memset(_opad_key, 0x5c, 64);
+        for (size_t i = 0; i < kl; i++) _opad_key[i] ^= key[i];
+    }
+
+    void finalizeHMAC(const uint8_t* key, size_t key_len, uint8_t* hmac_out, size_t hmac_len) {
+        (void)key; (void)key_len;
+        // Finish inner hash
+        uint8_t inner[32];
+        mbedtls_sha256_finish(&_ctx, inner);
+
+        // Outer hash: H(K ^ opad || inner_hash)
+        mbedtls_sha256_free(&_ctx);
+        mbedtls_sha256_init(&_ctx);
+        mbedtls_sha256_starts(&_ctx, 0);
+        mbedtls_sha256_update(&_ctx, _opad_key, 64);
+        mbedtls_sha256_update(&_ctx, inner, 32);
+        mbedtls_sha256_finish(&_ctx, _hash);
+
+        size_t n = (hmac_len < 32) ? hmac_len : 32;
+        memcpy(hmac_out, _hash, n);
+    }
+
+private:
+    uint8_t _opad_key[64];
 };
