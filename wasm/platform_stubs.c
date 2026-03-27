@@ -124,15 +124,19 @@ void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)lev
  *   hal_registry_start_all, hal_registry_stop_all
  */
 
-/* ── HTTP client stubs (no real HTTP in WASM yet) ──────────────────── */
-void *esp_http_client_init(const void *config) { (void)config; return NULL; }
-int esp_http_client_perform(void *c) { (void)c; return -1; }
-int esp_http_client_open(void *c, int l) { (void)c;(void)l; return -1; }
-int esp_http_client_fetch_headers(void *c) { (void)c; return -1; }
-int esp_http_client_read(void *c, void *b, int l) { (void)c;(void)b;(void)l; return -1; }
-int esp_http_client_get_status_code(void *c) { (void)c; return 0; }
-int esp_http_client_close(void *c) { (void)c; return 0; }
-int esp_http_client_cleanup(void *c) { (void)c; return 0; }
+/* ── sim_http stubs (backing for simulator/platform/esp_http_client.h inlines) */
+#include "sim_http.h"
+sim_http_client_handle_t sim_http_client_init(const sim_http_client_config_t *c) { (void)c; return NULL; }
+int sim_http_client_perform(sim_http_client_handle_t c) { (void)c; return -1; }
+int sim_http_client_get_status_code(sim_http_client_handle_t c) { (void)c; return 0; }
+int sim_http_client_get_content_length(sim_http_client_handle_t c) { (void)c; return 0; }
+const char *sim_http_client_get_response_data(sim_http_client_handle_t c) { (void)c; return ""; }
+size_t sim_http_client_get_response_length(sim_http_client_handle_t c) { (void)c; return 0; }
+int sim_http_client_open(sim_http_client_handle_t c, int l) { (void)c;(void)l; return -1; }
+int sim_http_client_fetch_headers(sim_http_client_handle_t c) { (void)c; return -1; }
+int sim_http_client_read(sim_http_client_handle_t c, char *b, int l) { (void)c;(void)b;(void)l; return -1; }
+int sim_http_client_close(sim_http_client_handle_t c) { (void)c; return 0; }
+void sim_http_client_cleanup(sim_http_client_handle_t c) { (void)c; }
 
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }
