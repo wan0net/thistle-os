@@ -20,7 +20,7 @@
 
 ---
 
-> **Beta Software** — Rust migration complete. 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests), 14 Rust hardware drivers, multi-board support (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini), and multi-arch builds (ESP32, S2, S3, C3, C6, H2). Recovery auto-detects hardware via I2C/SPI/UART scanning.
+> **Beta Software** — Rust migration complete. 100% Rust kernel (57 modules, 51,000+ LOC, 1231 tests), 15 Rust hardware drivers, multi-board support (10 boards), and multi-arch builds (ESP32, S2, S3, C3, C6, H2). Recovery auto-detects hardware via I2C/SPI/UART scanning.
 
 ## Why ThistleOS
 
@@ -47,7 +47,7 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 │         KERNEL (100% Rust, immutable)      │
 │  App Manager • IPC • Permissions • Events  │
 │  Signing • Manifest • Crypto • Syscall table│
-│  40+ modules • 26,000+ LOC • 489+ tests    │
+│  57 modules • 51,000+ LOC • 1231 tests      │
 ├─────────────────────────────────────────────┤
 │         HAL (vtable interfaces)            │
 │  Display • Input • Radio • GPS • Audio     │
@@ -55,7 +55,7 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 │  RTC                                       │
 ├─────────────────────────────────────────────┤
 │         DRIVERS (.drv.elf from SPIFFS/SD)  │
-│  14 Rust drivers: e-paper • LCD • OLED     │
+│  15 Rust drivers: e-paper • LCD • OLED     │
 │  TCA8418 • CST328/816 • SX1262 • GPS       │
 │  IMU • Power • Audio • RTC • SD card       │
 ├─────────────────────────────────────────────┤
@@ -385,13 +385,13 @@ cmake .. && make -j8 && ./thistle_sim
 
 | Metric | Value |
 |--------|-------|
-| Rust kernel code | 26,000+ lines |
-| Kernel modules | 40+ |
-| Kernel tests | 489+ |
-| Rust drivers | 14 |
+| Rust kernel code | 51,000+ lines |
+| Kernel modules | 57 |
+| Kernel tests | 1231 |
+| Rust drivers | 15 |
 | Built-in apps | 14 |
 | HAL interfaces | 11 (display, input, radio, GPS, audio, power, IMU, storage, net, crypto, RTC) |
-| Supported boards | 6 (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini) |
+| Supported boards | 10 |
 | Supported architectures | 6 (ESP32, S2, S3, C3, C6, H2) |
 | License | BSD 3-Clause |
 | Dependencies | All BSD/MIT/Apache-2.0 (no GPL) |
@@ -411,9 +411,9 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 ### Completed
 - [x] Ed25519 asymmetric signing (Monocypher)
 - [x] Recovery OS (Rust) with hardware auto-detection (I2C/SPI/UART scanning)
-- [x] 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests)
-- [x] 14 Rust hardware drivers
-- [x] Multi-board support (T-Deck Pro, T-Deck, T-Display-S3, T3-S3, CYD, C3-Mini)
+- [x] 100% Rust kernel (57 modules, 51,000+ LOC, 1231 tests)
+- [x] 15 Rust hardware drivers
+- [x] Multi-board support (10 boards)
 - [x] Multi-arch builds (ESP32, S2, S3, C3, C6, H2)
 - [x] Unified manifest system for apps, drivers, firmware
 - [x] Boot-from-JSON (board.json driven hardware init)

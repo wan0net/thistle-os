@@ -45,7 +45,7 @@
 ## Iteration 4 — 2026-03-26 (new items from persona review)
 
 ### Priority 9: MeshCore Integration
-**Status:** PENDING (requires MeshCore protocol research)
+**Status:** DONE (on main — mesh_manager, tk_meshchat, real Ed25519/X25519 crypto, HAL radio integration)
 **Personas:** Cairn (multi-hop SAR), Ember (field station mesh)
 **Description:** Integrate MeshCore mesh protocol for LoRa networking. Custom ThistleOS UI on top of MeshCore protocol. Do NOT reinvent mesh routing — use existing MeshCore.
 

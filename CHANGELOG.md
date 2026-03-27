@@ -120,3 +120,18 @@
   - Reload by ID or by file path, version tracking, load count
   - 16 C FFI exports for syscall table integration
   - 54 tests (all passing)
+
+### Iteration 12 — 2026-03-28
+- **Added:** 30 new syscalls — crypto (SHA-256, HMAC, AES-256-CBC, AES-128-ECB, PBKDF2, Ed25519, X25519, RNG) and mesh service (15 functions)
+- **Added:** `drv_crypto_mbedtls` HAL crypto driver — hardware-accelerated SHA-256, AES, HMAC, RNG via ESP-IDF mbedtls
+- **Added:** AES-128-ECB hardware acceleration — extended HAL crypto vtable, wired through mbedtls driver
+- **Added:** Real Ed25519/X25519 cryptography — replaced insecure MeshCore stubs with ed25519-dalek/x25519-dalek
+- **Added:** Messenger integration — wired contact manager, message encryption, burn timer, and message queue into messenger app with periodic tick, contact resolution, and queue retry
+- **Fixed:** MeshCore Ed25519 stubs — all identity operations now use real cryptography
+- **Fixed:** SHA256.h buffer overflow — fail-safe instead of silent truncation
+- **Fixed:** `hmac_verify` — routes through hardware dispatch, returns ESP_FAIL on mismatch, constant-time comparison
+- **Fixed:** Mesh init race conditions — lock ordering prevents deadlock, callbacks registered before radio starts
+- **Fixed:** App SDK ABI mismatches — `thistle_fs_open` (was POSIX flags, now fopen mode), `thistle_log` (was variadic, now 2-arg)
+- **Fixed:** Dev/production signing keys — now distinct to prevent cross-environment acceptance
+- **Implemented:** BHI260AP IMU driver — I2C init, chip ID verification, FIFO read, virtual sensor configuration
+- **Tagged:** v1.0.0-alpha

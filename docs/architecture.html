@@ -60,7 +60,7 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Architecture</div>
       <h1>Architecture</h1>
-      <p class="lead">A layered design: HAL interfaces at the bottom, 14 Rust drivers implementing them, a pure Rust kernel (40+ modules) coordinating everything, and apps at the top — with each layer knowing nothing about the one above it.</p>
+      <p class="lead">A layered design: HAL interfaces at the bottom, 15 Rust drivers implementing them, a pure Rust kernel (57 modules) coordinating everything, and apps at the top — with each layer knowing nothing about the one above it.</p>
       <a href="https://github.com/wan0net/thistle-os/blob/main/docs/architecture.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
@@ -71,7 +71,7 @@
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
 &#x2502;  <span class="d-blue">Syscall table  — symbol resolution for ELF loader</span>    &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-blue">Kernel — 100% Rust, 40+ modules, 489+ tests</span>          &#x2502;
+&#x2502;  <span class="d-blue">Kernel — 100% Rust, 57 modules, 1,231 tests</span>          &#x2502;
 &#x2502;  app_manager  driver_manager  ipc  event_bus  ota    &#x2502;
 &#x2502;  wifi_manager  ble_manager  permissions  elf_loader  &#x2502;
 &#x2502;  signing  manifest  crypto  version  display_server  &#x2502;
@@ -83,7 +83,7 @@
 &#x2502;  display  input  radio  gps  audio  power  imu        &#x2502;
 &#x2502;  storage  net  crypto  rtc                            &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;
-&#x2502;  <span class="d-green">14 Rust Drivers (drv_*)</span>                               &#x2502;
+&#x2502;  <span class="d-green">15 Rust Drivers (drv_*)</span>                               &#x2502;
 &#x2502;  epaper  lcd  oled  kbd  touch  gps  imu  rtc         &#x2502;
 &#x2502;  audio  power  sdcard  (light sensor, imu stubs)     &#x2502;
 &#x251c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2524;

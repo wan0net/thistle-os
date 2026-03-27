@@ -85,14 +85,15 @@ Reloading the display or input driver while the user is interacting would cause 
 
 ## Crypto / Syscall Review — 2026-03-28
 
-### Q23: AES-128-ECB has no hardware acceleration path
-The HAL crypto vtable has no AES-128-ECB fields. MeshCore uses AES-128-ECB for all mesh packet encryption, but it runs through the Rust `aes` crate (software) even on ESP32-S3 which has hardware AES. Should the vtable be extended with `aes128_ecb_encrypt`/`aes128_ecb_decrypt` fields?
+### Q23: AES-128-ECB has no hardware acceleration path — **RESOLVED**
+**Resolution:** HAL vtable extended with `aes128_ecb_encrypt`/`aes128_ecb_decrypt` fields. The `drv_crypto_mbedtls` driver implements them via ESP-IDF mbedtls hardware AES.
 
 ### Q24: PBKDF2 bypasses hardware SHA entirely
 The Rust `pbkdf2` crate calls its own internal SHA-256, bypassing the HAL crypto dispatch. On ESP32-S3, hardware SHA is 3-5x faster. Options: (a) rewrite PBKDF2 to use `thistle_crypto_hmac_sha256` per iteration, (b) accept software-only PBKDF2 since it's infrequent.
+**Note:** Deferred to post-1.0 — acceptable for infrequent key derivation.
 
-### Q25: thistle_fs_open ABI mismatch
-`thistle_app.h` declares `thistle_fs_open(path, int flags)` (POSIX-style) but the implementation wraps `fopen(path, mode)` taking a `char*` mode string. These are incompatible — an app passing integer flags will crash. Needs a decision: switch to POSIX `open()` semantics, or change the SDK header to take a `const char *mode`.
+### Q25: thistle_fs_open ABI mismatch — **RESOLVED**
+**Resolution:** SDK header now uses `const char *mode` (fopen-style), matching the implementation.
 
-### Q26: thistle_log is not variadic
-`thistle_app.h` declares `thistle_log(tag, fmt, ...)` but the Rust implementation takes exactly two args and passes the format string as `%s`. Apps using format arguments get garbled output. Needs either a real variadic implementation or the SDK header should drop the `...`.
+### Q26: thistle_log is not variadic — **RESOLVED**
+**Resolution:** SDK header now declares `thistle_log(const char *tag, const char *msg)` without variadic arguments, matching the Rust implementation.

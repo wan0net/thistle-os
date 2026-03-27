@@ -6,7 +6,7 @@ ThistleOS is a portable ESP32 family operating system with an immutable kernel, 
 ## Build System
 - **Firmware**: ESP-IDF v5.5 with CMake. `idf.py build`, `idf.py flash monitor`
 - **Simulator**: SDL2 desktop build. `cd simulator/build && cmake .. && make -j8 && ./thistle_sim`
-- **Rust kernel**: `cargo +esp check` in `components/kernel_rs/`. Tests: `cargo test --target aarch64-apple-darwin -- --test-threads=1` (515 tests)
+- **Rust kernel**: `cargo +esp check` in `components/kernel_rs/`. Tests: `cargo test --target aarch64-apple-darwin -- --test-threads=1` (1231 tests)
 - **Recovery OS**: `cd recovery && cargo +esp build --release`
 - **CI**: GitHub Actions — firmware build (espressif/idf:v5.5), Semgrep SAST, Trivy security scan
 
@@ -17,8 +17,8 @@ Recovery (Rust, ota_0, 1MB) — immutable, root of trust
   ↓ Ed25519 verify
 Kernel (100% Rust, ota_1, 4.5MB) — immutable, hardware-independent
   ├── Display Server (surfaces, compositor, input routing)
-  ├── Kernel modules (42 modules: app manager, IPC, events, permissions, signing, manifest, crypto, HAL registry, drivers, WM, app store, ...)
-  ├── Syscall table (45+ ESP-IDF APIs exported to loaded ELFs)
+  ├── Kernel modules (57 modules: app manager, IPC, events, permissions, signing, manifest, crypto, HAL registry, drivers, WM, app store, ...)
+  ├── Syscall table (~80 syscalls exported to loaded ELFs)
   └── HAL registry (bus handles, driver vtables)
          ↓ loads from
 SPIFFS (10.5MB) + SD card — updateable
@@ -41,9 +41,9 @@ The kernel is **100% Rust and hardware-independent**. It never calls ESP-IDF har
 
 ### Key components
 - **HAL** (`components/thistle_hal/`): Pure vtable interfaces. Bus handle sharing (SPI/I2C). 11 HAL interfaces: display, input, radio, GPS, audio, power, IMU, storage, network, crypto, RTC.
-- **Drivers** (`components/drv_*/`): 14 Rust drivers (compiled-in + standalone `.drv.elf`): e-paper, LCD, OLED, keyboard, touch (×2), GPS, accelerometer, power, audio, RTC (PCF8563), SD card, IMU (QMI8658C), light sensor. C drivers for modem (esp_modem) and radio (RadioLib).
-- **Board config**: Per-board `board.json` files in `sdcard_layout/config/boards/` define pins, buses, and which drivers to load. Replaces compiled `board_*` components. 6 boards supported.
-- **Kernel (Rust)** (`components/kernel_rs/`): 100% Rust. 42 modules: manifest parser, permissions, IPC, events, app manager, version, crypto, HAL registry, driver manager, WM, app store, wifi/ble/net managers, OTA, and more. 515 tests.
+- **Drivers** (`components/drv_*/`): 15 drivers (13 Rust + 2 C, compiled-in + standalone `.drv.elf`): e-paper, LCD, OLED, keyboard, touch (×2), GPS, accelerometer, power, audio, RTC (PCF8563), SD card, IMU (QMI8658C), light sensor. C drivers for modem (esp_modem) and radio (RadioLib).
+- **Board config**: Per-board `board.json` files in `sdcard_layout/config/boards/` define pins, buses, and which drivers to load. Replaces compiled `board_*` components. 10 boards supported.
+- **Kernel (Rust)** (`components/kernel_rs/`): 100% Rust. 57 modules: manifest parser, permissions, IPC, events, app manager, version, crypto, HAL registry, driver manager, WM, app store, wifi/ble/net managers, OTA, and more. 1231 tests.
 - **Display Server** (`components/kernel/src/display_server.c`): Surface management, compositor, WM vtable interface.
 - **UI** (`components/ui/`): thistle-tk WM (default). LVGL-based WM also available. Both loadable as `.wm.elf`.
 - **Apps** (`components/apps_builtin/`): 14 apps, migrating to `.app.elf` on SPIFFS.
@@ -62,7 +62,7 @@ The kernel is **100% Rust and hardware-independent**. It never calls ESP-IDF har
 - All public headers use `#pragma once`.
 - Error handling: `esp_err_t` return codes (C), i32 ESP error codes (Rust FFI).
 - Logging: `ESP_LOG*` macros (C). Rust logging TBD.
-- C kernel shims: ~180 LOC remaining — `kernel_shims.c` (57 LOC weak link stubs) and `tk_wm_shims.c` (123 LOC HAL bridges).
+- C kernel shims: ~210 LOC remaining — `kernel_shims.c` (87 LOC weak link stubs) and `tk_wm_shims.c` (123 LOC HAL bridges).
 
 ## Adding a New Driver
 **As standalone .drv.elf** (preferred):

@@ -61,7 +61,7 @@
   <main class="main-content">
     <div class="page-header">
       <h1>ThistleOS</h1>
-      <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 14 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6, H2 (RISC-V).</p>
+      <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 15 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6, H2 (RISC-V).</p>
       <a href="https://github.com/wan0net/thistle-os" class="edit-link">
         &#9998; Edit on GitHub
       </a>
@@ -74,7 +74,7 @@
 
     <div class="callout info">
       <div class="callout-title">Status</div>
-      ThistleOS Rust migration complete. 100% Rust kernel (40+ modules, 26,000+ LOC, 489+ tests), 14 Rust hardware drivers, 6 supported boards, multi-arch ESP32 support, and hardware auto-detection in the Recovery OS.
+      ThistleOS Rust migration complete. 100% Rust kernel (57 modules, 35,000+ LOC, 1,231 tests), 15 Rust hardware drivers, 10 supported boards, multi-arch ESP32 support, and hardware auto-detection in the Recovery OS.
     </div>
 
     <h2>What is ThistleOS?</h2>
@@ -82,7 +82,7 @@
 
     <p>Key design decisions:</p>
     <ul>
-      <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel. 14 drivers written in Rust.</li>
+      <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel. 15 drivers written in Rust.</li>
       <li><strong>Apps are ELF files on an SD card.</strong> The kernel's ELF loader resolves symbols against a syscall table at runtime. No recompilation of the OS needed to install an app.</li>
       <li><strong>BSD 3-Clause throughout.</strong> No GPL components in the ThistleOS core; swap to any commercial use case without license headaches.</li>
       <li><strong>Recovery OS auto-detects hardware.</strong> A separate, minimal Rust firmware in <code>ota_0</code> scans I2C/SPI/UART buses, identifies connected components, and downloads the matching drivers and firmware over WiFi.</li>
@@ -165,7 +165,7 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
     </div>
 
     <h2>Supported Hardware</h2>
-    <p>ThistleOS runs on 6 boards across the ESP32 family. The primary board is the <strong>LilyGo T-Deck Pro</strong> (ESP32-S3, 3.1" e-paper, QWERTY keyboard, LoRa, GPS, IMU, RTC). Other supported boards include the T-Deck (LCD), T-Display-S3, T3-S3 (LoRa), CYD (ESP32), and ESP32-C3 SuperMini.</p>
+    <p>ThistleOS runs on 10 boards across the ESP32 family. The primary board is the <strong>LilyGo T-Deck Pro</strong> (ESP32-S3, 3.1" e-paper, QWERTY keyboard, LoRa, GPS, IMU, RTC). Other supported boards include the T-Deck (LCD), T-Display-S3, T3-S3 (LoRa), CYD (ESP32), and ESP32-C3 SuperMini.</p>
     <p>See <a href="devices.html">Devices</a> for the full hardware breakdown, driver table, and how to add your own board.</p>
 
     <h2>License</h2>
