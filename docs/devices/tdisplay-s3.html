@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LilyGo T-Display-S3 — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / T-Display-S3</div>
+      <h1>LilyGo T-Display-S3</h1>
+      <p class="lead">Compact ESP32-S3 board with a small 320x170 LCD and capacitive touch. Touch-only input.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32-S3 (dual-core Xtensa LX7, 240 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>16 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>8 MB</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip)</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-green">Supported</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>LCD display</td><td>ST7789 320&times;170</td><td>SPI</td><td><code>drv_lcd_st7789</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Touch</td><td>CST816</td><td>I2C</td><td><code>drv_touch_cst816</code></td><td><span class="badge badge-green">Fixed</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>tdisplay-s3.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/tdisplay-s3.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>Touch driver had cold-boot, auto-sleep, and gesture issues that have been fixed.</li>
+      <li>No physical keyboard &mdash; touch-only input.</li>
+      <li>2 hardware buttons available on GPIO for additional input.</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

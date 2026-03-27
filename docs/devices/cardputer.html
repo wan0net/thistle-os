@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M5Stack Cardputer — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / Cardputer</div>
+      <h1>M5Stack Cardputer</h1>
+      <p class="lead">Credit-card-sized device with IPS LCD, I2C keyboard, and SD card. ESP32-S3 with no PSRAM.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32-S3 (dual-core Xtensa LX7, 240 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>8 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>None (~320 KB internal SRAM only)</td></tr>
+          <tr><td><strong>Battery</strong></td><td>120 mAh LiPo</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip), USB-C</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-yellow">Partial</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>LCD display</td><td>ST7789 240&times;135</td><td>SPI (DAT=35, SCK=36, CS=37, DC=34, RST=33, BL=38)</td><td><code>drv_lcd_st7789</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Keyboard</td><td>CardKB</td><td>I2C 0x5F</td><td><code>drv_kbd_cardkb</code></td><td><span class="badge badge-green">Fixed</span></td></tr>
+          <tr><td>SD Card</td><td>MicroSD</td><td>SPI (CS=12, separate bus)</td><td><code>drv_sdcard</code></td><td><span class="badge badge-dim">Untested</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Pin assignments</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function</th><th>GPIO</th></tr></thead>
+        <tbody>
+          <tr><td>LCD DAT (MOSI)</td><td>35</td></tr>
+          <tr><td>LCD SCK</td><td>36</td></tr>
+          <tr><td>LCD CS</td><td>37</td></tr>
+          <tr><td>LCD DC</td><td>34</td></tr>
+          <tr><td>LCD RST</td><td>33</td></tr>
+          <tr><td>LCD Backlight</td><td>38</td></tr>
+          <tr><td>SD Card CS</td><td>12</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>cardputer.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/cardputer.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <div class="callout warn">
+      <div class="callout-title">No PSRAM</div>
+      The Cardputer has no PSRAM, limiting available heap to internal SRAM (~320 KB). Apps and drivers must be conservative with memory. Large framebuffers and multi-surface compositing may not be possible.
+    </div>
+    <ul>
+      <li>Display uses a sub-window panel with offset x=40, y=52.</li>
+      <li>CardKB keyboard driver had address and arrow key code issues that have been fixed.</li>
+      <li>120 mAh battery provides very limited runtime.</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

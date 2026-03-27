@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Heltec WiFi LoRa 32 V3 — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / Heltec V3</div>
+      <h1>Heltec WiFi LoRa 32 V3</h1>
+      <p class="lead">Compact LoRa node with OLED display, battery ADC, and USB-C. ESP32-S3 with SX1262 radio.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32-S3 (dual-core Xtensa LX7, 240 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>8 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>8 MB</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip), USB-C</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-green">Supported</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>OLED display</td><td>SSD1306 128&times;64</td><td>I2C 0x3C (SDA=17, SCL=18, RST=21)</td><td><code>drv_oled_ssd1306</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>LoRa radio</td><td>SX1262</td><td>SPI (CS=8, RST=12, BUSY=13, DIO1=14, TCXO=true)</td><td><code>drv_radio_sx1262</code> (C/RadioLib)</td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Battery ADC</td><td>ADC on GPIO 1</td><td>ADC</td><td><code>drv_power_tp4065b</code></td><td><span class="badge badge-dim">Untested</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Pin assignments</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function</th><th>GPIO</th></tr></thead>
+        <tbody>
+          <tr><td>OLED SDA</td><td>17</td></tr>
+          <tr><td>OLED SCL</td><td>18</td></tr>
+          <tr><td>OLED RST</td><td>21</td></tr>
+          <tr><td>Vext power</td><td>36 (drive LOW to enable)</td></tr>
+          <tr><td>LoRa CS</td><td>8</td></tr>
+          <tr><td>LoRa RST</td><td>12</td></tr>
+          <tr><td>LoRa BUSY</td><td>13</td></tr>
+          <tr><td>LoRa DIO1</td><td>14</td></tr>
+          <tr><td>Battery ADC</td><td>1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>heltec-v3.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/heltec-v3.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>Vext power on GPIO 36 must be driven LOW to enable peripheral power (OLED, etc.). This is handled by the <code>pin_vext</code> config in the board JSON.</li>
+      <li>LoRa SX1262 uses TCXO (temperature-compensated crystal oscillator).</li>
+      <li>Battery ADC driver is untested on this board.</li>
+      <li>Good for: LoRa mesh node, compact sensor hub.</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

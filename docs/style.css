@@ -567,3 +567,16 @@ td code {
 .diagram .d-yellow { color: #fde68a; }
 .diagram .d-red    { color: #fca5a5; }
 .diagram .d-dim    { color: #6b7280; }
+
+/* ── Data table (device overview) ────────────────────────── */
+
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th, .data-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+.data-table th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+.data-table tr:hover td { background: var(--surface-2); }
+.data-table a { color: var(--text); font-weight: 500; }
+.data-table a:hover { color: var(--primary); }
+.detail-table { width: 100%; margin: 12px 0 32px; }
+.detail-table th { width: 120px; padding: 6px 12px; color: var(--text-dim); font-size: 13px; font-weight: 500; text-align: left; vertical-align: top; }
+.detail-table td { padding: 6px 12px; font-size: 14px; }
+.badge-blue { background: rgba(37, 99, 235, 0.15); color: #60a5fa; }

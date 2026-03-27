@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32-C3 Mini — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / C3 Mini</div>
+      <h1>ESP32-C3 Mini</h1>
+      <p class="lead">Minimal RISC-V board with optional OLED display. Single-core ESP32-C3 for headless LoRa node use cases.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32-C3 (single-core RISC-V RV32IMC, 160 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>4 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>None</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip)</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-dim">Minimal</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>OLED display</td><td>SSD1306 128&times;64</td><td>I2C</td><td><code>drv_oled_ssd1306</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>c3-mini.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/c3-mini.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>ESP32-C3 is single-core RISC-V &mdash; significantly less processing power than ESP32-S3.</li>
+      <li>Very minimal hardware &mdash; best suited for headless LoRa node or simple sensor applications.</li>
+      <li>No PSRAM, no input devices, no radio (unless externally connected).</li>
+      <li>Uses a different firmware binary (RISC-V) from the ESP32-S3 boards (Xtensa).</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

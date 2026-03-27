@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LilyGo T-Deck Plus — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / T-Deck Plus</div>
+      <h1>LilyGo T-Deck Plus</h1>
+      <p class="lead">Enhanced T-Deck with GPS module and 2000mAh battery. ESP32-S3 with ST7789 LCD, physical keyboard, LoRa, and power management.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32-S3 (dual-core Xtensa LX7, 240 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>16 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>8 MB</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 5.0 (on-chip)</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-green">Supported</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>LCD display</td><td>ST7789 320&times;240</td><td>SPI</td><td><code>drv_lcd_st7789</code> (wraps esp_lcd)</td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Keyboard</td><td>TCA8418</td><td>I2C 0x34</td><td><code>drv_kbd_tca8418</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Touch</td><td>CST328</td><td>I2C 0x1A</td><td><code>drv_touch_cst328</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>LoRa radio</td><td>SX1262</td><td>SPI</td><td><code>drv_radio_sx1262</code> (C/RadioLib)</td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>GPS</td><td>MIA-M10Q</td><td>UART</td><td><code>drv_gps_mia_m10q</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Power</td><td>TP4065B</td><td>ADC</td><td><code>drv_power_tp4065b</code></td><td><span class="badge badge-green">Proven</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>tdeck-plus.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/tdeck-plus.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>Window manager: <strong>LVGL</strong> (C, LCD rendering).</li>
+      <li>Same as T-Deck but adds power management driver and GPS module.</li>
+      <li>2000mAh battery provides significantly longer runtime than the standard T-Deck.</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

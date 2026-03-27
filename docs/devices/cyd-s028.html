@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CYD ESP32-2432S028R — ThistleOS</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="../index.html" class="sidebar-logo">
+        <img src="../thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="../index.html">Overview</a>
+        <a href="../architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="../app-development.html">Building Apps</a>
+        <a href="../driver-development.html">Building Drivers</a>
+        <a href="../board-support.html">Board Support</a>
+        <a href="../devices.html" class="active">Supported Devices</a>
+
+        <div class="nav-label">System</div>
+        <a href="../kernel-modules.html">Kernel Modules</a>
+        <a href="../app-store.html">App Store</a>
+        <a href="../security.html">Security &amp; Signing</a>
+        <a href="../recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../devices.html">Devices</a> / CYD S028</div>
+      <h1>CYD ESP32-2432S028R</h1>
+      <p class="lead">Cheap Yellow Display with 2.8" ILI9341 LCD over SPI and XPT2046 resistive touch. ESP32 with 3 separate SPI buses.</p>
+    </div>
+
+    <h2>Overview</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><strong>MCU</strong></td><td>ESP32 (dual-core Xtensa LX6, 240 MHz)</td></tr>
+          <tr><td><strong>Flash</strong></td><td>4 MB</td></tr>
+          <tr><td><strong>PSRAM</strong></td><td>None</td></tr>
+          <tr><td><strong>Connectivity</strong></td><td>WiFi 4 + BLE 4.2 (on-chip)</td></tr>
+          <tr><td><strong>Status</strong></td><td><span class="badge badge-yellow">Partial</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Components</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Chip</th><th>Interface</th><th>Driver</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>LCD display</td><td>ILI9341 320&times;240</td><td>SPI (MOSI=13, CLK=14, CS=15, DC=2, BL=21)</td><td><code>drv_lcd_ili9341</code></td><td><span class="badge badge-green">Fixed</span></td></tr>
+          <tr><td>Touch</td><td>XPT2046</td><td>SPI separate bus (CS=33, IRQ=36)</td><td><code>drv_touch_xpt2046</code></td><td><span class="badge badge-green">Fixed</span></td></tr>
+          <tr><td>SD Card</td><td>MicroSD</td><td>SPI (CS=5)</td><td><code>drv_sdcard</code></td><td><span class="badge badge-dim">Untested</span></td></tr>
+          <tr><td>RGB LED</td><td>&mdash;</td><td>GPIO (R=4, G=16, B=17)</td><td>&mdash;</td><td><span class="badge badge-dim">Untested</span></td></tr>
+          <tr><td>Speaker</td><td>&mdash;</td><td>GPIO 26</td><td>&mdash;</td><td><span class="badge badge-dim">Untested</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Pin assignments</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Function</th><th>GPIO</th></tr></thead>
+        <tbody>
+          <tr><td>LCD MOSI</td><td>13</td></tr>
+          <tr><td>LCD CLK</td><td>14</td></tr>
+          <tr><td>LCD CS</td><td>15</td></tr>
+          <tr><td>LCD DC</td><td>2</td></tr>
+          <tr><td>LCD Backlight</td><td>21</td></tr>
+          <tr><td>Touch CS</td><td>33</td></tr>
+          <tr><td>Touch IRQ</td><td>36</td></tr>
+          <tr><td>SD Card CS</td><td>5</td></tr>
+          <tr><td>RGB LED R</td><td>4</td></tr>
+          <tr><td>RGB LED G</td><td>16</td></tr>
+          <tr><td>RGB LED B</td><td>17</td></tr>
+          <tr><td>Speaker</td><td>26</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Board config</h2>
+    <p>Config file: <code>cyd-2432s028.json</code></p>
+    <p>Located at <code>sdcard_layout/config/boards/cyd-2432s028.json</code> in the source tree.</p>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>No PSRAM &mdash; limited to internal SRAM.</li>
+      <li>Uses 3 separate SPI buses: LCD, touch (XPT2046), and SD card.</li>
+      <li>ILI9341 LCD driver had init sequence and sleep timing issues that have been fixed.</li>
+      <li>XPT2046 touch driver had pressure threshold, IRQ handling, and debounce issues that have been fixed.</li>
+    </ul>
+
+    <div class="page-footer">
+      <span>ThistleOS &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>
