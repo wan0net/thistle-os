@@ -63,25 +63,26 @@ extern bool sim_board_has_keyboard(void);
 extern int rs_meshchat_init(void);
 extern int rs_meshchat_update(void);
 
+/* Device selection — JS calls _wasm_set_device(idx) before main runs */
+static const char *DEVICE_NAMES[] = {
+    "tdeck","tdeck-pro","tdeck-plus","tdisplay","heltec-v3",
+    "cardputer","cyd-s022","cyd-s028","t3-s3","c3-mini"
+};
+static const char *wasm_device_name = "tdeck";
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_set_device(int idx) {
+    if (idx >= 0 && idx < 10) {
+        wasm_device_name = DEVICE_NAMES[idx];
+    }
+}
+
 int main(void)
 {
-    /* Device selection — default to tdeck.
-     * The JS shell reads ?device= from URL and sets a global before
-     * Module init. We read it here via EM_ASM_INT as an index. */
-    int dev_idx = EM_ASM_INT({
-        var devs = ['tdeck','tdeck-pro','tdeck-plus','tdisplay','heltec-v3',
-                    'cardputer','cyd-s022','cyd-s028','t3-s3','c3-mini'];
-        var p = new URLSearchParams(window.location.search);
-        var d = p.get('device') || 'tdeck';
-        var idx = devs.indexOf(d);
-        return idx >= 0 ? idx : 0;
-    });
-    const char *dev_names[] = {"tdeck","tdeck-pro","tdeck-plus","tdisplay",
-        "heltec-v3","cardputer","cyd-s022","cyd-s028","t3-s3","c3-mini"};
-    const char *device = (dev_idx >= 0 && dev_idx < 10) ? dev_names[dev_idx] : "tdeck";
-
-    sim_board_set_device(device);
-    printf("ThistleOS WASM Simulator — %s\n", device);
+    /* Device defaults to tdeck. JS can call _wasm_set_device(idx)
+     * before Module init to change it. */
+    printf("ThistleOS WASM Simulator — %s\n", wasm_device_name);
+    sim_board_set_device(wasm_device_name);
 
     /* Initialize Rust kernel */
     int ret = kernel_init();

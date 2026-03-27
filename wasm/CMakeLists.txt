@@ -145,8 +145,8 @@ target_link_options(thistle_wasm PRIVATE
     -sALLOW_MEMORY_GROWTH=1
     -sINITIAL_MEMORY=33554432
     -sSTACK_SIZE=1048576
-    -sEXPORTED_FUNCTIONS=['_main']
-    -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']
+    -sEXPORTED_FUNCTIONS=['_main','_wasm_set_device','_app_manager_launch','_free']
+    -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','allocateUTF8']
     --preload-file ${THISTLE_DIR}/simulator/sdcard@/thistle_sdcard
     --shell-file ${CMAKE_CURRENT_SOURCE_DIR}/shell.html
 )

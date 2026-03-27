@@ -282,6 +282,16 @@ document.getElementById('device-select').addEventListener('change', function() {
 })();
 var Module = {
   canvas: document.getElementById('canvas'),
+  preRun: [function() {
+    /* Set device before main() runs */
+    var devs = ['tdeck','tdeck-pro','tdeck-plus','tdisplay','heltec-v3',
+                'cardputer','cyd-s022','cyd-s028','t3-s3','c3-mini'];
+    var dev = new URLSearchParams(window.location.search).get('device') || 'tdeck';
+    var idx = devs.indexOf(dev);
+    if (idx >= 0 && Module._wasm_set_device) {
+      Module._wasm_set_device(idx);
+    }
+  }],
   onRuntimeInitialized: function() {
     document.getElementById('device-status').textContent = 'ThistleOS running';
     document.getElementById('device-status').className = 'ready';
