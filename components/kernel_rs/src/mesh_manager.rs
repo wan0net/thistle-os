@@ -253,44 +253,61 @@ static EMPTY_NAME: &[u8] = b"\0";
 // ---------------------------------------------------------------------------
 
 /// Initialise the mesh manager. Calls meshcore_init on hardware.
+///
+/// The init sequence is carefully ordered to avoid two race conditions:
+/// 1. The Rust Mutex must NOT be held while calling into C (meshcore_init
+///    starts the radio, whose callbacks try to acquire the same Mutex).
+/// 2. Callbacks must be registered BEFORE meshcore_init so that packets
+///    arriving as soon as the radio starts are not silently dropped.
 #[no_mangle]
-pub extern "C" fn rs_mesh_init(name: *const c_char, node_type: u8) -> i32 {
+pub unsafe extern "C" fn rs_mesh_init(name: *const c_char, node_type: u8) -> i32 {
     if name.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
 
-    let mut state = match MESH_STATE.lock() {
-        Ok(s) => s,
-        Err(_) => return ESP_FAIL,
-    };
+    // Phase 1: claim initialisation under lock, store name, then drop lock
+    {
+        let mut state = match MESH_STATE.lock() {
+            Ok(s) => s,
+            Err(_) => return ESP_FAIL,
+        };
 
-    if state.initialized {
-        return ESP_ERR_INVALID_STATE;
+        if state.initialized {
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        // Copy node name into state
+        let name_bytes = std::ffi::CStr::from_ptr(name).to_bytes();
+        let copy_len = name_bytes.len().min(MESH_NAME_MAX - 1);
+        state.node_name[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
+        state.node_name[copy_len] = 0; // null-terminate
+        state.node_name_len = copy_len;
+        state.node_type = node_type;
+        state.inbox_clear();
+        state.initialized = true;
+        // Lock drops here
     }
 
-    // Copy node name into state
-    let name_bytes = unsafe { std::ffi::CStr::from_ptr(name).to_bytes() };
-    let copy_len = name_bytes.len().min(MESH_NAME_MAX - 1);
-    state.node_name[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
-    state.node_name[copy_len] = 0; // null-terminate
-    state.node_name_len = copy_len;
-    state.node_type = node_type;
-    state.inbox_clear();
-
+    // Phase 2: register callbacks BEFORE starting mesh (no lock held)
     #[cfg(target_os = "espidf")]
     {
-        let rc = unsafe { meshcore_init(name, node_type) };
+        meshcore_set_message_callback(Some(on_mesh_message), std::ptr::null_mut());
+        meshcore_set_contact_callback(Some(on_mesh_contact), std::ptr::null_mut());
+    }
+
+    // Phase 3: init mesh — starts the radio; callbacks are already registered
+    #[cfg(target_os = "espidf")]
+    {
+        let rc = meshcore_init(name, node_type);
         if rc != ESP_OK {
+            // Rollback: re-acquire lock, mark as not initialized
+            if let Ok(mut state) = MESH_STATE.lock() {
+                state.initialized = false;
+            }
             return rc;
-        }
-        // Register callbacks
-        unsafe {
-            meshcore_set_message_callback(Some(on_mesh_message), std::ptr::null_mut());
-            meshcore_set_contact_callback(Some(on_mesh_contact), std::ptr::null_mut());
         }
     }
 
-    state.initialized = true;
     ESP_OK
 }
 
@@ -753,7 +770,7 @@ mod tests {
     fn test_init_success() {
         reset_state();
         let name = CString::new("TestNode").unwrap();
-        let rc = rs_mesh_init(name.as_ptr(), 1);
+        let rc = unsafe { rs_mesh_init(name.as_ptr(), 1) };
         assert_eq!(rc, ESP_OK, "init must succeed");
         rs_mesh_deinit();
     }
@@ -761,7 +778,7 @@ mod tests {
     #[test]
     fn test_init_null_name() {
         reset_state();
-        let rc = rs_mesh_init(std::ptr::null(), 0);
+        let rc = unsafe { rs_mesh_init(std::ptr::null(), 0) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "init with null name must fail");
     }
 
@@ -769,8 +786,8 @@ mod tests {
     fn test_double_init_fails() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        assert_eq!(rs_mesh_init(name.as_ptr(), 0), ESP_OK);
-        assert_eq!(rs_mesh_init(name.as_ptr(), 0), ESP_ERR_INVALID_STATE,
+        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 0) }, ESP_OK);
+        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 0) }, ESP_ERR_INVALID_STATE,
             "double init must return INVALID_STATE");
         rs_mesh_deinit();
     }
@@ -786,9 +803,9 @@ mod tests {
     fn test_init_deinit_reinit() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        assert_eq!(rs_mesh_init(name.as_ptr(), 1), ESP_OK);
+        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 1) }, ESP_OK);
         assert_eq!(rs_mesh_deinit(), ESP_OK);
-        assert_eq!(rs_mesh_init(name.as_ptr(), 2), ESP_OK, "re-init after deinit must succeed");
+        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 2) }, ESP_OK, "re-init after deinit must succeed");
         rs_mesh_deinit();
     }
 
@@ -798,7 +815,7 @@ mod tests {
     fn test_inbox_push_and_read() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         // Push a message directly into state
         {
@@ -828,7 +845,7 @@ mod tests {
     fn test_inbox_overflow_wraps() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         // Push INBOX_SIZE + 5 messages
         {
@@ -859,7 +876,7 @@ mod tests {
     fn test_inbox_clear() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         {
             let mut state = MESH_STATE.lock().unwrap();
@@ -879,7 +896,7 @@ mod tests {
     fn test_inbox_read_out_of_range() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let mut out = CMeshMessage::default();
         let rc = rs_mesh_get_inbox_message(0, &mut out as *mut CMeshMessage);
@@ -895,7 +912,7 @@ mod tests {
     fn test_inbox_read_null_out() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let rc = rs_mesh_get_inbox_message(0, std::ptr::null_mut());
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "null output pointer must fail");
@@ -932,7 +949,7 @@ mod tests {
     fn test_send_null_dest() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let text = CString::new("hello").unwrap();
         let rc = rs_mesh_send(std::ptr::null(), text.as_ptr());
@@ -945,7 +962,7 @@ mod tests {
     fn test_send_null_text() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let key = [0u8; 32];
         let rc = rs_mesh_send(key.as_ptr(), std::ptr::null());
@@ -972,7 +989,7 @@ mod tests {
     fn test_get_contact_null() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let rc = rs_mesh_get_contact(0, std::ptr::null_mut());
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "null contact output must fail");
@@ -984,7 +1001,7 @@ mod tests {
     fn test_find_contact_null() {
         reset_state();
         let name = CString::new("Node").unwrap();
-        rs_mesh_init(name.as_ptr(), 0);
+        unsafe { rs_mesh_init(name.as_ptr(), 0) };
 
         let rc = rs_mesh_find_contact(std::ptr::null());
         assert_eq!(rc, -1, "null pub_key must return -1");
