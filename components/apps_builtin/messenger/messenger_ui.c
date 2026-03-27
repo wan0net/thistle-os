@@ -25,6 +25,7 @@
 
 #include "messenger/messenger_app.h"
 #include "messenger/messenger_transport.h"
+#include "messenger/messenger_kernel.h"
 
 #include "lvgl.h"
 #include "esp_log.h"
@@ -118,6 +119,9 @@ static struct {
     char            device_id_str[12];   /* "Node-XXXX" */
 } s_msg;
 
+/* LVGL periodic timer for kernel tick integration */
+static lv_timer_t *s_tick_timer;
+
 /* ------------------------------------------------------------------ */
 /* Forward declarations                                                 */
 /* ------------------------------------------------------------------ */
@@ -132,6 +136,7 @@ static void create_message_bubble(const chat_message_t *msg);
 static void add_message_to_conv(int conv_idx, const char *sender,
                                 const char *text, bool is_self);
 static void send_message(void);
+static void kernel_tick_cb(lv_timer_t *timer);
 
 /* ------------------------------------------------------------------ */
 /* Transport RX callback (may be called from any task context)         */
@@ -147,6 +152,7 @@ typedef struct {
     msg_transport_t transport;
     char            sender[16];
     char            text[MSG_MAX_TEXT];
+    uint32_t        sender_device_id;   /* raw device ID for contact lookup (0 = unknown) */
 } rx_async_arg_t;
 
 static void rx_async_handler(void *arg)
@@ -165,7 +171,73 @@ static void rx_async_handler(void *arg)
     }
 
     if (ci >= 0) {
-        add_message_to_conv(ci, rx->sender, rx->text, false);
+        /*
+         * Contact resolution: try to resolve the sender's display name
+         * from the kernel contact manager.  For LoRa, the raw sender is
+         * "Node-XXXX" where XXXX is the low 16 bits of the device_id.
+         * We pass the full 32-bit device_id through the wire format, so
+         * attempt a lookup.  For other transports, try phone number.
+         */
+        const char *display_name = rx->sender;
+        char resolved_name[64];
+
+        if (rx->transport == MSG_TRANSPORT_LORA) {
+            /* Parse device_id from "Node-XXXXXXXX" sender string */
+            unsigned int did = 0;
+            if (sscanf(rx->sender, "Node-%8X", &did) == 1) {
+                CContactInfo contact;
+                memset(&contact, 0, sizeof(contact));
+                if (rs_contact_find_by_device_id((uint32_t)did, &contact) == 0 &&
+                    contact.name[0] != '\0') {
+                    strncpy(resolved_name, (const char *)contact.name, sizeof(resolved_name) - 1);
+                    resolved_name[sizeof(resolved_name) - 1] = '\0';
+                    display_name = resolved_name;
+                }
+            }
+        } else if (rx->transport == MSG_TRANSPORT_SMS) {
+            /* For SMS, sender is a phone number — look up in contacts */
+            CContactInfo contact;
+            memset(&contact, 0, sizeof(contact));
+            if (rs_contact_find_by_phone(rx->sender, &contact) == 0 &&
+                contact.name[0] != '\0') {
+                strncpy(resolved_name, (const char *)contact.name, sizeof(resolved_name) - 1);
+                resolved_name[sizeof(resolved_name) - 1] = '\0';
+                display_name = resolved_name;
+            }
+        }
+
+        /* Decrypt if an encrypted channel is active for this contact */
+        const char *final_text = rx->text;
+        char decrypted[MSG_MAX_TEXT];
+        CContactInfo contact_for_crypto;
+        memset(&contact_for_crypto, 0, sizeof(contact_for_crypto));
+
+        /* Try to find a contact ID for crypto lookup */
+        bool have_contact = false;
+        if (rx->transport == MSG_TRANSPORT_LORA) {
+            unsigned int did = 0;
+            if (sscanf(rx->sender, "Node-%8X", &did) == 1) {
+                have_contact = (rs_contact_find_by_device_id((uint32_t)did,
+                                &contact_for_crypto) == 0);
+            }
+        } else if (rx->transport == MSG_TRANSPORT_SMS) {
+            have_contact = (rs_contact_find_by_phone(rx->sender,
+                            &contact_for_crypto) == 0);
+        }
+
+        if (have_contact && rs_msg_crypto_is_active(contact_for_crypto.id)) {
+            int pt_len = rs_msg_crypto_decrypt(
+                contact_for_crypto.id,
+                (const uint8_t *)rx->text, strlen(rx->text),
+                (uint8_t *)decrypted, sizeof(decrypted) - 1);
+            if (pt_len > 0) {
+                decrypted[pt_len] = '\0';
+                final_text = decrypted;
+            }
+            /* If decryption fails, fall through and show raw text */
+        }
+
+        add_message_to_conv(ci, display_name, final_text, false);
 
         /* If this conversation is currently open, bubbles already rendered */
         /* If we are on the conversation list, refresh the preview row */
@@ -784,22 +856,169 @@ static void send_message(void)
     conversation_t *cv = &s_msg.convs[s_msg.active_conv];
     const msg_transport_driver_t *drv = messenger_get_transport(cv->transport);
 
+    /*
+     * Encrypt if an encrypted channel is active for the destination contact.
+     * Look up the contact by destination (phone for SMS, device_id for LoRa).
+     */
+    const uint8_t *send_payload = (const uint8_t *)text;
+    uint16_t send_len = (uint16_t)strlen(text);
+    uint8_t encrypted_buf[512];
+    bool encrypted = false;
+
+    /* Try to find a contact for this conversation's destination */
+    CContactInfo dest_contact;
+    memset(&dest_contact, 0, sizeof(dest_contact));
+    bool have_dest_contact = false;
+
+    if (cv->dest[0] != '\0') {
+        if (cv->transport == MSG_TRANSPORT_SMS) {
+            have_dest_contact = (rs_contact_find_by_phone(cv->dest, &dest_contact) == 0);
+        }
+        /* For other transports, destination lookup could be added here */
+    }
+
+    if (have_dest_contact && rs_msg_crypto_is_active(dest_contact.id)) {
+        int ct_len = rs_msg_crypto_encrypt(
+            dest_contact.id,
+            (const uint8_t *)text, strlen(text),
+            encrypted_buf, sizeof(encrypted_buf));
+        if (ct_len > 0) {
+            send_payload = encrypted_buf;
+            send_len = (uint16_t)ct_len;
+            encrypted = true;
+            ESP_LOGI(TAG, "message encrypted for contact %u", (unsigned)dest_contact.id);
+        } else {
+            ESP_LOGW(TAG, "encryption failed (rc=%d), sending plaintext", ct_len);
+        }
+    }
+
+    /*
+     * Enqueue through the kernel message queue for retry/persistence,
+     * then also attempt direct send for immediate delivery.
+     */
+    const uint8_t *dest_ptr = cv->dest[0] ? (const uint8_t *)cv->dest : NULL;
+    uint8_t dest_len = cv->dest[0] ? (uint8_t)strlen(cv->dest) : 0;
+
+    int msg_id = rs_msg_queue_enqueue(
+        (uint8_t)cv->transport,
+        dest_ptr, dest_len,
+        send_payload, send_len,
+        0 /* MSG_PRIORITY_NORMAL */);
+
+    if (msg_id > 0) {
+        ESP_LOGI(TAG, "queued message id=%d on %s%s",
+                 msg_id, drv ? drv->name : "?",
+                 encrypted ? " (encrypted)" : "");
+    }
+
+    /* Also attempt direct send for immediate delivery */
     if (drv && drv->send && drv->is_available()) {
-        esp_err_t ret = drv->send(cv->dest[0] ? cv->dest : NULL, text);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "send failed on %s: %s",
+        const char *send_text = encrypted ? (const char *)encrypted_buf : text;
+        esp_err_t ret = drv->send(cv->dest[0] ? cv->dest : NULL, send_text);
+        if (ret == ESP_OK && msg_id > 0) {
+            /* Mark as sent in the queue so it won't retry */
+            rs_msg_queue_mark_sent((uint32_t)msg_id);
+        } else if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "direct send failed on %s: %s (queued for retry)",
                      drv->name, esp_err_to_name(ret));
-            /* Still echo locally so the user sees their own message */
         }
     } else {
-        ESP_LOGW(TAG, "transport %s unavailable — local echo only",
+        ESP_LOGW(TAG, "transport %s unavailable — queued for later",
                  drv ? drv->name : "?");
     }
 
-    /* Always show the message locally */
+    /* Always show the message locally (original plaintext) */
     add_message_to_conv(s_msg.active_conv, "You", text, true);
 
     lv_textarea_set_text(s_msg.input_ta, "");
+}
+
+/* ------------------------------------------------------------------ */
+/* Kernel tick — periodic burn timer + message queue processing        */
+/* ------------------------------------------------------------------ */
+
+static void kernel_tick_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+
+    /* Advance burn timers and check for expired messages */
+    rs_burn_timer_tick(now_ms);
+
+    CBurnExpired expired[8];
+    int n_expired = rs_burn_timer_get_expired(expired, 8);
+    for (int i = 0; i < n_expired; i++) {
+        uint8_t conv_id  = expired[i].conversation_id;
+        uint8_t msg_idx  = expired[i].message_index;
+
+        if (conv_id < s_msg.conv_count) {
+            conversation_t *cv = &s_msg.convs[conv_id];
+            int slot = msg_idx % MSG_HISTORY;
+            if (msg_idx < cv->msg_count) {
+                /* Wipe the burned message content */
+                strncpy(cv->messages[slot].text, "[burned]", MSG_MAX_TEXT - 1);
+                cv->messages[slot].text[MSG_MAX_TEXT - 1] = '\0';
+            }
+        }
+        ESP_LOGI(TAG, "burn expired: conv=%u msg=%u", conv_id, msg_idx);
+    }
+
+    /* If any messages were burned and we're viewing that conversation, refresh */
+    if (n_expired > 0 && s_msg.screen == SCREEN_CHAT && s_msg.active_conv >= 0) {
+        conversation_t *cv = &s_msg.convs[s_msg.active_conv];
+        if (s_msg.msg_list) {
+            lv_obj_clean(s_msg.msg_list);
+            int count = cv->msg_count;
+            int start = (count > MSG_HISTORY) ? count - MSG_HISTORY : 0;
+            for (int j = start; j < count; j++) {
+                create_message_bubble(&cv->messages[j % MSG_HISTORY]);
+            }
+        }
+    }
+
+    /* Advance the message queue and dispatch ready-to-send messages */
+    rs_msg_queue_tick(now_ms);
+
+    CQueuedMsgInfo ready[4];
+    int n_ready = rs_msg_queue_get_ready(ready, 4);
+    for (int i = 0; i < n_ready; i++) {
+        uint8_t transport_type = ready[i].transport;
+        const msg_transport_driver_t *drv = messenger_get_transport((msg_transport_t)transport_type);
+        if (!drv || !drv->send || !drv->is_available()) {
+            /* Transport not available — leave in queue for next tick */
+            continue;
+        }
+
+        /* Retrieve the payload from the queue */
+        uint8_t payload[512];
+        int plen = rs_msg_queue_get_payload(ready[i].id, payload, sizeof(payload) - 1);
+        if (plen <= 0) {
+            rs_msg_queue_mark_failed(ready[i].id);
+            continue;
+        }
+        payload[plen] = '\0';
+
+        /* Build destination string from queue entry */
+        char dest[33];
+        if (ready[i].dest_len > 0) {
+            int dlen = ready[i].dest_len < 32 ? ready[i].dest_len : 32;
+            memcpy(dest, ready[i].dest, dlen);
+            dest[dlen] = '\0';
+        } else {
+            dest[0] = '\0';
+        }
+
+        esp_err_t ret = drv->send(dest[0] ? dest : NULL, (const char *)payload);
+        if (ret == ESP_OK) {
+            rs_msg_queue_mark_sent(ready[i].id);
+            ESP_LOGI(TAG, "queue dispatch: msg %u sent via %s",
+                     (unsigned)ready[i].id, drv->name);
+        } else {
+            rs_msg_queue_mark_failed(ready[i].id);
+            ESP_LOGW(TAG, "queue dispatch: msg %u failed on %s: %s",
+                     (unsigned)ready[i].id, drv->name, esp_err_to_name(ret));
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -822,6 +1041,7 @@ esp_err_t messenger_ui_create(lv_obj_t *parent)
     s_msg.device_id = (uint32_t)esp_timer_get_time() ^ 0xDEADBEEF;
     snprintf(s_msg.device_id_str, sizeof(s_msg.device_id_str),
              "Node-%04X", (unsigned)(s_msg.device_id & 0xFFFF));
+    /* Note: LoRa wire format sends full 32-bit device_id for contact lookup */
 
     /* Initialise transport registry */
     messenger_transport_init();
@@ -858,6 +1078,9 @@ esp_err_t messenger_ui_create(lv_obj_t *parent)
         s_msg.convs[ci].transport = (msg_transport_t)t;
     }
 
+    /* Start the kernel tick timer (1 second interval) */
+    s_tick_timer = lv_timer_create(kernel_tick_cb, 1000, NULL);
+
     /* Start on the conversation list */
     show_screen(SCREEN_CONV_LIST);
 
@@ -869,6 +1092,9 @@ void messenger_ui_show(void)
 {
     if (s_msg.root) {
         lv_obj_clear_flag(s_msg.root, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_tick_timer) {
+        lv_timer_resume(s_tick_timer);
     }
 }
 
@@ -884,4 +1110,10 @@ void messenger_ui_hide(void)
             if (drv && drv->stop_receive) drv->stop_receive();
         }
     }
+    /* Pause the tick timer while hidden to avoid unnecessary work */
+    if (s_tick_timer) {
+        lv_timer_pause(s_tick_timer);
+    }
+    /* Persist the message queue to disk on hide */
+    rs_msg_queue_save();
 }

@@ -73,7 +73,7 @@ static void lora_radio_rx_shim(const uint8_t *data, size_t len,
     if (msg_len > LORA_MAX_TEXT) msg_len = LORA_MAX_TEXT;
 
     char sender[16];
-    snprintf(sender, sizeof(sender), "Node-%04X", (unsigned)(sender_id & 0xFFFF));
+    snprintf(sender, sizeof(sender), "Node-%08X", (unsigned)sender_id);
 
     char text[LORA_MAX_TEXT + 1];
     memcpy(text, data + 6, msg_len);
