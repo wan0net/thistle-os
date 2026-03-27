@@ -19,7 +19,8 @@ use thistle_tk::render::{self, MonoMapper, RgbMapper};
 use thistle_tk::theme::Theme;
 use thistle_tk::tree::UiTree;
 use thistle_tk::widget::{
-    ButtonWidget, ContainerWidget, LabelWidget, Size, SizeHint, TextInputWidget, Widget, WidgetId,
+    ButtonWidget, ContainerWidget, DividerWidget, LabelWidget, ListItemWidget, ProgressBarWidget,
+    Size, SizeHint, SpacerWidget, StatusBarWidget, TextInputWidget, Widget, WidgetId,
 };
 
 // ---------------------------------------------------------------------------
@@ -278,7 +279,7 @@ pub extern "C" fn tk_wm_init() -> i32 {
 
     let theme = match mode {
         DisplayMode::Mono => Theme::monochrome(),
-        DisplayMode::Rgb => Theme::dark(),
+        DisplayMode::Rgb => Theme::link42(),
     };
 
     // Create root container filling the viewport
@@ -463,6 +464,130 @@ pub unsafe extern "C" fn tk_wm_widget_create_text_input(
             id as u32
         }
         None => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// New widget creation FFI (Phase 2)
+// ---------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn tk_wm_widget_create_list_item(
+    parent: u32, title: *const c_char, subtitle: *const c_char,
+) -> u32 {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let mut li = ListItemWidget::default();
+    if !title.is_null() {
+        if let Ok(s) = std::ffi::CStr::from_ptr(title).to_str() {
+            let _ = li.title.push_str(s);
+        }
+    }
+    if !subtitle.is_null() {
+        if let Ok(s) = std::ffi::CStr::from_ptr(subtitle).to_str() {
+            let _ = li.subtitle.push_str(s);
+        }
+    }
+    match state.tree.add_child(parent as WidgetId, Widget::ListItem(li)) {
+        Some(id) => { state.dirty = true; id as u32 }
+        None => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tk_wm_widget_create_progress_bar(parent: u32, value: i32) -> u32 {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let mut pb = ProgressBarWidget::default();
+    pb.value = (value as u8).min(100);
+    match state.tree.add_child(parent as WidgetId, Widget::ProgressBar(pb)) {
+        Some(id) => { state.dirty = true; id as u32 }
+        None => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tk_wm_widget_create_divider(parent: u32) -> u32 {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    match state.tree.add_child(parent as WidgetId, Widget::Divider(DividerWidget::default())) {
+        Some(id) => { state.dirty = true; id as u32 }
+        None => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tk_wm_widget_create_spacer(parent: u32) -> u32 {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let mut sp = SpacerWidget::default();
+    sp.common.height_hint = SizeHint::Flex(1.0);
+    match state.tree.add_child(parent as WidgetId, Widget::Spacer(sp)) {
+        Some(id) => { state.dirty = true; id as u32 }
+        None => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tk_wm_widget_create_status_bar(
+    parent: u32, left: *const c_char, center: *const c_char, right: *const c_char,
+) -> u32 {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let mut sb = StatusBarWidget::default();
+    if !left.is_null() {
+        if let Ok(s) = std::ffi::CStr::from_ptr(left).to_str() { let _ = sb.left_text.push_str(s); }
+    }
+    if !center.is_null() {
+        if let Ok(s) = std::ffi::CStr::from_ptr(center).to_str() { let _ = sb.center_text.push_str(s); }
+    }
+    if !right.is_null() {
+        if let Ok(s) = std::ffi::CStr::from_ptr(right).to_str() { let _ = sb.right_text.push_str(s); }
+    }
+    match state.tree.add_child(parent as WidgetId, Widget::StatusBar(sb)) {
+        Some(id) => { state.dirty = true; id as u32 }
+        None => 0,
+    }
+}
+
+/// Set the progress bar value (0-100).
+#[no_mangle]
+pub extern "C" fn tk_wm_widget_set_progress(widget: u32, value: i32) {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return };
+    if let Some(Widget::ProgressBar(pb)) = state.tree.get_mut(widget as WidgetId) {
+        pb.value = (value as u8).min(100);
+        pb.common.dirty = true;
+        state.dirty = true;
+    }
+}
+
+/// Set the list item badge text.
+#[no_mangle]
+pub unsafe extern "C" fn tk_wm_widget_set_badge(widget: u32, badge: *const c_char) {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return };
+    if let Some(Widget::ListItem(li)) = state.tree.get_mut(widget as WidgetId) {
+        li.badge.clear();
+        if !badge.is_null() {
+            if let Ok(s) = std::ffi::CStr::from_ptr(badge).to_str() {
+                let _ = li.badge.push_str(s);
+            }
+        }
+        li.common.dirty = true;
+        state.dirty = true;
+    }
+}
+
+/// Set list item selected state.
+#[no_mangle]
+pub extern "C" fn tk_wm_widget_set_selected(widget: u32, selected: bool) {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() { Some(s) => s, None => return };
+    if let Some(Widget::ListItem(li)) = state.tree.get_mut(widget as WidgetId) {
+        li.selected = selected;
+        li.common.dirty = true;
+        state.dirty = true;
     }
 }
 
