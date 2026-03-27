@@ -40,11 +40,13 @@
         <div class="nav-label">Development</div>
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
-        <a href="drivers.html">Driver Reference</a>
+
+        <div class="nav-label">Reference</div>
         <a href="devices.html">Devices</a>
+        <a href="drivers.html">Drivers</a>
+        <a href="kernel-modules.html">Kernel Modules</a>
 
         <div class="nav-label">System</div>
-        <a href="kernel-modules.html">Kernel Modules</a>
         <a href="app-store.html">App Store</a>
         <a href="security.html">Security &amp; Signing</a>
         <a href="recovery.html">Recovery OS</a>
@@ -57,7 +59,7 @@
     <div class="page-header">
       <h1>ThistleOS</h1>
       <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 14 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6, H2 (RISC-V).</p>
-      <a href="https://github.com/wan0net/esp32-os" class="edit-link">
+      <a href="https://github.com/wan0net/thistle-os" class="edit-link">
         &#9998; Edit on GitHub
       </a>
     </div>
@@ -88,7 +90,7 @@
     <p>Prerequisites: <a href="https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/">ESP-IDF v5.3+</a> installed and on your <code>PATH</code>.</p>
 
     <pre><code><span class="tok-comment"># Clone the repo</span>
-git clone https://github.com/wan0net/esp32-os
+git clone https://github.com/wan0net/thistle-os
 cd esp32-os
 
 <span class="tok-comment"># Build for the default board (T-Deck Pro)</span>
@@ -168,7 +170,7 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
 
     <div class="page-footer">
       <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
-      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
     </div>
   </main>
 </div>

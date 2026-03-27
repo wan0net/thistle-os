@@ -40,7 +40,6 @@
         <div class="nav-label">Development</div>
         <a href="app-development.html">Building Apps</a>
         <a href="driver-development.html">Building Drivers</a>
-        <a href="drivers.html">Driver Reference</a>
         <a href="devices.html" class="active">Devices</a>
 
         <div class="nav-label">System</div>
@@ -57,7 +56,7 @@
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Devices</div>
       <h1>Devices</h1>
       <p class="lead">ThistleOS runs on the ESP32 chip family across 10 supported boards. One firmware binary per architecture. Hardware drivers are auto-detected by the Recovery OS via I2C/SPI/UART scanning and downloaded from the catalog. This page also covers how to add a new board.</p>
-      <a href="https://github.com/wan0net/esp32-os/blob/main/docs/devices.html" class="edit-link">&#9998; Edit on GitHub</a>
+      <a href="https://github.com/wan0net/thistle-os/blob/main/docs/devices.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
     <h2>Device overview</h2>
@@ -180,233 +179,14 @@
       Recovery identifies hardware by component detection, not by board name. A new board with a TCA8418 keyboard and ST7789 display will automatically get the correct keyboard and LCD drivers without any manual configuration.
     </div>
 
-    <h2>Adding a New Board</h2>
-
-    <h3>What you need to port ThistleOS</h3>
-    <p>Before writing any code, gather:</p>
-    <ul>
-      <li>The target chip variant (ESP32-S3 is required; Xtensa LX7 ABI must match)</li>
-      <li>Which peripherals are present and which drivers they need</li>
-      <li>All relevant GPIO pin numbers</li>
-      <li>I2C addresses for each I2C device</li>
-      <li>SPI host (SPI2_HOST or SPI3_HOST) and MOSI/MISO/SCLK pins</li>
-      <li>UART number for GPS (if present)</li>
-    </ul>
-
-    <div class="callout warn">
-      <div class="callout-title">ESP32-S3 only</div>
-      The app and driver ELF format targets the Xtensa LX7 ABI. ThistleOS currently does not support RISC-V ESP32 variants (C3, C6, H2). The kernel, drivers, and apps must all be compiled for the same ABI.
-    </div>
-
-    <h3>Step-by-step: adding a new board</h3>
-
-    <h4>1. Create the component directory</h4>
-    <pre><code>mkdir -p components/board_myboard/include
-mkdir -p components/board_myboard/src</code></pre>
-
-    <h4>2. Write the board header</h4>
-    <p>The header defines all pin numbers and hardware constants. Use the T-Deck Pro header as a template:</p>
-
-    <pre><code><span class="tok-comment">// components/board_myboard/include/board_myboard.h</span>
-#pragma once
-
-#include <span class="tok-string">"driver/gpio.h"</span>
-#include <span class="tok-string">"driver/spi_master.h"</span>
-#include <span class="tok-string">"driver/i2c_master.h"</span>
-
-<span class="tok-comment">/* === SPI Bus === */</span>
-<span class="tok-macro">#define BOARD_SPI_HOST</span>   SPI2_HOST
-<span class="tok-macro">#define BOARD_SPI_MOSI</span>   GPIO_NUM_11
-<span class="tok-macro">#define BOARD_SPI_MISO</span>   GPIO_NUM_13
-<span class="tok-macro">#define BOARD_SPI_SCLK</span>   GPIO_NUM_12
-
-<span class="tok-comment">/* === LCD (ST7789) === */</span>
-<span class="tok-macro">#define BOARD_LCD_CS</span>     GPIO_NUM_10
-<span class="tok-macro">#define BOARD_LCD_DC</span>     GPIO_NUM_9
-<span class="tok-macro">#define BOARD_LCD_RST</span>    GPIO_NUM_8
-<span class="tok-macro">#define BOARD_LCD_BL</span>     GPIO_NUM_7
-
-<span class="tok-comment">/* === LoRa Radio (SX1262) === */</span>
-<span class="tok-macro">#define BOARD_LORA_CS</span>    GPIO_NUM_6
-<span class="tok-macro">#define BOARD_LORA_RST</span>   GPIO_NUM_5
-<span class="tok-macro">#define BOARD_LORA_BUSY</span>  GPIO_NUM_4
-<span class="tok-macro">#define BOARD_LORA_DIO1</span>  GPIO_NUM_3
-
-<span class="tok-comment">/* === I2C Bus === */</span>
-<span class="tok-macro">#define BOARD_I2C_PORT</span>   I2C_NUM_0
-<span class="tok-macro">#define BOARD_I2C_SDA</span>    GPIO_NUM_21
-<span class="tok-macro">#define BOARD_I2C_SCL</span>    GPIO_NUM_22
-<span class="tok-macro">#define BOARD_I2C_FREQ_HZ</span> 400000
-
-<span class="tok-comment">/* === SD Card === */</span>
-<span class="tok-macro">#define BOARD_SD_CS</span>      GPIO_NUM_2
-
-<span class="tok-comment">/* === Display dimensions === */</span>
-<span class="tok-macro">#define BOARD_DISPLAY_WIDTH</span>  240
-<span class="tok-macro">#define BOARD_DISPLAY_HEIGHT</span> 135</code></pre>
-
-    <h4>3. Write the board source</h4>
-    <p>The source file implements <code>board_init()</code> — the one function the kernel calls. It initializes buses and registers drivers with the HAL:</p>
-
-    <pre><code><span class="tok-comment">// components/board_myboard/src/board_myboard.c</span>
-#include <span class="tok-string">"board_myboard.h"</span>
-#include <span class="tok-string">"hal/board.h"</span>
-#include <span class="tok-string">"drv_lcd_st7789.h"</span>
-#include <span class="tok-string">"drv_radio_sx1262.h"</span>
-#include <span class="tok-string">"drv_sdcard.h"</span>
-#include <span class="tok-string">"esp_log.h"</span>
-
-<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *TAG = <span class="tok-string">"board"</span>;
-
-<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">lcd_st7789_config_t</span> lcd_cfg = {
-    .spi_host    = <span class="tok-macro">BOARD_SPI_HOST</span>,
-    .pin_cs      = <span class="tok-macro">BOARD_LCD_CS</span>,
-    .pin_dc      = <span class="tok-macro">BOARD_LCD_DC</span>,
-    .pin_rst     = <span class="tok-macro">BOARD_LCD_RST</span>,
-    .pin_backlight = <span class="tok-macro">BOARD_LCD_BL</span>,
-    .spi_clock_hz  = 40000000,
-    .width         = <span class="tok-macro">BOARD_DISPLAY_WIDTH</span>,
-    .height        = <span class="tok-macro">BOARD_DISPLAY_HEIGHT</span>,
-};
-
-<span class="tok-keyword">static</span> <span class="tok-keyword">const</span> <span class="tok-type">sdcard_config_t</span> sd_cfg = {
-    .spi_host    = <span class="tok-macro">BOARD_SPI_HOST</span>,
-    .pin_cs      = <span class="tok-macro">BOARD_SD_CS</span>,
-    .mount_point = <span class="tok-string">"/sdcard"</span>,
-    .max_files   = 5,
-};
-
-<span class="tok-type">esp_err_t</span> <span class="tok-fn">board_init</span>(<span class="tok-keyword">void</span>)
-{
-    <span class="tok-type">esp_err_t</span> ret;
-    <span class="tok-macro">ESP_LOGI</span>(TAG, <span class="tok-string">"Initializing myboard"</span>);
-
-    <span class="tok-comment">// 1. Initialize SPI bus (shared by LCD, radio, SD)</span>
-    <span class="tok-type">spi_bus_config_t</span> spi = {
-        .mosi_io_num = <span class="tok-macro">BOARD_SPI_MOSI</span>,
-        .miso_io_num = <span class="tok-macro">BOARD_SPI_MISO</span>,
-        .sclk_io_num = <span class="tok-macro">BOARD_SPI_SCLK</span>,
-        .quadwp_io_num = -1, .quadhd_io_num = -1,
-        .max_transfer_sz = <span class="tok-macro">BOARD_DISPLAY_WIDTH</span> * <span class="tok-macro">BOARD_DISPLAY_HEIGHT</span> * 2,
-    };
-    ret = <span class="tok-fn">spi_bus_initialize</span>(<span class="tok-macro">BOARD_SPI_HOST</span>, &amp;spi, <span class="tok-macro">SPI_DMA_CH_AUTO</span>);
-    if (ret != <span class="tok-macro">ESP_OK</span>) <span class="tok-keyword">return</span> ret;
-
-    <span class="tok-comment">// 2. Set board identity</span>
-    <span class="tok-fn">hal_set_board_name</span>(<span class="tok-string">"MyBoard v1.0"</span>);
-
-    <span class="tok-comment">// 3. Register drivers</span>
-    <span class="tok-fn">hal_display_register</span>(<span class="tok-fn">drv_lcd_st7789_get</span>(), &amp;lcd_cfg);
-    <span class="tok-fn">hal_radio_register</span>(<span class="tok-fn">drv_radio_sx1262_get</span>(), <span class="tok-macro">NULL</span>);
-    <span class="tok-fn">hal_storage_register</span>(<span class="tok-fn">drv_sdcard_get</span>(), &amp;sd_cfg);
-
-    <span class="tok-macro">ESP_LOGI</span>(TAG, <span class="tok-string">"myboard initialized"</span>);
-    <span class="tok-keyword">return</span> <span class="tok-macro">ESP_OK</span>;
-}</code></pre>
-
-    <h4>4. CMakeLists.txt</h4>
-    <p>List each driver component you use in <code>REQUIRES</code>. The build system uses this to pull in the right driver code:</p>
-
-    <pre><code>idf_component_register(
-    SRCS     <span class="tok-string">"src/board_myboard.c"</span>
-    INCLUDE_DIRS <span class="tok-string">"include"</span>
-    REQUIRES
-        thistle_hal
-        drv_lcd_st7789
-        drv_radio_sx1262
-        drv_sdcard
-        driver       <span class="tok-comment"># ESP-IDF "driver" component for GPIO/SPI/I2C</span>
-)</code></pre>
-
-    <h4>5. Select the board in the top-level CMakeLists.txt</h4>
-    <p>The project-level CMakeLists.txt sets which board component to include. Change the <code>BOARD_COMPONENT</code> variable:</p>
-
-    <pre><code><span class="tok-comment"># In the root CMakeLists.txt — change this to your board</span>
-set(BOARD_COMPONENT <span class="tok-string">"board_myboard"</span>)
-
-<span class="tok-comment"># The kernel's driver_manager calls board_init() which is
-# provided by whichever board_* component is selected.</span>
-list(APPEND EXTRA_COMPONENT_DIRS <span class="tok-string">"components/${BOARD_COMPONENT}"</span>)</code></pre>
-
-    <h3>T-Deck Pro pin reference</h3>
-    <p>For reference, the LilyGo T-Deck Pro pin assignments as defined in <code>components/board_tdeck_pro/include/board_tdeck_pro.h</code>:</p>
-
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Peripheral</th><th>Signal</th><th>GPIO</th></tr></thead>
-        <tbody>
-          <tr><td rowspan="3">SPI bus (shared)</td><td>MOSI</td><td>41</td></tr>
-          <tr><td>MISO</td><td>38</td></tr>
-          <tr><td>SCLK</td><td>40</td></tr>
-          <tr><td rowspan="4">E-Paper (GDEQ031T10)</td><td>CS</td><td>42</td></tr>
-          <tr><td>DC</td><td>1</td></tr>
-          <tr><td>RST</td><td>2</td></tr>
-          <tr><td>BUSY</td><td>39</td></tr>
-          <tr><td rowspan="4">LoRa (SX1262)</td><td>CS</td><td>9</td></tr>
-          <tr><td>RST</td><td>5</td></tr>
-          <tr><td>BUSY</td><td>36</td></tr>
-          <tr><td>DIO1</td><td>45</td></tr>
-          <tr><td>SD Card</td><td>CS</td><td>43</td></tr>
-          <tr><td rowspan="2">I2C bus (shared)</td><td>SDA</td><td>18</td></tr>
-          <tr><td>SCL</td><td>8</td></tr>
-          <tr><td>Keyboard (TCA8418)</td><td>I2C addr 0x34, INT</td><td>46</td></tr>
-          <tr><td>Touch (CST328)</td><td>I2C addr 0x1A, INT/RST</td><td>16/48</td></tr>
-          <tr><td rowspan="2">GPS (MIA-M10Q) UART1</td><td>TX</td><td>17</td></tr>
-          <tr><td>RX</td><td>15</td></tr>
-          <tr><td rowspan="3">Audio I2S (PCM5102A)</td><td>BCK</td><td>7</td></tr>
-          <tr><td>WS</td><td>6</td></tr>
-          <tr><td>DATA</td><td>3</td></tr>
-          <tr><td>IMU (BHI260AP)</td><td>I2C addr 0x28, INT</td><td>14</td></tr>
-          <tr><td>Light sensor (LTR-553)</td><td>I2C addr 0x23</td><td>&mdash;</td></tr>
-          <tr><td>Battery ADC</td><td>&mdash;</td><td>4</td></tr>
-          <tr><td>Status LED</td><td>&mdash;</td><td>13</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3>Example: porting to a Heltec WiFi LoRa 32 (V3)</h3>
-    <p>The Heltec WiFi LoRa 32 V3 is an ESP32-S3 board with an SSD1306 OLED display and SX1262 radio — a popular choice for LoRa projects. Here is a sketch of the port:</p>
-
-    <p><strong>What it has:</strong></p>
-    <ul>
-      <li>0.96" SSD1306 OLED (128×64, I2C)</li>
-      <li>SX1262 LoRa radio (SPI)</li>
-      <li>No keyboard, no touch, no GPS, no audio</li>
-      <li>No SD card slot (apps would need to be compiled in)</li>
-    </ul>
-
-    <p><strong>What to write:</strong></p>
-    <ul>
-      <li>A new <code>drv_oled_ssd1306</code> display driver implementing <code>hal_display_driver_t</code> using I2C commands</li>
-      <li>A <code>board_heltec_lora32v3</code> component with the correct GPIO numbers</li>
-      <li>Because there is no SD card, apps must be compiled into the firmware as built-in apps</li>
-    </ul>
-
-    <pre><code><span class="tok-comment">// board_heltec_lora32v3/include/board_heltec_lora32v3.h (sketch)</span>
-<span class="tok-macro">#define BOARD_I2C_SDA</span>    GPIO_NUM_17
-<span class="tok-macro">#define BOARD_I2C_SCL</span>    GPIO_NUM_18
-<span class="tok-macro">#define BOARD_OLED_ADDR</span>  0x3C
-<span class="tok-macro">#define BOARD_OLED_RST</span>   GPIO_NUM_21
-
-<span class="tok-macro">#define BOARD_SPI_MOSI</span>   GPIO_NUM_10
-<span class="tok-macro">#define BOARD_SPI_MISO</span>   GPIO_NUM_11
-<span class="tok-macro">#define BOARD_SPI_SCLK</span>   GPIO_NUM_9
-<span class="tok-macro">#define BOARD_LORA_CS</span>    GPIO_NUM_8
-<span class="tok-macro">#define BOARD_LORA_RST</span>   GPIO_NUM_12
-<span class="tok-macro">#define BOARD_LORA_BUSY</span>  GPIO_NUM_13
-<span class="tok-macro">#define BOARD_LORA_DIO1</span>  GPIO_NUM_14
-
-<span class="tok-macro">#define BOARD_DISPLAY_WIDTH</span>  128
-<span class="tok-macro">#define BOARD_DISPLAY_HEIGHT</span> 64</code></pre>
-
     <div class="callout info">
-      <div class="callout-title">Contributions welcome</div>
-      If you port ThistleOS to a new board, please open a pull request. Include the board component, a short description of the hardware, and any driver stubs that need finishing.
+      <div class="callout-title">Want to add a new device?</div>
+      See the <a href="driver-development.html">Building Drivers</a> guide for step-by-step instructions on creating board.json configs and porting ThistleOS to new hardware.
     </div>
 
     <div class="page-footer">
       <span>ThistleOS &mdash; BSD 3-Clause</span>
-      <a href="https://github.com/wan0net/esp32-os">GitHub</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
     </div>
   </main>
 </div>
