@@ -109,6 +109,8 @@ extern "C" {
     fn driver_loader_scan_and_load() -> i32;
     fn elf_loader_init() -> i32;
     fn ota_init() -> i32;
+    fn drv_crypto_mbedtls_get() -> *const std::os::raw::c_void;
+    fn hal_crypto_register(driver: *const std::os::raw::c_void) -> i32;
     fn wifi_manager_init() -> i32;
     fn net_manager_register_wifi();
 }
@@ -148,6 +150,9 @@ pub extern "C" fn kernel_init() -> i32 {
     // Syscall table (C for now)
     let ret = unsafe { syscall_table_init() };
     if ret != ESP_OK { return ret; }
+
+    // Register mbedtls hardware-accelerated crypto driver (board-independent)
+    unsafe { hal_crypto_register(drv_crypto_mbedtls_get()); }
 
     // Board config: reads board.json, inits buses, loads drivers
     let ret = unsafe { board_config_init(std::ptr::null()) };

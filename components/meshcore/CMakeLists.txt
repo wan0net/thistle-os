@@ -37,7 +37,7 @@ idf_component_register(
         "include"
         "${MESHCORE_DIR}"
         "${MESHCORE_DIR}/helpers"
-    REQUIRES thistle_hal kernel driver esp_timer mbedtls
+    REQUIRES thistle_hal kernel driver esp_timer
 )
 
 # Suppress warnings in third-party MeshCore code

@@ -1,33 +1,59 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// SHA256.h stub — wraps mbedtls SHA-256 for MeshCore on ESP-IDF
+// SHA256.h — MeshCore SHA-256/HMAC-SHA256 via ThistleOS kernel crypto syscalls.
 #pragma once
 
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include "mbedtls/sha256.h"
+
+extern "C" {
+    int thistle_crypto_sha256(const uint8_t *data, size_t len, uint8_t *hash_out);
+    int thistle_crypto_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, uint8_t *mac_out);
+}
 
 class SHA256 {
-    mbedtls_sha256_context _ctx;
+    // Buffer for accumulating update() data.
+    // MeshCore packets are small; 512 bytes is plenty.
+    uint8_t _buf[512];
+    size_t _buf_len;
     uint8_t _hash[32];
+
+    // HMAC state
+    uint8_t _hmac_key[64];
+    size_t _hmac_key_len;
+    bool _hmac_mode;
+
 public:
     static const size_t HASH_SIZE = 32;
 
-    SHA256() { mbedtls_sha256_init(&_ctx); }
-    ~SHA256() { mbedtls_sha256_free(&_ctx); }
+    SHA256() : _buf_len(0), _hmac_key_len(0), _hmac_mode(false) {
+        memset(_hash, 0, sizeof(_hash));
+    }
 
     void reset() {
-        mbedtls_sha256_free(&_ctx);
-        mbedtls_sha256_init(&_ctx);
-        mbedtls_sha256_starts(&_ctx, 0); // 0 = SHA-256 (not SHA-224)
+        _buf_len = 0;
+        _hmac_mode = false;
+        memset(_hash, 0, sizeof(_hash));
     }
 
     void update(const void* data, size_t len) {
-        mbedtls_sha256_update(&_ctx, (const unsigned char*)data, len);
+        const uint8_t* src = (const uint8_t*)data;
+        size_t to_copy = len;
+        if (_buf_len + to_copy > sizeof(_buf)) {
+            to_copy = sizeof(_buf) - _buf_len; // Truncate if overflow
+        }
+        if (to_copy > 0) {
+            memcpy(_buf + _buf_len, src, to_copy);
+            _buf_len += to_copy;
+        }
     }
 
-    void finalize(uint8_t* hash, size_t hash_len) {
-        mbedtls_sha256_finish(&_ctx, _hash);
+    void finalize(void* hash, size_t hash_len) {
+        if (_hmac_mode) {
+            thistle_crypto_hmac_sha256(_hmac_key, _hmac_key_len, _buf, _buf_len, _hash);
+        } else {
+            thistle_crypto_sha256(_buf, _buf_len, _hash);
+        }
         size_t n = (hash_len < 32) ? hash_len : 32;
         memcpy(hash, _hash, n);
     }
@@ -36,38 +62,17 @@ public:
 
     // HMAC-SHA256 support (Arduino Crypto API)
     void resetHMAC(const uint8_t* key, size_t key_len) {
-        // HMAC = H((K ^ opad) || H((K ^ ipad) || message))
-        // For simplicity, use mbedtls md for HMAC
         reset();
-        // Store key for finalize — simplified: just reset with key XOR ipad
-        uint8_t k_ipad[64];
-        memset(k_ipad, 0x36, 64);
-        size_t kl = (key_len > 64) ? 64 : key_len;
-        for (size_t i = 0; i < kl; i++) k_ipad[i] ^= key[i];
-        update(k_ipad, 64);
-        // Store key for opad in _opad_key
-        memset(_opad_key, 0x5c, 64);
-        for (size_t i = 0; i < kl; i++) _opad_key[i] ^= key[i];
+        _hmac_mode = true;
+        _hmac_key_len = (key_len > 64) ? 64 : key_len;
+        memcpy(_hmac_key, key, _hmac_key_len);
     }
 
-    void finalizeHMAC(const uint8_t* key, size_t key_len, uint8_t* hmac_out, size_t hmac_len) {
+    void finalizeHMAC(const uint8_t* key, size_t key_len, void* hmac_out, size_t hmac_len) {
         (void)key; (void)key_len;
-        // Finish inner hash
-        uint8_t inner[32];
-        mbedtls_sha256_finish(&_ctx, inner);
-
-        // Outer hash: H(K ^ opad || inner_hash)
-        mbedtls_sha256_free(&_ctx);
-        mbedtls_sha256_init(&_ctx);
-        mbedtls_sha256_starts(&_ctx, 0);
-        mbedtls_sha256_update(&_ctx, _opad_key, 64);
-        mbedtls_sha256_update(&_ctx, inner, 32);
-        mbedtls_sha256_finish(&_ctx, _hash);
-
+        // Use stored key from resetHMAC
+        thistle_crypto_hmac_sha256(_hmac_key, _hmac_key_len, _buf, _buf_len, _hash);
         size_t n = (hmac_len < 32) ? hmac_len : 32;
         memcpy(hmac_out, _hash, n);
     }
-
-private:
-    uint8_t _opad_key[64];
 };
