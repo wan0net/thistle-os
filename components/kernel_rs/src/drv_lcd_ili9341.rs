@@ -59,8 +59,11 @@ const ILI9341_CMD_3GAMMA_DIS: u8       = 0xF2;
 const ILI9341_CMD_GAMMA_SET: u8        = 0x26;
 const ILI9341_CMD_POS_GAMMA: u8        = 0xE0;
 const ILI9341_CMD_NEG_GAMMA: u8        = 0xE1;
+const ILI9341_CMD_SLEEP_IN: u8         = 0x10;
 const ILI9341_CMD_SLEEP_OUT: u8        = 0x11;
+const ILI9341_CMD_DISPLAY_OFF: u8      = 0x28;
 const ILI9341_CMD_DISPLAY_ON: u8       = 0x29;
+const ILI9341_CMD_ENTRY_MODE: u8       = 0xB7;
 
 // -- Configuration struct -----------------------------------------------------
 
@@ -245,6 +248,9 @@ mod platform {
         pub fn ledc_channel_config(cfg: *const LedcChannelConfig) -> i32;
         pub fn ledc_set_duty(mode: i32, channel: i32, duty: u32) -> i32;
         pub fn ledc_update_duty(mode: i32, channel: i32) -> i32;
+
+        // FreeRTOS
+        pub fn vTaskDelay(ticks: u32);
     }
 }
 
@@ -449,6 +455,23 @@ unsafe fn lcd_io_tx_param(io: *mut c_void, cmd: u8, params: &[u8]) -> i32 {
     }
 }
 
+/// Delay for approximately `ms` milliseconds.
+/// On ESP-IDF, uses vTaskDelay (assumes configTICK_RATE_HZ = 100, so 1 tick = 10ms).
+/// On simulator, this is a no-op.
+#[inline]
+unsafe fn delay_ms(ms: u32) {
+    #[cfg(target_os = "espidf")]
+    {
+        // Round up: (ms + 9) / 10 gives ceiling ticks at 100 Hz
+        let ticks = (ms + 9) / 10;
+        platform::vTaskDelay(ticks);
+    }
+    #[cfg(not(target_os = "espidf"))]
+    {
+        let _ = ms;
+    }
+}
+
 // -- ILI9341 init command sequence --------------------------------------------
 
 /// Send the ILI9341-specific initialization commands via SPI IO.
@@ -458,11 +481,11 @@ unsafe fn lcd_io_tx_param(io: *mut c_void, cmd: u8, params: &[u8]) -> i32 {
 /// NOT require color inversion.
 unsafe fn ili9341_send_init_commands(io: *mut c_void) -> i32 {
     // Power control B
-    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_CTRL_B, &[0x00, 0xC1, 0x30]);
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_CTRL_B, &[0x00, 0xAA, 0xE0]);
     if ret != ESP_OK { return ret; }
 
     // Power on sequence control
-    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_ON_SEQ, &[0x64, 0x03, 0x12, 0x81]);
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_ON_SEQ, &[0x67, 0x03, 0x12, 0x81]);
     if ret != ESP_OK { return ret; }
 
     // Driver timing control A
@@ -486,11 +509,11 @@ unsafe fn ili9341_send_init_commands(io: *mut c_void) -> i32 {
     if ret != ESP_OK { return ret; }
 
     // Power control 2
-    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_CTRL2, &[0x10]);
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_POWER_CTRL2, &[0x11]);
     if ret != ESP_OK { return ret; }
 
     // VCOM control 1
-    let ret = lcd_io_tx_param(io, ILI9341_CMD_VCOM_CTRL1, &[0x3E, 0x28]);
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_VCOM_CTRL1, &[0x43, 0x4C]);
     if ret != ESP_OK { return ret; }
 
     // VCOM control 2
@@ -505,12 +528,16 @@ unsafe fn ili9341_send_init_commands(io: *mut c_void) -> i32 {
     let ret = lcd_io_tx_param(io, ILI9341_CMD_PIXEL_FMT, &[0x55]);
     if ret != ESP_OK { return ret; }
 
-    // Frame rate control: 79 Hz
-    let ret = lcd_io_tx_param(io, ILI9341_CMD_FRAME_RATE, &[0x00, 0x18]);
+    // Frame rate control: 70 Hz
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_FRAME_RATE, &[0x00, 0x1B]);
     if ret != ESP_OK { return ret; }
 
     // Display function control
     let ret = lcd_io_tx_param(io, ILI9341_CMD_DISP_FUNC, &[0x08, 0x82, 0x27]);
+    if ret != ESP_OK { return ret; }
+
+    // Entry mode set
+    let ret = lcd_io_tx_param(io, ILI9341_CMD_ENTRY_MODE, &[0x07]);
     if ret != ESP_OK { return ret; }
 
     // 3Gamma function disable
@@ -521,23 +548,26 @@ unsafe fn ili9341_send_init_commands(io: *mut c_void) -> i32 {
     let ret = lcd_io_tx_param(io, ILI9341_CMD_GAMMA_SET, &[0x01]);
     if ret != ESP_OK { return ret; }
 
-    // Positive gamma correction
+    // Positive gamma correction (Espressif ILI9341 reference values)
     let ret = lcd_io_tx_param(io, ILI9341_CMD_POS_GAMMA, &[
-        0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1,
-        0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00,
+        0x1F, 0x36, 0x36, 0x3A, 0x0C, 0x05, 0x4F, 0x87,
+        0x3C, 0x08, 0x11, 0x35, 0x19, 0x13, 0x00,
     ]);
     if ret != ESP_OK { return ret; }
 
-    // Negative gamma correction
+    // Negative gamma correction (Espressif ILI9341 reference values)
     let ret = lcd_io_tx_param(io, ILI9341_CMD_NEG_GAMMA, &[
-        0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1,
-        0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
+        0x00, 0x2C, 0x2E, 0x3F, 0x0F, 0x04, 0x51, 0x76,
+        0x43, 0x09, 0x12, 0x3B, 0x25, 0x22, 0x00,
     ]);
     if ret != ESP_OK { return ret; }
 
     // Sleep out
     let ret = lcd_io_tx_param(io, ILI9341_CMD_SLEEP_OUT, &[]);
     if ret != ESP_OK { return ret; }
+
+    // ILI9341 datasheet requires >= 120ms delay after Sleep Out before Display On
+    delay_ms(120);
 
     // Display on
     lcd_io_tx_param(io, ILI9341_CMD_DISPLAY_ON, &[])
@@ -599,10 +629,21 @@ pub unsafe extern "C" fn ili9341_init(config: *const c_void) -> i32 {
     }
     s.panel = panel;
 
-    // Hardware reset
-    lcd_panel_reset(s.panel);
+    // Hardware reset (toggles RST pin via esp_lcd)
+    let ret = lcd_panel_reset(s.panel);
+    if ret != ESP_OK {
+        lcd_panel_del(s.panel);
+        lcd_panel_io_del(s.io);
+        s.panel = std::ptr::null_mut();
+        s.io = std::ptr::null_mut();
+        return ret;
+    }
 
-    // Send ILI9341-specific initialization commands
+    // Send ILI9341-specific initialization commands.
+    // We intentionally skip lcd_panel_init() — that would run the ST7789
+    // built-in init sequence which overwrites our ILI9341-specific commands.
+    // Our custom init commands handle everything (power, gamma, timing, sleep
+    // out, display on).
     let ret = ili9341_send_init_commands(s.io);
     if ret != ESP_OK {
         lcd_panel_del(s.panel);
@@ -612,12 +653,7 @@ pub unsafe extern "C" fn ili9341_init(config: *const c_void) -> i32 {
         return ret;
     }
 
-    // Initialize panel (generic esp_lcd init)
-    lcd_panel_init(s.panel);
-
     // ILI9341 does NOT need color inversion (unlike ST7789)
-
-    lcd_panel_disp_on_off(s.panel, true);
 
     // Turn backlight on at full brightness
     let ret = bl_set_duty(s.cfg.pin_bl, 100);
@@ -697,8 +733,8 @@ pub unsafe extern "C" fn ili9341_set_brightness(percent: u8) -> i32 {
 
 /// Enter or exit display sleep.
 ///
-/// `enter = true`:  display off + backlight off.
-/// `enter = false`: display on + restore backlight.
+/// `enter = true`:  Display Off (0x28) + Sleep In (0x10) + backlight off.
+/// `enter = false`: Sleep Out (0x11) + 120ms delay + Display On (0x29) + restore backlight.
 pub unsafe extern "C" fn ili9341_sleep(enter: bool) -> i32 {
     let s = state();
     if !s.initialized {
@@ -706,12 +742,21 @@ pub unsafe extern "C" fn ili9341_sleep(enter: bool) -> i32 {
     }
 
     if enter {
-        lcd_panel_disp_on_off(s.panel, false);
+        // Display Off, then Sleep In
+        let ret = lcd_io_tx_param(s.io, ILI9341_CMD_DISPLAY_OFF, &[]);
+        if ret != ESP_OK { return ret; }
+        let ret = lcd_io_tx_param(s.io, ILI9341_CMD_SLEEP_IN, &[]);
+        if ret != ESP_OK { return ret; }
         if s.cfg.pin_bl != GPIO_NUM_NC {
             bl_set_duty(s.cfg.pin_bl, 0);
         }
     } else {
-        lcd_panel_disp_on_off(s.panel, true);
+        // Sleep Out, wait 120ms, then Display On
+        let ret = lcd_io_tx_param(s.io, ILI9341_CMD_SLEEP_OUT, &[]);
+        if ret != ESP_OK { return ret; }
+        delay_ms(120);
+        let ret = lcd_io_tx_param(s.io, ILI9341_CMD_DISPLAY_ON, &[]);
+        if ret != ESP_OK { return ret; }
         if s.cfg.pin_bl != GPIO_NUM_NC {
             bl_set_duty(s.cfg.pin_bl, s.brightness);
         }

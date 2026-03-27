@@ -160,6 +160,9 @@ struct TouchState {
     last_x: u16,
     last_y: u16,
     initialized: bool,
+    pending_down: bool,          // debounce: first valid reading pending confirmation
+    pending_x: i32,              // debounce: raw X from first reading
+    pending_y: i32,              // debounce: raw Y from first reading
 }
 
 // SAFETY: The state is guarded by the single-threaded init / poll contract
@@ -196,6 +199,9 @@ impl TouchState {
             last_x: 0,
             last_y: 0,
             initialized: false,
+            pending_down: false,
+            pending_x: 0,
+            pending_y: 0,
         }
     }
 }
@@ -402,55 +408,51 @@ unsafe fn xpt2046_read_channel(cmd: u8) -> i32 {
     raw & 0xFFF // Mask to 12 bits
 }
 
-/// Read raw X position, averaged over SAMPLE_COUNT readings.
+/// Read raw X and Y positions, interleaved and averaged over SAMPLE_COUNT
+/// readings. Samples outside 50..=4045 are rejected as outliers.
+///
+/// Returns `(-1, -1)` if no valid samples remain after rejection.
 ///
 /// # Safety
 /// S_TOUCH.spi_dev must be valid.
-unsafe fn read_raw_x() -> i32 {
-    let mut sum: i32 = 0;
-    for _ in 0..SAMPLE_COUNT {
-        let v = xpt2046_read_channel(XPT2046_CMD_READ_X);
-        if v < 0 {
-            return -1;
-        }
-        sum += v;
-    }
-    sum / SAMPLE_COUNT as i32
-}
+unsafe fn read_raw_xy() -> (i32, i32) {
+    let mut x_sum: i32 = 0;
+    let mut y_sum: i32 = 0;
+    let mut x_count: i32 = 0;
+    let mut y_count: i32 = 0;
 
-/// Read raw Y position, averaged over SAMPLE_COUNT readings.
-///
-/// # Safety
-/// S_TOUCH.spi_dev must be valid.
-unsafe fn read_raw_y() -> i32 {
-    let mut sum: i32 = 0;
     for _ in 0..SAMPLE_COUNT {
-        let v = xpt2046_read_channel(XPT2046_CMD_READ_Y);
-        if v < 0 {
-            return -1;
+        let x = xpt2046_read_channel(XPT2046_CMD_READ_X);
+        let y = xpt2046_read_channel(XPT2046_CMD_READ_Y);
+        // Outlier rejection: valid 12-bit range excluding edges
+        if x >= 50 && x <= 4045 {
+            x_sum += x;
+            x_count += 1;
         }
-        sum += v;
+        if y >= 50 && y <= 4045 {
+            y_sum += y;
+            y_count += 1;
+        }
     }
-    sum / SAMPLE_COUNT as i32
+
+    let x_avg = if x_count > 0 { x_sum / x_count } else { -1 };
+    let y_avg = if y_count > 0 { y_sum / y_count } else { -1 };
+    (x_avg, y_avg)
 }
 
 /// Read touch pressure (Z). Returns a positive value proportional to pressure.
-/// Uses the Z1/Z2 method: pressure ~ Z1 reading (simplified).
+/// Uses the datasheet formula: pressure = Z1 + (4095 - Z2).
+/// Higher Z1 with lower Z2 means more pressure.
 ///
 /// # Safety
 /// S_TOUCH.spi_dev must be valid.
 unsafe fn read_pressure() -> i32 {
     let z1 = xpt2046_read_channel(XPT2046_CMD_READ_Z1);
-    if z1 < 0 {
-        return 0;
-    }
     let z2 = xpt2046_read_channel(XPT2046_CMD_READ_Z2);
-    if z2 < 0 {
+    if z1 < 0 || z2 < 0 {
         return 0;
     }
-    // Simplified pressure: Z1 value. Higher Z1 with lower Z2 means more pressure.
-    // For practical use, Z1 alone is a reasonable proxy.
-    z1
+    (z1 + (4095 - z2)).max(0)
 }
 
 /// Check if the touch panel is currently being pressed, using the IRQ pin
@@ -581,6 +583,9 @@ unsafe extern "C" fn xpt2046_init(config: *const c_void) -> i32 {
 
     S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
     S_TOUCH.touching = false;
+    S_TOUCH.pending_down = false;
+    S_TOUCH.pending_x = 0;
+    S_TOUCH.pending_y = 0;
 
     // ── Initialise dedicated SPI bus ────────────────────────────────────
     let bus_cfg = SpiBusConfig {
@@ -719,9 +724,27 @@ unsafe extern "C" fn xpt2046_poll() -> i32 {
     let now_ms = (esp_timer_get_time() / 1000) as u32;
 
     if is_touched() {
+        // Mask IRQ during SPI reads to prevent false triggers from PENIRQ
+        // de-asserting during ADC conversion.
+        #[cfg(target_os = "espidf")]
+        if S_TOUCH.cfg.pin_irq != GPIO_NUM_NC {
+            gpio_isr_handler_remove(S_TOUCH.cfg.pin_irq);
+        }
+
         // Read pressure first to validate touch
         let pressure = read_pressure();
+
         if pressure < S_TOUCH.cfg.pressure_threshold {
+            // Re-enable IRQ before returning
+            #[cfg(target_os = "espidf")]
+            if S_TOUCH.cfg.pin_irq != GPIO_NUM_NC {
+                gpio_isr_handler_add(
+                    S_TOUCH.cfg.pin_irq,
+                    xpt2046_isr_handler,
+                    std::ptr::null_mut(),
+                );
+            }
+
             // Below threshold — treat as no touch
             if S_TOUCH.touching {
                 S_TOUCH.touching = false;
@@ -739,16 +762,43 @@ unsafe extern "C" fn xpt2046_poll() -> i32 {
                     cb(&event, S_TOUCH.cb_data);
                 }
             }
+            S_TOUCH.pending_down = false;
             S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
             return ESP_OK;
         }
 
-        // Read raw ADC coordinates
-        let raw_x = read_raw_x();
-        let raw_y = read_raw_y();
+        // Read raw ADC coordinates (interleaved X/Y with outlier rejection)
+        let (raw_x, raw_y) = read_raw_xy();
+
+        // Re-enable IRQ after SPI reads complete
+        #[cfg(target_os = "espidf")]
+        if S_TOUCH.cfg.pin_irq != GPIO_NUM_NC {
+            gpio_isr_handler_add(
+                S_TOUCH.cfg.pin_irq,
+                xpt2046_isr_handler,
+                std::ptr::null_mut(),
+            );
+        }
+
         if raw_x < 0 || raw_y < 0 {
+            S_TOUCH.pending_down = false;
             S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
-            return ESP_OK; // SPI error, skip this cycle
+            return ESP_OK; // All samples rejected or SPI error, skip this cycle
+        }
+
+        // Pen-down debounce: require 2 consecutive valid readings before
+        // reporting TouchDown. This filters unreliable first-contact reads.
+        if !S_TOUCH.touching {
+            if !S_TOUCH.pending_down {
+                // First valid reading — store but don't emit yet
+                S_TOUCH.pending_down = true;
+                S_TOUCH.pending_x = raw_x;
+                S_TOUCH.pending_y = raw_y;
+                S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
+                return ESP_OK;
+            }
+            // Second consecutive valid reading — confirm touch down
+            S_TOUCH.pending_down = false;
         }
 
         // Calibrate and transform
@@ -776,6 +826,7 @@ unsafe extern "C" fn xpt2046_poll() -> i32 {
         }
     } else {
         // Not touched — emit TOUCH_UP if previously touching
+        S_TOUCH.pending_down = false;
         if S_TOUCH.touching {
             S_TOUCH.touching = false;
             if let Some(cb) = S_TOUCH.cb {
@@ -850,6 +901,9 @@ mod tests {
         S_TOUCH.last_x = 0;
         S_TOUCH.last_y = 0;
         S_TOUCH.initialized = false;
+        S_TOUCH.pending_down = false;
+        S_TOUCH.pending_x = 0;
+        S_TOUCH.pending_y = 0;
         clear_injected_touch();
     }
 
@@ -1169,6 +1223,13 @@ mod tests {
 
             // Inject touch at center
             inject_touch(2050, 1950, 500);
+
+            // First poll — debounce: pending but no event yet
+            assert_eq!(xpt2046_poll(), ESP_OK);
+            assert!(!S_TOUCH.touching);
+            assert_eq!(EVENT_COUNT, 0);
+
+            // Second poll — debounce confirmed, TouchDown emitted
             assert_eq!(xpt2046_poll(), ESP_OK);
             assert!(S_TOUCH.touching);
             assert_eq!(EVENT_COUNT, 1);
@@ -1197,8 +1258,10 @@ mod tests {
                 ESP_OK,
             );
 
-            // Inject touch with pressure below threshold (100)
-            inject_touch(2050, 1950, 50);
+            // Inject touch with low pressure. With formula pressure = z1 + (4095 - z2),
+            // and sim returning z1=p, z2=4095-p, effective pressure = 2*p.
+            // threshold=100, so p=40 gives effective=80 which is below threshold.
+            inject_touch(2050, 1950, 40);
             assert_eq!(xpt2046_poll(), ESP_OK);
             // IRQ shows touched but pressure is below threshold
             // is_touched() returns true (gpio level 0), but pressure < threshold
@@ -1246,6 +1309,206 @@ mod tests {
             // Should not panic
             xpt2046_deinit();
             assert!(!S_TOUCH.initialized);
+        }
+    }
+
+    // ── Outlier rejection tests ────────────────────────────────────────
+
+    #[test]
+    fn test_outlier_rejection_filters_edge_samples() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            // Values at exact boundaries (49 and 4046) should be rejected.
+            // Inject raw values below 50 — read_raw_xy returns (-1, -1).
+            inject_touch(30, 30, 500);
+            let (rx, ry) = read_raw_xy();
+            assert_eq!(rx, -1);
+            assert_eq!(ry, -1);
+
+            // Values at the valid boundary edges (50 and 4045) should pass.
+            inject_touch(50, 4045, 500);
+            let (rx, ry) = read_raw_xy();
+            assert_eq!(rx, 50);
+            assert_eq!(ry, 4045);
+
+            xpt2046_deinit();
+        }
+    }
+
+    #[test]
+    fn test_outlier_rejection_valid_center_values() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            // Normal center values should pass through unchanged.
+            inject_touch(2050, 1950, 500);
+            let (rx, ry) = read_raw_xy();
+            assert_eq!(rx, 2050);
+            assert_eq!(ry, 1950);
+
+            xpt2046_deinit();
+        }
+    }
+
+    // ── Pressure formula tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_pressure_formula_z1_plus_inverted_z2() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            // Sim: z1 = pressure_val, z2 = 4095 - pressure_val
+            // Formula: z1 + (4095 - z2) = p + (4095 - (4095 - p)) = 2*p
+            inject_touch(2050, 1950, 500);
+            let p = read_pressure();
+            assert_eq!(p, 1000); // 500 + (4095 - 3595) = 500 + 500 = 1000
+
+            // Zero pressure
+            inject_touch(2050, 1950, 0);
+            let p = read_pressure();
+            // z1=0, z2=4095: 0 + (4095-4095) = 0
+            assert_eq!(p, 0);
+
+            xpt2046_deinit();
+        }
+    }
+
+    // ── Debounce tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_debounce_requires_two_polls_for_touch_down() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            static mut EVENT_COUNT: i32 = 0;
+            static mut LAST_EVENT_TYPE: i32 = -1;
+
+            unsafe extern "C" fn debounce_cb(
+                event: *const HalInputEvent,
+                _user_data: *mut c_void,
+            ) {
+                EVENT_COUNT += 1;
+                LAST_EVENT_TYPE = (*event).event_type as i32;
+            }
+
+            EVENT_COUNT = 0;
+            LAST_EVENT_TYPE = -1;
+            xpt2046_register_callback(Some(debounce_cb), std::ptr::null_mut());
+
+            inject_touch(2050, 1950, 500);
+
+            // First poll: pending, no event
+            assert_eq!(xpt2046_poll(), ESP_OK);
+            assert!(!S_TOUCH.touching);
+            assert_eq!(EVENT_COUNT, 0);
+            assert!(S_TOUCH.pending_down);
+
+            // Second poll: confirmed, TouchDown emitted
+            assert_eq!(xpt2046_poll(), ESP_OK);
+            assert!(S_TOUCH.touching);
+            assert_eq!(EVENT_COUNT, 1);
+            assert_eq!(LAST_EVENT_TYPE, HalInputEventType::TouchDown as i32);
+
+            xpt2046_deinit();
+        }
+    }
+
+    #[test]
+    fn test_debounce_clears_on_release_before_confirm() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            static mut EVENT_COUNT: i32 = 0;
+
+            unsafe extern "C" fn debounce_clear_cb(
+                _event: *const HalInputEvent,
+                _user_data: *mut c_void,
+            ) {
+                EVENT_COUNT += 1;
+            }
+
+            EVENT_COUNT = 0;
+            xpt2046_register_callback(Some(debounce_clear_cb), std::ptr::null_mut());
+
+            // Touch then release before second poll
+            inject_touch(2050, 1950, 500);
+            assert_eq!(xpt2046_poll(), ESP_OK); // pending
+            assert!(!S_TOUCH.touching);
+            assert!(S_TOUCH.pending_down);
+
+            clear_injected_touch();
+            assert_eq!(xpt2046_poll(), ESP_OK); // release clears pending
+            assert!(!S_TOUCH.touching);
+            assert!(!S_TOUCH.pending_down);
+            assert_eq!(EVENT_COUNT, 0); // No events fired at all
+
+            xpt2046_deinit();
+        }
+    }
+
+    #[test]
+    fn test_touch_move_after_down_no_debounce() {
+        unsafe {
+            reset_state();
+            let cfg = default_config();
+            assert_eq!(
+                xpt2046_init(&cfg as *const TouchXpt2046Config as *const c_void),
+                ESP_OK,
+            );
+
+            static mut EVENT_COUNT: i32 = 0;
+            static mut LAST_EVENT_TYPE: i32 = -1;
+
+            unsafe extern "C" fn move_cb(
+                event: *const HalInputEvent,
+                _user_data: *mut c_void,
+            ) {
+                EVENT_COUNT += 1;
+                LAST_EVENT_TYPE = (*event).event_type as i32;
+            }
+
+            EVENT_COUNT = 0;
+            xpt2046_register_callback(Some(move_cb), std::ptr::null_mut());
+
+            inject_touch(2050, 1950, 500);
+            assert_eq!(xpt2046_poll(), ESP_OK); // debounce pending
+            assert_eq!(xpt2046_poll(), ESP_OK); // TouchDown
+            assert_eq!(EVENT_COUNT, 1);
+            assert_eq!(LAST_EVENT_TYPE, HalInputEventType::TouchDown as i32);
+
+            // Move — no debounce needed, fires immediately
+            inject_touch(2100, 2000, 500);
+            assert_eq!(xpt2046_poll(), ESP_OK);
+            assert_eq!(EVENT_COUNT, 2);
+            assert_eq!(LAST_EVENT_TYPE, HalInputEventType::TouchMove as i32);
+
+            xpt2046_deinit();
         }
     }
 }

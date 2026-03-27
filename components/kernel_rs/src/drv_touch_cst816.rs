@@ -31,15 +31,13 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 
 // ── Register addresses (8-bit) ───────────────────────────────────────────────
 
-const CST816_REG_GESTURE:     u8 = 0x01;
-const CST816_REG_FINGER_CNT:  u8 = 0x02;
-const CST816_REG_X_HIGH:      u8 = 0x03;
+const CST816_REG_GESTURE:        u8 = 0x01;
+const CST816_REG_FINGER_CNT:     u8 = 0x02;
+const CST816_REG_X_HIGH:         u8 = 0x03;
+const CST816_REG_CHIP_ID:        u8 = 0xA7;
+const CST816_REG_DIS_AUTO_SLEEP: u8 = 0xFE;
 
-const CST816_READ_LEN: usize = 4; // finger count + X_high + X_low + Y_high + Y_low = 5,
-                                   // but we read from REG_FINGER_CNT (0x02) for 5 bytes;
-                                   // however sequential read from 0x02 gives bytes at
-                                   // 0x02..0x06 — 5 bytes total.  We define the burst length.
-const CST816_BURST_LEN: usize = 5; // 0x02,0x03,0x04,0x05,0x06
+const CST816_BURST_LEN: usize = 6; // gesture + finger_cnt + x_hi + x_lo + y_hi + y_lo
 
 // GPIO_NUM_NC: -1 means "not connected"
 const GPIO_NUM_NC: i32 = -1;
@@ -224,6 +222,7 @@ struct TouchState {
     touching: bool,
     last_x: u16,
     last_y: u16,
+    last_gesture: u8,
     initialized: bool,
 }
 
@@ -250,6 +249,7 @@ impl TouchState {
             touching: false,
             last_x: 0,
             last_y: 0,
+            last_gesture: 0,
             initialized: false,
         }
     }
@@ -267,6 +267,17 @@ unsafe fn cst816_read_regs(reg: u8, buf: *mut u8, len: usize) -> i32 {
     i2c_master_transmit_receive(S_TOUCH.dev, &reg, 1, buf, len, 50)
 }
 
+/// Write `data` bytes to register `reg`.
+///
+/// # Safety
+/// `S_TOUCH.dev` must be a valid I2C device handle.
+unsafe fn cst816_write_reg(reg: u8, data: &[u8]) -> i32 {
+    let mut tx = [0u8; 2];
+    tx[0] = reg;
+    tx[1] = data[0];
+    i2c_master_transmit(S_TOUCH.dev, tx.as_ptr(), 2, 50)
+}
+
 // ── ISR ──────────────────────────────────────────────────────────────────────
 
 /// GPIO ISR handler — sets irq_pending so the poll loop reads I2C.
@@ -279,7 +290,7 @@ unsafe extern "C" fn cst816_isr_handler(_arg: *mut c_void) {
 
 // ── Hardware reset ─────────────────────────────────────────────────────────
 
-/// Pulse the reset pin: assert low for 20 ms, release high for 50 ms.
+/// Pulse the reset pin: assert low for 20 ms, release high for 200 ms.
 ///
 /// # Safety
 /// Calls ESP-IDF GPIO and FreeRTOS APIs.
@@ -290,7 +301,7 @@ unsafe fn cst816_hw_reset() {
     gpio_set_level(S_TOUCH.cfg.pin_rst, 0);
     vTaskDelay(ms_to_ticks(20));
     gpio_set_level(S_TOUCH.cfg.pin_rst, 1);
-    vTaskDelay(ms_to_ticks(50));
+    vTaskDelay(ms_to_ticks(200));
 }
 
 // ── HAL vtable functions ──────────────────────────────────────────────────────
@@ -348,10 +359,22 @@ unsafe extern "C" fn cst816_init(config: *const c_void) -> i32 {
         return ret;
     }
 
-    // ── Verify chip presence by reading gesture register ───────────────────
-    // On a live chip this returns 0x00 when idle; stubs return 0 as well.
+    // ── Verify chip presence by reading Chip ID register (0xA7) ────────────
+    // Unlike the gesture register, the Chip ID responds even without an
+    // active touch.
     let mut probe = 0u8;
-    let ret = cst816_read_regs(CST816_REG_GESTURE, &mut probe, 1);
+    let ret = cst816_read_regs(CST816_REG_CHIP_ID, &mut probe, 1);
+    if ret != ESP_OK {
+        i2c_master_bus_rm_device(S_TOUCH.dev);
+        S_TOUCH.dev = std::ptr::null_mut();
+        return ret;
+    }
+
+    // ── Disable auto-sleep (register 0xFE) ──────────────────────────────
+    // Without this, the controller enters standby after ~2 s idle and
+    // stops responding to I2C.
+    let disable_sleep = [0x01u8];
+    let ret = cst816_write_reg(CST816_REG_DIS_AUTO_SLEEP, &disable_sleep);
     if ret != ESP_OK {
         i2c_master_bus_rm_device(S_TOUCH.dev);
         S_TOUCH.dev = std::ptr::null_mut();
@@ -425,8 +448,8 @@ unsafe extern "C" fn cst816_register_callback(cb: HalInputCb, user_data: *mut c_
 
 /// Poll the CST816S for new touch events.
 ///
-/// The CST816S reports a single touch point.  Reads 5 bytes starting at
-/// `REG_FINGER_CNT` (0x02): [finger_count, x_high, x_low, y_high, y_low].
+/// The CST816S reports a single touch point.  Reads 6 bytes starting at
+/// `REG_GESTURE` (0x01): [gesture, finger_count, x_high, x_low, y_high, y_low].
 ///
 /// # Safety
 /// Called from C via the HAL vtable.
@@ -442,20 +465,22 @@ unsafe extern "C" fn cst816_poll() -> i32 {
         }
     }
 
-    // Read 5 bytes from REG_FINGER_CNT (0x02): [cnt, x_hi, x_lo, y_hi, y_lo]
+    // Read 6 bytes from REG_GESTURE (0x01): [gesture, cnt, x_hi, x_lo, y_hi, y_lo]
     let mut buf = [0u8; CST816_BURST_LEN];
-    let ret = cst816_read_regs(CST816_REG_FINGER_CNT, buf.as_mut_ptr(), CST816_BURST_LEN);
+    let ret = cst816_read_regs(CST816_REG_GESTURE, buf.as_mut_ptr(), CST816_BURST_LEN);
     if ret != ESP_OK {
         return ret;
     }
 
-    let finger_count = buf[0];
+    let _gesture = buf[0];
+    S_TOUCH.last_gesture = _gesture;
+    let finger_count = buf[1];
     let now_ms = (esp_timer_get_time() / 1000) as u32;
 
     if finger_count > 0 {
         // Extract 12-bit X and Y: high nibble (bits[3:0]) + low byte
-        let mut x: u16 = ((buf[1] as u16 & 0x0F) << 8) | buf[2] as u16;
-        let mut y: u16 = ((buf[3] as u16 & 0x0F) << 8) | buf[4] as u16;
+        let mut x: u16 = ((buf[2] as u16 & 0x0F) << 8) | buf[3] as u16;
+        let mut y: u16 = ((buf[4] as u16 & 0x0F) << 8) | buf[5] as u16;
 
         // Clamp to panel dimensions
         if S_TOUCH.cfg.max_x > 0 && x >= S_TOUCH.cfg.max_x {
@@ -505,7 +530,7 @@ unsafe extern "C" fn cst816_poll() -> i32 {
         }
     }
 
-    S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
+    S_TOUCH.irq_pending.swap(false, Ordering::AcqRel);
     ESP_OK
 }
 
@@ -550,6 +575,7 @@ mod tests {
         S_TOUCH.touching = false;
         S_TOUCH.last_x = 0;
         S_TOUCH.last_y = 0;
+        S_TOUCH.last_gesture = 0;
         S_TOUCH.initialized = false;
     }
 
