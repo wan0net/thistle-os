@@ -18,6 +18,8 @@ jobs:
       image: espressif/idf:v5.5
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Cache Rust ESP toolchain
         uses: actions/cache@v4
@@ -87,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Cache Rust toolchain
         uses: actions/cache@v4
@@ -125,6 +129,8 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Run Semgrep (text output for log visibility)
         run: |
@@ -195,6 +201,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
