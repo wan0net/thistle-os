@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Window Managers — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="table-interactive.js" defer></script>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/apps.html">Apps</a>
+      <a href="/thistle-os/docs/kernel-modules.html">Modules</a>
+      <a href="/thistle-os/simulator/">Simulator</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </div>
+</nav>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+
+        <div class="nav-label">Reference</div>
+        <a href="devices.html">Devices</a>
+        <a href="drivers.html">Drivers</a>
+        <a href="apps.html">Apps</a>
+        <a href="window-managers.html" class="active">Window Managers</a>
+        <a href="kernel-modules.html">Kernel Modules</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <p class="lead">ThistleOS supports swappable window managers loaded as <code>.wm.elf</code> files. The active WM is set in <code>system.json</code> and can be changed without recompilation. The kernel's display server manages surfaces and compositing, while the WM controls layout, rendering, and input handling.</p>
+      <a href="https://github.com/wan0net/thistle-os/blob/main/docs/window-managers.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Overview</h2>
+    <p>Available window managers:</p>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Toolkit</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>thistle-tk</td><td>Default WM with BlackBerry-style UI: status bar, app drawer, wallpaper</td><td>thistle-tk (Rust)</td><td><span class="badge badge-green">Default</span></td></tr>
+          <tr><td>LVGL WM</td><td>Alternative WM using LVGL widget toolkit</td><td>LVGL 9.2 (C)</td><td><span class="badge badge-blue">Available</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>How Window Managers Work</h2>
+    <p>The kernel's display server defines the <code>display_server_wm_t</code> vtable interface. Every window manager &mdash; whether compiled-in or loaded from a <code>.wm.elf</code> file &mdash; must implement this vtable:</p>
+
+    <pre><code>typedef struct {
+    const char *name;
+    esp_err_t (*init)(void);
+    esp_err_t (*render)(lv_obj_t *screen);
+    esp_err_t (*on_input)(input_event_t *event);
+    esp_err_t (*on_app_launch)(const char *app_id);
+    esp_err_t (*on_app_close)(const char *app_id);
+    esp_err_t (*on_surface_create)(surface_t *surface);
+    esp_err_t (*on_surface_destroy)(surface_t *surface);
+    void (*shutdown)(void);
+} display_server_wm_t;</code></pre>
+
+    <p>The display server calls into these functions at the appropriate lifecycle points. The WM owns the screen layout: it decides where the status bar goes, how the app drawer looks, how surfaces are arranged, and how input events are routed to the focused app.</p>
+
+    <h2>Switching Window Managers</h2>
+    <p>The active window manager is configured in <code>config/system.json</code> on the SD card or SPIFFS:</p>
+
+    <pre><code>{
+  "window_manager": "thistle-tk",
+  "theme": "dark",
+  "wifi_ssid": "...",
+  "wifi_pass": "..."
+}</code></pre>
+
+    <p>Change the <code>"window_manager"</code> value to the name of any installed WM and reboot. The kernel will load the matching <code>.wm.elf</code> from storage, or fall back to the compiled-in WM if no file is found.</p>
+
+    <h2>Building a Custom Window Manager</h2>
+    <ol class="steps">
+      <li>Implement the <code>display_server_wm_t</code> vtable &mdash; at minimum <code>init</code>, <code>render</code>, <code>on_input</code>, and <code>shutdown</code>.</li>
+      <li>Build as a <code>.wm.elf</code> using the driver SDK toolchain, or compile-in via <code>display_server_register_wm()</code>.</li>
+      <li>Place the <code>.wm.elf</code> file in the <code>wm/</code> directory on SPIFFS or SD card.</li>
+      <li>Create a <code>manifest.json</code> alongside the ELF with name, version, and description.</li>
+      <li>Set <code>"window_manager"</code> in <code>system.json</code> to your WM's name and reboot.</li>
+    </ol>
+
+    <div class="callout info">
+      <div class="callout-title">Theming</div>
+      Window managers can read theme files from <code>themes/*.json</code> on storage. The default thistle-tk WM supports dark and light themes with customizable accent colours.
+    </div>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

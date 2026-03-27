@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apps — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="table-interactive.js" defer></script>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/apps.html">Apps</a>
+      <a href="/thistle-os/docs/kernel-modules.html">Modules</a>
+      <a href="/thistle-os/simulator/">Simulator</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </div>
+</nav>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+
+        <div class="nav-label">Reference</div>
+        <a href="devices.html">Devices</a>
+        <a href="drivers.html">Drivers</a>
+        <a href="apps.html" class="active">Apps</a>
+        <a href="window-managers.html">Window Managers</a>
+        <a href="kernel-modules.html">Kernel Modules</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <p class="lead">ThistleOS ships with 14 built-in apps covering system management, communication, productivity, security, and utilities. All apps follow the same manifest and signing model &mdash; built-in apps are compiled into the firmware, while additional apps are loaded from <code>.app.elf</code> files on SPIFFS or SD card.</p>
+      <a href="https://github.com/wan0net/thistle-os/blob/main/docs/apps.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <h2>Overview</h2>
+    <p>All 14 built-in apps at a glance.</p>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Category</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Launcher</td><td>Home screen with app grid and favorites dock</td><td>System</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Settings</td><td>System configuration (WiFi, display, theme)</td><td>System</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Messenger</td><td>Multi-transport messaging (LoRa, SMS, BLE)</td><td>Communication</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Navigator</td><td>GPS position, bearing, grid reference display</td><td>Navigation</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Notes</td><td>Simple text editor with SD card save/load</td><td>Productivity</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>File Manager</td><td>Browse SD card, view/copy/delete files</td><td>Utility</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Reader</td><td>E-book reader for text files and PDFs</td><td>Productivity</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>App Store</td><td>Browse, download, install signed apps OTA</td><td>System</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>WiFi Scanner</td><td>Scan networks, show RSSI, channel, encryption</td><td>Security</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Terminal</td><td>Serial terminal (GhostTerm) for UART devices</td><td>Utility</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>AI Assistant</td><td>Claude-powered assistant via HTTP API</td><td>Productivity</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Vault</td><td>Encrypted file storage on SD card</td><td>Security</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Weather</td><td>Weather display (requires internet)</td><td>Utility</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+          <tr><td>Flashlight</td><td>Screen-as-flashlight, LED control</td><td>Utility</td><td><span class="badge badge-blue">Built-in</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>App Manifest Format</h2>
+    <p>Every app &mdash; whether built-in or loaded from storage &mdash; has an accompanying <code>manifest.json</code> that declares its identity, permissions, and requirements:</p>
+
+    <pre><code>{
+  "name": "my-app",
+  "version": "1.0.0",
+  "display_name": "My App",
+  "description": "A sample ThistleOS application",
+  "category": "Utility",
+  "entry": "my-app.app.elf",
+  "permissions": ["network", "storage"],
+  "min_kernel": "0.1.0"
+}</code></pre>
+
+    <h3>Loading from Storage</h3>
+    <p>Apps stored as <code>.app.elf</code> files on SPIFFS or SD card are discovered and loaded by the kernel's app manager at boot. The kernel verifies the Ed25519 signature on each ELF before loading &mdash; signed apps receive full permissions, while unsigned apps are restricted to IPC-only access.</p>
+    <p>Apps communicate with the kernel through the syscall table (C ABI), which exports 45+ ESP-IDF APIs for display, storage, networking, and hardware access.</p>
+
+    <div class="callout info">
+      <div class="callout-title">Want to build an app?</div>
+      See the <a href="app-development.html">Building Apps</a> guide for step-by-step instructions on creating a ThistleOS application.
+    </div>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>
