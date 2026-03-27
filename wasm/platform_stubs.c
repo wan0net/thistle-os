@@ -124,6 +124,20 @@ void esp_log_write(int level, const char *tag, const char *fmt, ...) { (void)lev
  *   hal_registry_start_all, hal_registry_stop_all
  */
 
+/* ── esp_http_client stubs (for Rust kernel FFI that calls these directly) ── */
+/* Do NOT include esp_http_client.h — it has static inline versions that would
+ * conflict. The Rust kernel extern "C" FFI only needs the symbol names.
+ * Use void* to avoid type conflicts.
+ * The Rust kernel calls these by symbol name via extern "C" FFI. */
+void *esp_http_client_init(const void *c) { (void)c; return NULL; }
+int esp_http_client_perform(void *c) { (void)c; return -1; }
+int esp_http_client_open(void *c, int l) { (void)c;(void)l; return -1; }
+int esp_http_client_fetch_headers(void *c) { (void)c; return -1; }
+int esp_http_client_read(void *c, char *b, int l) { (void)c;(void)b;(void)l; return -1; }
+int esp_http_client_get_status_code(void *c) { (void)c; return 0; }
+int esp_http_client_close(void *c) { (void)c; return 0; }
+void esp_http_client_cleanup(void *c) { (void)c; }
+
 /* ── sim_http stubs (backing for simulator/platform/esp_http_client.h inlines) */
 #include "sim_http.h"
 sim_http_client_handle_t sim_http_client_init(const sim_http_client_config_t *c) { (void)c; return NULL; }
