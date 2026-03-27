@@ -30,6 +30,7 @@ pub mod widget;
 pub mod tk_wm;
 pub mod tk_launcher;
 pub mod tk_appstore;
+pub mod tk_meshchat;
 pub mod drv_kbd_tca8418;
 pub mod drv_kbd_cardkb;
 pub mod drv_touch_cst328;
