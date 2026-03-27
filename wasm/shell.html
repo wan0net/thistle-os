@@ -5,101 +5,123 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ThistleOS — Browser Simulator</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: #111110; color: #ededed; min-height: 100vh; }
-  .layout { display: flex; min-height: 100vh; }
-  .device-panel { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
-  .device-header { text-align: center; margin-bottom: 16px; }
-  .device-header h1 { color: #9D4EDD; font-size: 22px; }
-  .device-header p { color: #a09f9b; font-size: 13px; }
-  #canvas-container { border: 2px solid #343432; border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #111110; --surface: #1c1c1b; --surface-2: #232322;
+    --border: #282826; --border-2: #343432;
+    --text: #ededed; --text-dim: #a09f9b;
+    --primary: #2563eb; --primary-hover: #1d4ed8;
+    --accent: #9D4EDD;
+    --green: #22c55e; --amber: #eab308; --red: #ef4444;
+  }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  a { color: inherit; text-decoration: none; }
+  .top-nav { border-bottom: 1px solid var(--border); padding: 12px 0; background: var(--bg); position: sticky; top: 0; z-index: 200; }
+  .top-nav-inner { max-width: 1400px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+  .top-nav-brand { font-weight: 600; font-size: 15px; color: var(--text); }
+  .top-nav-links { display: flex; gap: 24px; }
+  .top-nav-links a { font-size: 14px; color: var(--text-dim); transition: color 0.15s; }
+  .top-nav-links a:hover { color: var(--text); }
+  .top-nav-links a.active { color: var(--primary); }
+  .sim-layout { display: flex; max-width: 1400px; margin: 0 auto; min-height: calc(100vh - 45px); }
+  .device-panel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 16px; }
+  .device-controls { display: flex; gap: 12px; align-items: center; }
+  .device-controls select { padding: 6px 12px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 6px; color: var(--text); font-size: 13px; cursor: pointer; }
+  #canvas-container { border: 2px solid var(--border-2); border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
   canvas { display: block; image-rendering: pixelated; }
-  #device-status { margin-top: 8px; font-size: 12px; color: #a09f9b; }
-  #device-status.loading { color: #eab308; }
-  #device-status.ready { color: #22c55e; }
-  .control-panel { flex: 1; min-width: 320px; max-width: 420px; background: #1c1c1b; border-left: 1px solid #282826; display: flex; flex-direction: column; overflow: hidden; }
-  .panel-tabs { display: flex; border-bottom: 1px solid #282826; flex-shrink: 0; }
-  .panel-tab { flex: 1; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; color: #a09f9b; cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none; }
-  .panel-tab:hover { color: #ededed; }
-  .panel-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+  #device-status { font-size: 12px; color: var(--text-dim); }
+  #device-status.loading { color: var(--amber); }
+  #device-status.ready { color: var(--green); }
+  .control-panel { width: 380px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .panel-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .panel-tab { flex: 1; padding: 10px 6px; text-align: center; font-size: 11px; font-weight: 600; color: var(--text-dim); cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none; text-transform: uppercase; letter-spacing: 0.05em; }
+  .panel-tab:hover { color: var(--text); }
+  .panel-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
   .panel-content { display: none; flex: 1; overflow-y: auto; padding: 16px; }
-  .panel-content.active { display: flex; flex-direction: column; }
+  .panel-content.active { display: flex; flex-direction: column; gap: 12px; }
   #console-output { flex: 1; background: #0d0d0c; color: #86efac; font-family: 'Cascadia Code','Fira Code',monospace; font-size: 11px; line-height: 1.5; padding: 12px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border-radius: 6px; min-height: 200px; }
   .log-warn { color: #fde68a; } .log-error { color: #fca5a5; } .log-info { color: #86efac; } .log-dim { color: #6b7280; }
-  .section { margin-bottom: 16px; }
-  .section h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #a09f9b; margin-bottom: 8px; }
-  .sim-card { background: #232322; border: 1px solid #343432; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; font-size: 13px; }
-  .sim-card .label { color: #a09f9b; font-size: 11px; }
-  .sim-card .value { color: #ededed; font-weight: 500; }
+  .section h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 8px; }
+  .sim-card { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+  .sim-card .label { color: var(--text-dim); font-size: 11px; }
+  .sim-card .value { color: var(--text); font-weight: 500; }
   .sim-card input[type="range"] { width: 100%; margin-top: 4px; }
-  .sim-card input[type="text"], .sim-card input[type="number"] { width: 100%; padding: 6px 8px; background: #1c1c1b; border: 1px solid #343432; border-radius: 4px; color: #ededed; font-size: 12px; margin-top: 4px; }
-  .sim-btn { padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; margin-top: 4px; }
-  .sim-btn-blue { background: #2563eb; color: white; }
-  .sim-btn-red { background: #dc2626; color: white; }
-  .sim-btn-dim { background: #343432; color: #a09f9b; }
-  .wifi-network { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #282826; }
+  .sim-card input[type="text"], .sim-card input[type="number"] { width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border-2); border-radius: 4px; color: var(--text); font-size: 12px; margin-top: 4px; }
+  .sim-btn { padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.15s; }
+  .sim-btn-blue { background: var(--primary); color: white; }
+  .sim-btn-blue:hover { background: var(--primary-hover); }
+  .sim-btn-red { background: var(--red); color: white; }
+  .sim-btn-dim { background: var(--border-2); color: var(--text-dim); }
+  .sim-btn-dim:hover { background: var(--border); color: var(--text); }
+  .apps-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .app-card { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 10px; cursor: pointer; transition: border-color 0.15s; }
+  .app-card:hover { border-color: var(--primary); }
+  .app-card .app-name { font-size: 13px; font-weight: 500; }
+  .app-card .app-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .wifi-network { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .wifi-network:last-child { border-bottom: none; }
-  .wifi-ssid { font-weight: 500; } .wifi-signal { color: #a09f9b; font-size: 12px; }
-  .ble-device { padding: 6px 0; border-bottom: 1px solid #282826; }
+  .wifi-ssid { font-weight: 500; font-size: 13px; } .wifi-signal { color: var(--text-dim); font-size: 12px; }
+  .ble-device { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
   .ble-device:last-child { border-bottom: none; }
-  @media (max-width: 900px) { .layout { flex-direction: column; } .control-panel { max-width: none; border-left: none; border-top: 1px solid #282826; max-height: 40vh; } }
+  @media (max-width: 900px) {
+    .sim-layout { flex-direction: column; }
+    .control-panel { width: 100%; border-left: none; border-top: 1px solid var(--border); max-height: 40vh; }
+  }
 </style>
 </head>
 <body>
-<div class="layout">
-  <div class="device-panel">
-    <div class="device-header">
-      <h1>ThistleOS</h1>
-      <p>Browser Simulator</p>
-      <select id="device-select" style="margin-top:10px;padding:6px 12px;background:#232322;border:1px solid #343432;border-radius:6px;color:#ededed;font-size:13px;cursor:pointer;">
-        <option value="tdeck">T-Deck (320×240 LCD)</option>
-        <option value="tdeck-pro">T-Deck Pro (320×240 E-Paper)</option>
-        <option value="tdeck-plus">T-Deck Plus (320×240 LCD+GPS)</option>
-        <option value="tdisplay">T-Display-S3 (320×170 LCD)</option>
-        <option value="heltec-v3">Heltec V3 (128×64 OLED)</option>
-        <option value="cardputer">Cardputer (240×135 LCD)</option>
-        <option value="cyd-s022">CYD S022 (240×320 LCD)</option>
-        <option value="cyd-s028">CYD S028 (320×240 LCD)</option>
-        <option value="t3-s3">T3-S3 (128×64 OLED)</option>
-        <option value="c3-mini">C3-Mini (128×64 OLED)</option>
-      </select>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/apps.html">Apps</a>
+      <a href="/thistle-os/docs/kernel-modules.html">Modules</a>
+      <a href="/thistle-os/simulator/" class="active">Simulator</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
     </div>
-    <div id="canvas-container"><canvas id="canvas" width="640" height="480" oncontextmenu="event.preventDefault()"></canvas></div>
-    <p id="device-status" class="loading">Loading ThistleOS...</p>
+  </div>
+</nav>
+<div class="sim-layout">
+  <div class="device-panel">
+    <div class="device-controls">
+      <select id="device-select">
+        <option value="tdeck">T-Deck (320x240)</option>
+        <option value="tdeck-pro">T-Deck Pro (E-Paper)</option>
+        <option value="tdeck-plus">T-Deck Plus (+GPS)</option>
+        <option value="tdisplay">T-Display-S3 (320x170)</option>
+        <option value="heltec-v3">Heltec V3 (128x64)</option>
+        <option value="cardputer">Cardputer (240x135)</option>
+        <option value="cyd-s022">CYD S022 (240x320)</option>
+        <option value="cyd-s028">CYD S028 (320x240)</option>
+        <option value="t3-s3">T3-S3 (128x64)</option>
+        <option value="c3-mini">C3-Mini (128x64)</option>
+      </select>
+      <span id="device-status" class="loading">Loading...</span>
+    </div>
+    <div id="canvas-container">
+      <canvas id="canvas" width="640" height="480" oncontextmenu="event.preventDefault()"></canvas>
+    </div>
   </div>
   <div class="control-panel">
     <div class="panel-tabs">
-      <button class="panel-tab active" onclick="showTab('console')">Console</button>
-      <button class="panel-tab" onclick="showTab('wifi')">WiFi</button>
-      <button class="panel-tab" onclick="showTab('ble')">BLE</button>
+      <button class="panel-tab active" onclick="showTab('apps')">Apps</button>
+      <button class="panel-tab" onclick="showTab('console')">Console</button>
       <button class="panel-tab" onclick="showTab('hw')">Hardware</button>
+      <button class="panel-tab" onclick="showTab('radio')">Radio</button>
     </div>
-    <div id="tab-console" class="panel-content active"><div id="console-output"></div></div>
-    <div id="tab-wifi" class="panel-content">
-      <div class="section"><h3>Simulated Networks</h3><div id="wifi-list"></div></div>
-      <div class="section"><h3>Add Network</h3><div class="sim-card">
-        <input type="text" id="wifi-add-ssid" placeholder="SSID">
-        <input type="number" id="wifi-add-rssi" placeholder="Signal (dBm)" value="-50">
-        <button class="sim-btn sim-btn-blue" onclick="wifiAdd()" style="margin-top:8px">Add Network</button>
-      </div></div>
+    <div id="tab-apps" class="panel-content active">
+      <div class="section"><h3>Launch App</h3></div>
+      <div class="apps-grid" id="apps-grid"></div>
     </div>
-    <div id="tab-ble" class="panel-content">
-      <div class="section"><h3>Simulated BLE Devices</h3><div id="ble-list"></div></div>
-      <div class="section"><h3>BLE State</h3>
-        <div class="sim-card"><div class="label">Advertising</div><div class="value" id="ble-adv-status">Off</div>
-          <button class="sim-btn sim-btn-blue" onclick="bleToggleAdv()">Toggle</button></div>
-        <div class="sim-card"><div class="label">Connection</div><div class="value" id="ble-conn-status">Disconnected</div></div>
-      </div>
-      <div class="section"><h3>Send BLE Data</h3><div class="sim-card">
-        <input type="text" id="ble-send-data" placeholder="Data via UART service">
-        <button class="sim-btn sim-btn-blue" onclick="bleSend()" style="margin-top:8px">Send</button>
-      </div></div>
-    </div>
+    <div id="tab-console" class="panel-content"><div id="console-output"></div></div>
     <div id="tab-hw" class="panel-content">
       <div class="section"><h3>Battery</h3><div class="sim-card">
         <div class="label">Level: <span id="battery-pct">75</span>%</div>
         <input type="range" min="0" max="100" value="75" oninput="document.getElementById('battery-pct').textContent=this.value">
-        <label style="font-size:12px;color:#a09f9b;margin-top:4px;display:block"><input type="checkbox" onchange="appendLog('[power] Charging: '+(this.checked?'yes':'no'),'log-info')"> Charging</label>
+        <label style="font-size:12px;color:var(--text-dim);margin-top:4px;display:block"><input type="checkbox" onchange="appendLog('[power] Charging: '+(this.checked?'yes':'no'),'log-info')"> Charging</label>
       </div></div>
       <div class="section"><h3>GPS Position</h3><div class="sim-card">
         <div class="label">Latitude</div><input type="number" id="gps-lat" step="0.0001" value="55.9533">
@@ -107,14 +129,29 @@
         <div class="label" style="margin-top:6px">Altitude (m)</div><input type="number" id="gps-alt" step="1" value="47">
         <button class="sim-btn sim-btn-blue" onclick="updateGps()" style="margin-top:8px">Set Position</button>
       </div></div>
+      <div class="section"><h3>Sensors</h3><div class="sim-card">
+        <div class="label">Temperature: 22.5C | Pressure: 1013.25 hPa</div>
+        <div class="label" style="margin-top:4px">Light: 450 lux</div>
+      </div></div>
+    </div>
+    <div id="tab-radio" class="panel-content">
       <div class="section"><h3>LoRa Radio</h3><div class="sim-card">
-        <div class="label">Frequency: 915.0 MHz | TX: +22 dBm</div>
+        <div class="label">Freq: 915.0 MHz | SF7 | BW 125k | TX +22 dBm</div>
         <div class="label" style="margin-top:4px">Status: <span id="radio-status">Idle</span></div>
-        <button class="sim-btn sim-btn-dim" onclick="radioRx()" style="margin-top:8px">Simulate RX Packet</button>
+        <button class="sim-btn sim-btn-dim" onclick="radioRx()" style="margin-top:8px">Simulate RX</button>
       </div></div>
-      <div class="section"><h3>IMU / Environment</h3><div class="sim-card">
-        <div class="label">Temperature: 22.5 C | Pressure: 1013.25 hPa</div>
-      </div></div>
+      <div class="section"><h3>WiFi</h3><div id="wifi-list"></div>
+        <div class="sim-card" style="margin-top:8px">
+          <input type="text" id="wifi-add-ssid" placeholder="SSID">
+          <button class="sim-btn sim-btn-blue" onclick="wifiAdd()" style="margin-top:6px">Add</button>
+        </div>
+      </div>
+      <div class="section"><h3>BLE</h3><div id="ble-list"></div>
+        <div class="sim-card" style="margin-top:8px">
+          <div class="label">Advertising: <span id="ble-adv-status">Off</span></div>
+          <button class="sim-btn sim-btn-dim" onclick="bleToggleAdv()" style="margin-top:6px">Toggle</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -135,6 +172,49 @@ function appendLog(text,cls) {
   if(consoleEl.childNodes.length>500) consoleEl.removeChild(consoleEl.firstChild);
   consoleEl.scrollTop=consoleEl.scrollHeight;
 }
+/* App launcher */
+var APPS = [
+  {id:'com.thistle.launcher',   name:'Launcher',     desc:'Home screen'},
+  {id:'com.thistle.settings',   name:'Settings',     desc:'System config'},
+  {id:'com.thistle.messenger',  name:'Messenger',    desc:'LoRa / SMS / BLE'},
+  {id:'com.thistle.navigator',  name:'Navigator',    desc:'GPS position'},
+  {id:'com.thistle.notes',      name:'Notes',        desc:'Text editor'},
+  {id:'com.thistle.filemgr',    name:'File Manager', desc:'Browse SD card'},
+  {id:'com.thistle.reader',     name:'Reader',       desc:'E-book viewer'},
+  {id:'com.thistle.appstore',   name:'App Store',    desc:'Install apps OTA'},
+  {id:'com.thistle.wifiscanner',name:'WiFi Scanner', desc:'Network recon'},
+  {id:'com.thistle.terminal',   name:'Terminal',     desc:'Serial console'},
+  {id:'com.thistle.assistant',  name:'AI Assistant',  desc:'Claude API'},
+  {id:'com.thistle.vault',      name:'Vault',        desc:'Encrypted storage'},
+  {id:'com.thistle.weather',    name:'Weather',      desc:'Forecast'},
+  {id:'com.thistle.flashlight', name:'Flashlight',   desc:'Screen light'},
+];
+function initApps() {
+  var grid = document.getElementById('apps-grid');
+  APPS.forEach(function(app) {
+    var card = document.createElement('div');
+    card.className = 'app-card';
+    card.addEventListener('click', function() { launchApp(app.id); });
+    var name = document.createElement('div');
+    name.className = 'app-name';
+    name.textContent = app.name;
+    var desc = document.createElement('div');
+    desc.className = 'app-desc';
+    desc.textContent = app.desc;
+    card.appendChild(name);
+    card.appendChild(desc);
+    grid.appendChild(card);
+  });
+}
+function launchApp(appId) {
+  appendLog('[app] Launching ' + appId, 'log-info');
+  if (typeof Module !== 'undefined' && Module._app_manager_launch) {
+    var ptr = Module.allocateUTF8(appId);
+    Module._app_manager_launch(ptr);
+    Module._free(ptr);
+  }
+}
+/* WiFi */
 function createWifiEntry(ssid,rssi,ch) {
   var row=document.createElement('div'); row.className='wifi-network';
   var info=document.createElement('div');
@@ -152,74 +232,63 @@ function initWifi() {
   list.appendChild(createWifiEntry('CoffeeShop_5G','-65','36'));
   list.appendChild(createWifiEntry('IoT-Network','-78','11'));
 }
+var connectedWifi=null;
+function wifiConnect(ssid,btn) {
+  if(connectedWifi===ssid){connectedWifi=null;btn.textContent='Connect';btn.className='sim-btn sim-btn-dim';appendLog('[wifi] Disconnected from '+ssid,'log-warn');return;}
+  document.querySelectorAll('.wifi-network button').forEach(function(b){b.textContent='Connect';b.className='sim-btn sim-btn-dim'});
+  appendLog('[wifi] Connecting to '+ssid+'...','log-info');
+  btn.textContent='...';
+  setTimeout(function(){connectedWifi=ssid;btn.textContent='Disconnect';btn.className='sim-btn sim-btn-red';appendLog('[wifi] Connected to '+ssid+' (192.168.1.42)','log-info')},800);
+}
+function wifiAdd() {
+  var ssid=document.getElementById('wifi-add-ssid').value; if(!ssid) return;
+  document.getElementById('wifi-list').appendChild(createWifiEntry(ssid,'-50',''));
+  document.getElementById('wifi-add-ssid').value='';
+  appendLog('[wifi] Network discovered: '+ssid,'log-dim');
+}
+/* BLE */
 function initBle() {
   var list=document.getElementById('ble-list');
-  [['Phone (Companion App)','-35 dBm | paired'],['Heart Rate Monitor','-60 dBm'],['Bluetooth Speaker','-72 dBm']].forEach(function(d) {
+  var devices=[['Phone (Companion)','-35 dBm | paired'],['HR Monitor','-60 dBm'],['BT Speaker','-72 dBm']];
+  devices.forEach(function(d) {
     var el=document.createElement('div'); el.className='ble-device';
     var n=document.createElement('div'); n.className='wifi-ssid'; n.textContent=d[0];
     var s=document.createElement('div'); s.className='wifi-signal'; s.textContent=d[1];
     el.appendChild(n); el.appendChild(s); list.appendChild(el);
   });
 }
-var connectedWifi=null;
-function wifiConnect(ssid,btn) {
-  if(connectedWifi===ssid){connectedWifi=null;btn.textContent='Connect';btn.className='sim-btn sim-btn-dim';appendLog('[wifi] Disconnected from '+ssid,'log-warn');return;}
-  document.querySelectorAll('.wifi-network button').forEach(function(b){b.textContent='Connect';b.className='sim-btn sim-btn-dim'});
-  appendLog('[wifi] Connecting to '+ssid+'...','log-info');
-  btn.textContent='Connecting...';
-  setTimeout(function(){connectedWifi=ssid;btn.textContent='Disconnect';btn.className='sim-btn sim-btn-red';appendLog('[wifi] Connected to '+ssid+' (192.168.1.42)','log-info')},800);
-}
-function wifiAdd() {
-  var ssid=document.getElementById('wifi-add-ssid').value;
-  var rssi=document.getElementById('wifi-add-rssi').value||'-50';
-  if(!ssid) return;
-  document.getElementById('wifi-list').appendChild(createWifiEntry(ssid,rssi,''));
-  document.getElementById('wifi-add-ssid').value='';
-  appendLog('[wifi] Network discovered: '+ssid+' ('+rssi+' dBm)','log-dim');
-}
 function bleToggleAdv() {
   var el=document.getElementById('ble-adv-status');
   if(el.textContent==='Off'){el.textContent='Advertising';el.style.color='#22c55e';appendLog('[ble] Advertising started','log-info')}
-  else{el.textContent='Off';el.style.color='#ededed';appendLog('[ble] Advertising stopped','log-info')}
+  else{el.textContent='Off';el.style.color='inherit';appendLog('[ble] Advertising stopped','log-info')}
 }
-function bleSend() {
-  var d=document.getElementById('ble-send-data').value; if(!d) return;
-  appendLog('[ble] RX: '+d,'log-info'); document.getElementById('ble-send-data').value='';
-}
-function updateGps() {
-  appendLog('[gps] Position: '+document.getElementById('gps-lat').value+', '+document.getElementById('gps-lon').value+' alt '+document.getElementById('gps-alt').value+'m','log-info');
-}
+/* Hardware */
+function updateGps() { appendLog('[gps] Position: '+document.getElementById('gps-lat').value+', '+document.getElementById('gps-lon').value+' alt '+document.getElementById('gps-alt').value+'m','log-info'); }
 function radioRx() {
   document.getElementById('radio-status').textContent='RX';
   appendLog('[radio] Received LoRa packet (32 bytes, RSSI -85 dBm)','log-info');
   setTimeout(function(){document.getElementById('radio-status').textContent='Idle'},1000);
 }
-initWifi(); initBle();
-/* Device selector — reload with ?device=xxx */
+/* Init */
+initApps(); initWifi(); initBle();
 document.getElementById('device-select').addEventListener('change', function() {
-  var dev = this.value;
   var url = new URL(window.location);
-  url.searchParams.set('device', dev);
+  url.searchParams.set('device', this.value);
   window.location.href = url.toString();
 });
-/* Set initial dropdown from URL */
 (function() {
-  var params = new URLSearchParams(window.location.search);
-  var dev = params.get('device');
-  if (dev) { document.getElementById('device-select').value = dev; }
+  var dev = new URLSearchParams(window.location.search).get('device');
+  if (dev) document.getElementById('device-select').value = dev;
 })();
-var Module={
-  canvas:document.getElementById('canvas'),
-  onRuntimeInitialized:function(){
-    document.getElementById('device-status').textContent='ThistleOS running';
-    document.getElementById('device-status').className='ready';
-    appendLog('ThistleOS kernel initialized','log-info');
-    appendLog('Display server: 320x240 LCD','log-info');
-    appendLog('Window manager: lvgl-wm v1.0.0','log-info');
-    appendLog('14 apps registered','log-info');
+var Module = {
+  canvas: document.getElementById('canvas'),
+  onRuntimeInitialized: function() {
+    document.getElementById('device-status').textContent = 'ThistleOS running';
+    document.getElementById('device-status').className = 'ready';
+    appendLog('ThistleOS kernel initialized', 'log-info');
   },
-  print:function(t){console.log('[ThistleOS]',t);appendLog(t,t.indexOf('W (')>=0||t.indexOf('WARN')>=0?'log-warn':t.indexOf('E (')>=0||t.indexOf('ERROR')>=0?'log-error':'log-info')},
-  printErr:function(t){console.error('[ThistleOS]',t);appendLog(t,'log-error')},
+  print: function(t) { console.log('[ThistleOS]', t); appendLog(t, t.indexOf('WARN')>=0?'log-warn':t.indexOf('ERROR')>=0?'log-error':'log-info'); },
+  printErr: function(t) { console.error('[ThistleOS]', t); appendLog(t, 'log-error'); },
 };
 </script>
 {{{ SCRIPT }}}
