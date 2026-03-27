@@ -82,3 +82,17 @@ For a Fern-like development workflow, the system should watch the SD card for mo
 
 ### Q22: Reload safety for display/input drivers
 Reloading the display or input driver while the user is interacting would cause a visible glitch or input loss. The reload system should coordinate with the display server to show a "reloading driver..." screen and buffer input events during the reload window.
+
+## Crypto / Syscall Review — 2026-03-28
+
+### Q23: AES-128-ECB has no hardware acceleration path
+The HAL crypto vtable has no AES-128-ECB fields. MeshCore uses AES-128-ECB for all mesh packet encryption, but it runs through the Rust `aes` crate (software) even on ESP32-S3 which has hardware AES. Should the vtable be extended with `aes128_ecb_encrypt`/`aes128_ecb_decrypt` fields?
+
+### Q24: PBKDF2 bypasses hardware SHA entirely
+The Rust `pbkdf2` crate calls its own internal SHA-256, bypassing the HAL crypto dispatch. On ESP32-S3, hardware SHA is 3-5x faster. Options: (a) rewrite PBKDF2 to use `thistle_crypto_hmac_sha256` per iteration, (b) accept software-only PBKDF2 since it's infrequent.
+
+### Q25: thistle_fs_open ABI mismatch
+`thistle_app.h` declares `thistle_fs_open(path, int flags)` (POSIX-style) but the implementation wraps `fopen(path, mode)` taking a `char*` mode string. These are incompatible — an app passing integer flags will crash. Needs a decision: switch to POSIX `open()` semantics, or change the SDK header to take a `const char *mode`.
+
+### Q26: thistle_log is not variadic
+`thistle_app.h` declares `thistle_log(tag, fmt, ...)` but the Rust implementation takes exactly two args and passes the format string as `%s`. Apps using format arguments get garbled output. Needs either a real variadic implementation or the SDK header should drop the `...`.

@@ -321,12 +321,9 @@ int meshcore_send_message(const uint8_t* dest_pub_key, const char* text) {
     if (!s_mesh || !dest_pub_key || !text) return MESHCORE_SEND_FAILED;
 
     // Find the contact by public key
-    ContactsIterator iter;
     ContactInfo ci;
-    int idx = 0;
     bool found = false;
 
-    // Search contacts
     ContactsIterator it;
     while (it.hasNext(s_mesh, ci)) {
         if (memcmp(ci.id.pub_key, dest_pub_key, MESHCORE_PUBKEY_SIZE) == 0) {

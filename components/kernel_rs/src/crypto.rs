@@ -154,16 +154,16 @@ pub unsafe extern "C" fn thistle_crypto_hmac_verify(
 ) -> i32 {
     if key.is_null() || data.is_null() || expected_mac.is_null() { return ESP_ERR_INVALID_ARG; }
 
-    let key_slice = std::slice::from_raw_parts(key, key_len);
-    let data_slice = std::slice::from_raw_parts(data, data_len);
-    let expected = std::slice::from_raw_parts(expected_mac, 32);
+    // Compute HMAC via hardware if available, then compare
+    let mut computed = [0u8; 32];
+    let ret = thistle_crypto_hmac_sha256(key, key_len, data, data_len, computed.as_mut_ptr());
+    if ret != ESP_OK { return ret; }
 
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key_slice).unwrap();
-    mac.update(data_slice);
-    match mac.verify_slice(expected) {
-        Ok(()) => 0,
-        Err(_) => 1,
-    }
+    // Constant-time comparison
+    let expected = std::slice::from_raw_parts(expected_mac, 32);
+    let mut diff: u8 = 0;
+    for i in 0..32 { diff |= computed[i] ^ expected[i]; }
+    if diff == 0 { ESP_OK } else { ESP_FAIL }
 }
 
 #[no_mangle]
@@ -454,7 +454,7 @@ mod tests {
         let ret = unsafe {
             thistle_crypto_hmac_verify(key.as_ptr(), key.len(), data.as_ptr(), data.len(), bad_mac.as_ptr())
         };
-        assert_eq!(ret, 1);
+        assert_eq!(ret, ESP_FAIL);
     }
 
     #[test]
