@@ -65,21 +65,21 @@ extern int rs_meshchat_update(void);
 int main(void)
 {
     /* Read device from URL ?device=xxx or default to tdeck */
-    char device_buf[32] = "tdeck";
-    EM_ASM({
-        var params = new URLSearchParams(window.location.search);
-        var dev = params.get('device');
-        if (dev) {
-            var buf = $0;
-            for (var i = 0; i < dev.length && i < 31; i++) {
-                HEAP8[buf + i] = dev.charCodeAt(i);
-            }
-            HEAP8[buf + Math.min(dev.length, 31)] = 0;
-        }
-        /* Also set the dropdown to match */
-        var sel = document.getElementById('device-select');
-        if (sel && dev) { sel.value = dev; }
-    }, device_buf);
+    const char *device_str = emscripten_run_script_string(
+        "(function() {"
+        "  var p = new URLSearchParams(window.location.search);"
+        "  var d = p.get('device');"
+        "  if (d) {"
+        "    var s = document.getElementById('device-select');"
+        "    if (s) s.value = d;"
+        "    return d;"
+        "  }"
+        "  return 'tdeck';"
+        "})()"
+    );
+    char device_buf[32];
+    strncpy(device_buf, device_str ? device_str : "tdeck", 31);
+    device_buf[31] = '\0';
 
     sim_board_set_device(device_buf);
     printf("ThistleOS WASM Simulator — %s\n", device_buf);
