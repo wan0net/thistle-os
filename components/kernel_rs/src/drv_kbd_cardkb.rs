@@ -3,7 +3,7 @@
 //
 // Driver for the M5Stack CardKB (and compatible) I2C keyboards.
 //
-// The CardKB is a simple I2C keyboard at address 0x08.  Reading one byte
+// The CardKB is a simple I2C keyboard at address 0x5F.  Reading one byte
 // returns the ASCII value of the currently pressed key, or 0 if no key is
 // pressed.  Special keys use values >= 0x80 (function/arrow keys) or
 // standard control codes (backspace 0x08, enter 0x0D, escape 0x1B, tab 0x09).
@@ -28,7 +28,9 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 // ── CardKB constants ─────────────────────────────────────────────────────────
 
 /// Default I2C address for the CardKB.
-pub const CARDKB_DEFAULT_ADDR: u8 = 0x08;
+/// CardKB v1.0/v1.1 and Cardputer internal keyboard all use 0x5F.
+/// The M5Stack Faces QWERTY (different product) uses 0x08.
+pub const CARDKB_DEFAULT_ADDR: u8 = 0x5F;
 
 /// Minimum valid I2C address (7-bit).
 const I2C_ADDR_MIN: u8 = 0x03;
@@ -40,11 +42,12 @@ const KEY_BUF_SIZE: usize = 8;
 
 // ── CardKB special key codes ─────────────────────────────────────────────────
 
-const CARDKB_KEY_FN: u8 = 0x81;
-const CARDKB_KEY_ARROW_UP: u8 = 0x82;
-const CARDKB_KEY_ARROW_DOWN: u8 = 0x83;
-const CARDKB_KEY_ARROW_LEFT: u8 = 0x84;
-const CARDKB_KEY_ARROW_RIGHT: u8 = 0x85;
+// Fn key is a modifier — CardKB firmware never sends a standalone Fn byte.
+// Arrow key codes match the real CardKB v1.0/v1.1 firmware output.
+const CARDKB_KEY_ARROW_UP: u8 = 0xB5;
+const CARDKB_KEY_ARROW_DOWN: u8 = 0xB6;
+const CARDKB_KEY_ARROW_LEFT: u8 = 0xB4;
+const CARDKB_KEY_ARROW_RIGHT: u8 = 0xB7;
 
 const CARDKB_KEY_BACKSPACE: u8 = 0x08;
 const CARDKB_KEY_ENTER: u8 = 0x0D;
@@ -60,7 +63,6 @@ const THISTLE_KEY_BACKSPACE: u16 = 0x08;
 const THISTLE_KEY_TAB: u16 = 0x09;
 const THISTLE_KEY_ENTER: u16 = 0x0A; // normalise CR -> LF
 const THISTLE_KEY_ESCAPE: u16 = 0x1B;
-const THISTLE_KEY_FN: u16 = 0x01;
 
 // Arrow keys — use values in the 0xF0xx range to avoid clashing with ASCII.
 const THISTLE_KEY_UP: u16 = 0xF001;
@@ -271,7 +273,6 @@ fn map_cardkb_key(raw: u8) -> u16 {
         CARDKB_KEY_TAB => THISTLE_KEY_TAB,
         CARDKB_KEY_ENTER => THISTLE_KEY_ENTER,
         CARDKB_KEY_ESCAPE => THISTLE_KEY_ESCAPE,
-        CARDKB_KEY_FN => THISTLE_KEY_FN,
         CARDKB_KEY_ARROW_UP => THISTLE_KEY_UP,
         CARDKB_KEY_ARROW_DOWN => THISTLE_KEY_DOWN,
         CARDKB_KEY_ARROW_LEFT => THISTLE_KEY_LEFT,
@@ -707,7 +708,6 @@ mod tests {
         assert_eq!(map_cardkb_key(CARDKB_KEY_TAB), THISTLE_KEY_TAB);
         assert_eq!(map_cardkb_key(CARDKB_KEY_ENTER), THISTLE_KEY_ENTER);
         assert_eq!(map_cardkb_key(CARDKB_KEY_ESCAPE), THISTLE_KEY_ESCAPE);
-        assert_eq!(map_cardkb_key(CARDKB_KEY_FN), THISTLE_KEY_FN);
         assert_eq!(map_cardkb_key(CARDKB_KEY_ARROW_UP), THISTLE_KEY_UP);
         assert_eq!(map_cardkb_key(CARDKB_KEY_ARROW_DOWN), THISTLE_KEY_DOWN);
         assert_eq!(map_cardkb_key(CARDKB_KEY_ARROW_LEFT), THISTLE_KEY_LEFT);

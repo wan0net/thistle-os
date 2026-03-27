@@ -94,6 +94,9 @@ pub struct OledSsd1306Config {
     pub i2c_addr: u8,
     /// Hardware reset GPIO; -1 = no reset pin.
     pub pin_rst: i32,
+    /// External power enable GPIO (Heltec V3: GPIO 36, drive LOW to power on).
+    /// -1 = no Vext pin (OLED is always powered).
+    pub pin_vext: i32,
 }
 
 // ── Driver state ──────────────────────────────────────────────────────────────
@@ -117,6 +120,7 @@ impl OledState {
                 i2c_bus: std::ptr::null_mut(),
                 i2c_addr: 0x3C,
                 pin_rst: GPIO_NUM_NC,
+                pin_vext: GPIO_NUM_NC,
             },
             dev: std::ptr::null_mut(),
             fb: [0u8; OLED_FB_SIZE],
@@ -354,9 +358,17 @@ pub unsafe extern "C" fn ssd1306_init(config: *const c_void) -> i32 {
     s.cfg.i2c_bus  = cfg.i2c_bus;
     s.cfg.i2c_addr = cfg.i2c_addr;
     s.cfg.pin_rst  = cfg.pin_rst;
+    s.cfg.pin_vext = cfg.pin_vext;
 
     // Clear framebuffer
     s.fb = [0u8; OLED_FB_SIZE];
+
+    // Enable external power rail (Heltec V3: GPIO 36 driven LOW powers the OLED)
+    if s.cfg.pin_vext != GPIO_NUM_NC {
+        gpio_set_direction(s.cfg.pin_vext, 2); // GPIO_MODE_OUTPUT
+        gpio_set_level(s.cfg.pin_vext, 0);     // LOW = power on
+        vTaskDelay(2); // ~20ms for rail to stabilise
+    }
 
     // Optional hardware reset
     ssd1306_hw_reset(s.cfg.pin_rst);
@@ -602,6 +614,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         let ret = unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
         assert_eq!(ret, ESP_OK);
@@ -621,6 +634,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         let ptr = &cfg as *const OledSsd1306Config as *const c_void;
         assert_eq!(unsafe { ssd1306_init(ptr) }, ESP_OK);
@@ -653,6 +667,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -670,6 +685,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -687,6 +703,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -711,6 +728,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -738,6 +756,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -769,6 +788,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
@@ -795,6 +815,7 @@ mod tests {
             i2c_bus: 1usize as *mut c_void,
             i2c_addr: 0x3C,
             pin_rst: GPIO_NUM_NC,
+            pin_vext: GPIO_NUM_NC,
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
         assert!(state().display_on);
