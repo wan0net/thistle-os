@@ -23,6 +23,7 @@ pub mod ota;
 pub mod wifi_manager;
 pub mod ble_manager;
 pub mod net_manager;
+pub mod mesh_manager;
 pub mod appstore_client;
 pub mod crypto;
 pub mod widget;

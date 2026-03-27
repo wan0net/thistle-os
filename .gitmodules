@@ -1,0 +1,3 @@
+[submodule "components/meshcore/MeshCore"]
+	path = components/meshcore/MeshCore
+	url = https://github.com/meshcore-dev/MeshCore.git
