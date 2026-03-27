@@ -36,7 +36,9 @@
                 "bl": 38,
                 "spi_bus": 0,
                 "width": 240,
-                "height": 135
+                "height": 135,
+                "x_offset": 40,
+                "y_offset": 52
             }
         },
         {
@@ -45,7 +47,7 @@
             "entry": "kbd-cardkb.drv.elf",
             "config": {
                 "i2c_bus": 0,
-                "i2c_addr": "0x08"
+                "i2c_addr": "0x5F"
             }
         },
         {
