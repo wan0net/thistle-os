@@ -155,6 +155,34 @@ enum DisplayMode {
 }
 
 // ---------------------------------------------------------------------------
+// Layout mode — adapts to display size
+// ---------------------------------------------------------------------------
+
+/// Determines how the WM lays out apps and chrome.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LayoutMode {
+    /// Full UI: status bar + app grid + sidebar. For 320x240+.
+    Full,
+    /// Compact: status bar + single app, simplified chrome. For 240x135.
+    Compact,
+    /// Micro: DS-style single app fills screen, left/right arrows to switch.
+    /// For 128x64 and smaller. Minimal or no status bar.
+    Micro,
+}
+
+impl LayoutMode {
+    fn from_dimensions(w: u32, h: u32) -> Self {
+        if w <= 160 || h <= 80 {
+            LayoutMode::Micro
+        } else if w <= 260 || h <= 160 {
+            LayoutMode::Compact
+        } else {
+            LayoutMode::Full
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Global WM state
 // ---------------------------------------------------------------------------
 
@@ -162,6 +190,7 @@ struct TkWmState {
     tree: UiTree,
     theme: Theme,
     mode: DisplayMode,
+    layout: LayoutMode,
     mono_fb: Option<Framebuffer<BinaryColor>>,
     rgb_fb: Option<Framebuffer<Rgb565>>,
     width: u32,
@@ -169,6 +198,14 @@ struct TkWmState {
     dirty: bool,
     /// Static buffer for get_text return value (must outlive FFI call)
     text_buf: [u8; 257],
+    /// Micro mode: which app index is currently shown
+    micro_current_app: i32,
+    /// Micro mode: total app count
+    micro_app_count: i32,
+    /// Micro mode: nav arrow widget IDs
+    micro_left_arrow: Option<WidgetId>,
+    micro_right_arrow: Option<WidgetId>,
+    micro_app_label: Option<WidgetId>,
 }
 
 static TK_WM: Mutex<Option<TkWmState>> = Mutex::new(None);
@@ -277,6 +314,8 @@ pub extern "C" fn tk_wm_init() -> i32 {
         DisplayMode::Rgb
     };
 
+    let layout = LayoutMode::from_dimensions(width, height);
+
     let theme = match mode {
         DisplayMode::Mono => Theme::monochrome(),
         DisplayMode::Rgb => Theme::link42(),
@@ -287,7 +326,46 @@ pub extern "C" fn tk_wm_init() -> i32 {
     root.common.size = Size { w: width, h: height };
     root.direction = Direction::Column;
     root.bg_color = Some(Color::Background);
-    let tree = UiTree::new(Widget::Container(root));
+    let mut tree = UiTree::new(Widget::Container(root));
+
+    // Micro mode: add left/right nav arrows and app name label
+    let (micro_left, micro_right, micro_label) = if layout == LayoutMode::Micro {
+        // Bottom row: [<] [App Name] [>]
+        let root_id = tree.root();
+        let mut nav = ContainerWidget::default();
+        nav.direction = Direction::Row;
+        nav.common.height_hint = SizeHint::Fixed(12);
+        nav.common.width_hint = SizeHint::Percent(1.0);
+        nav.align = Align::Center;
+        nav.cross_align = Align::Center;
+        nav.bg_color = Some(Color::Surface);
+        let nav_id = tree.add_child(root_id, Widget::Container(nav));
+        if let Some(nav_id) = nav_id {
+            let mut left = LabelWidget::default();
+            let _ = left.text.push_str("<");
+            left.color = Color::TextSecondary;
+            left.common.width_hint = SizeHint::Fixed(12);
+            let left_id = tree.add_child(nav_id, Widget::Label(left));
+
+            let mut label = LabelWidget::default();
+            let _ = label.text.push_str("ThistleOS");
+            label.color = Color::Text;
+            label.common.width_hint = SizeHint::Flex(1.0);
+            let label_id = tree.add_child(nav_id, Widget::Label(label));
+
+            let mut right = LabelWidget::default();
+            let _ = right.text.push_str(">");
+            right.color = Color::TextSecondary;
+            right.common.width_hint = SizeHint::Fixed(12);
+            let right_id = tree.add_child(nav_id, Widget::Label(right));
+
+            (left_id, right_id, label_id)
+        } else {
+            (None, None, None)
+        }
+    } else {
+        (None, None, None)
+    };
 
     let (mono_fb, rgb_fb) = match mode {
         DisplayMode::Mono => (Some(Framebuffer::new_mono(width, height)), None),
@@ -299,12 +377,18 @@ pub extern "C" fn tk_wm_init() -> i32 {
         tree,
         theme,
         mode,
+        layout,
         mono_fb,
         rgb_fb,
         width,
         height,
         dirty: true,
         text_buf: [0u8; 257],
+        micro_current_app: 0,
+        micro_app_count: 0,
+        micro_left_arrow: micro_left,
+        micro_right_arrow: micro_right,
+        micro_app_label: micro_label,
     });
 
     0 // ESP_OK
@@ -1089,3 +1173,73 @@ pub unsafe extern "C" fn tk_wm_on_app_stopped(_app_id: *const c_char) {}
 
 #[no_mangle]
 pub unsafe extern "C" fn tk_wm_on_app_switched(_app_id: *const c_char) {}
+
+// ---------------------------------------------------------------------------
+// Layout mode queries + micro mode navigation
+// ---------------------------------------------------------------------------
+
+/// Returns the current layout mode: 0=Full, 1=Compact, 2=Micro
+#[no_mangle]
+pub extern "C" fn tk_wm_get_layout_mode() -> i32 {
+    let lock = TK_WM.lock().unwrap();
+    match lock.as_ref() {
+        Some(state) => match state.layout {
+            LayoutMode::Full => 0,
+            LayoutMode::Compact => 1,
+            LayoutMode::Micro => 2,
+        },
+        None => 0,
+    }
+}
+
+/// Micro mode: switch to the next app (right arrow)
+#[no_mangle]
+pub extern "C" fn tk_wm_micro_next() {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    if state.layout != LayoutMode::Micro || state.micro_app_count <= 0 {
+        return;
+    }
+    state.micro_current_app = (state.micro_current_app + 1) % state.micro_app_count;
+    state.dirty = true;
+}
+
+/// Micro mode: switch to the previous app (left arrow)
+#[no_mangle]
+pub extern "C" fn tk_wm_micro_prev() {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    if state.layout != LayoutMode::Micro || state.micro_app_count <= 0 {
+        return;
+    }
+    state.micro_current_app = (state.micro_current_app - 1 + state.micro_app_count) % state.micro_app_count;
+    state.dirty = true;
+}
+
+/// Micro mode: set the number of apps and current index
+#[no_mangle]
+pub extern "C" fn tk_wm_micro_set_app_count(count: i32) {
+    let mut lock = TK_WM.lock().unwrap();
+    if let Some(state) = lock.as_mut() {
+        state.micro_app_count = count;
+        if state.micro_current_app >= count {
+            state.micro_current_app = 0;
+        }
+    }
+}
+
+/// Micro mode: get current app index
+#[no_mangle]
+pub extern "C" fn tk_wm_micro_get_current() -> i32 {
+    let lock = TK_WM.lock().unwrap();
+    match lock.as_ref() {
+        Some(state) => state.micro_current_app,
+        None => 0,
+    }
+}
