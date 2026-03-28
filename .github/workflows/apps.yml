@@ -1,0 +1,116 @@
+name: Build & Publish Apps
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'standalone_apps/**'
+      - 'app_sdk/**'
+      - 'driver_sdk/**'
+      - 'tools/sign_elf.py'
+      - 'tools/build_catalog.py'
+  workflow_dispatch:
+
+jobs:
+  build-apps:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5
+    strategy:
+      matrix:
+        arch: [esp32s3]
+        # Add more architectures as needed:
+        # arch: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up ESP-IDF target
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target "$TARGET_ARCH"
+
+      - name: Build standalone apps
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          . $IDF_PATH/export.sh
+          mkdir -p "artifacts/$TARGET_ARCH"
+
+          for app_dir in standalone_apps/*/; do
+            app_name=$(basename "$app_dir")
+            echo "Building $app_name for $TARGET_ARCH..."
+
+            mkdir -p "$app_dir/build"
+            cd "$app_dir/build"
+            cmake .. -DCMAKE_TOOLCHAIN_FILE="$IDF_PATH/tools/cmake/toolchain-${TARGET_ARCH}.cmake"
+            cmake --build . --parallel
+            cd -
+
+            # Copy artifacts
+            elf=$(find "$app_dir/build" -name "*.app.elf" | head -1)
+            if [ -n "$elf" ]; then
+              cp "$elf" "artifacts/$TARGET_ARCH/"
+              if [ -f "$app_dir/manifest.json" ]; then
+                cp "$app_dir/manifest.json" "artifacts/$TARGET_ARCH/${app_name}.manifest.json"
+              fi
+            fi
+          done
+
+      - name: Sign artifacts
+        if: env.SIGNING_KEY != ''
+        env:
+          SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          pip install pynacl
+          for elf in "artifacts/$TARGET_ARCH/"*.app.elf; do
+            python3 tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apps-${{ matrix.arch }}
+          path: artifacts/${{ matrix.arch }}/
+
+  publish-catalog:
+    needs: build-apps
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts/
+
+      - name: Merge artifacts
+        run: |
+          mkdir -p publish/apps
+          cp -r all-artifacts/*/. publish/apps/
+
+      - name: Generate catalog
+        run: |
+          pip install pynacl
+          python3 tools/build_catalog.py publish/apps \
+            --base-url "https://wan0net.github.io/thistle-apps/apps" \
+            --output publish/catalog.json \
+            --merge appstore-site/catalog.json 2>/dev/null || true
+
+          # Copy any existing static assets
+          cp -r appstore-site/* publish/ 2>/dev/null || true
+          # Catalog takes precedence
+          cp publish/catalog.json publish/catalog.json
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./publish
+          destination_dir: .
