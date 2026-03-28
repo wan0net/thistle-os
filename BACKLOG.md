@@ -98,7 +98,17 @@
 **Personas:** Cairn (SAR coordination), Thorn (secure comms)
 **Description:** Add voice call support using A7682E AT commands (ATD, ATA, ATH, +RING URC). Requires I2S audio bridge between modem PCM output and PCM5102A DAC, plus microphone input from T-Deck Pro keyboard PCB. Needs call UI: dialer, incoming call screen, in-call controls with mute/speaker/hangup.
 
-### Priority 19: Messenger Internet Transport (LTE/WiFi)
+### Priority 19: Mesh-to-Internet Gateway Mode
+**Status:** PENDING
+**Personas:** Cairn (SAR base camp), Ember (field station), ALL
+**Description:** A ThistleOS node with internet (WiFi or LTE) acts as a transparent mesh-to-internet gateway. Field devices on LoRa mesh send messages that hop to the gateway, which proxies them out via SMS, HTTP webhook, or any configured endpoint. Replies are relayed back into the mesh. Enables the "base station" pattern: one powered node at home/camp gives the entire mesh internet access. Implementation: MeshCore `onMessageRecv` checks if message is marked for internet relay → forwards via modem SMS or esp_http_client POST → relays response back as mesh message. Configuration via system.json (relay phone number, webhook URL, auth token).
+
+### Priority 20: Mesh Base Station (Dedicated Gateway Hardware)
+**Status:** PENDING
+**Personas:** Cairn (SAR coordination), Ember (field station mesh)
+**Description:** Headless base station mode for cheap hardware (Heltec V3, RAK, C3-Mini). No display needed — boots into MeshCore gateway with WiFi/LTE backhaul. Web UI for configuration (relay targets, mesh settings, status monitoring). Could run on a Raspberry Pi with LoRa hat as an alternative. Auto-starts mesh + PPP on boot, persists message queue across power cycles.
+
+### Priority 21: Messenger Internet Transport (LTE/WiFi)
 **Status:** PENDING
 **Personas:** Cairn, Thorn, Ember
 **Description:** Wire messenger Internet transport to use PPP (4G) or WiFi for message delivery. The modem driver's PPP stack is already implemented — once connected, esp_http_client routes over LTE transparently. Needs: backend API endpoint definition (REST or WebSocket), message relay server, auth token storage in NVS. Could use a simple self-hosted relay or a public service.
