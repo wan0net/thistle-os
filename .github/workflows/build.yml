@@ -43,7 +43,9 @@ jobs:
           if ! command -v espup &> /dev/null; then
             cargo install espup
           fi
-          espup install || echo "espup install failed (may be cached)"
+          if ! command -v ldproxy &>/dev/null; then
+            espup install
+          fi
           # NOTE: Do NOT source export-esp.sh here — it overrides ESP-IDF's
           # GCC with an incompatible version. The kernel_rs CMakeLists.txt
           # adds cargo to PATH when invoking the Rust build.
@@ -72,6 +74,10 @@ jobs:
         run: |
           . $IDF_PATH/export.sh
           SIZE=$(idf.py size 2>&1 | grep "Total image" | grep -oE '[0-9]+' | head -1)
+          if [ -z "$SIZE" ]; then
+            echo "::error::Could not determine firmware size"
+            exit 1
+          fi
           echo "Firmware size: $SIZE bytes ($(($SIZE / 1024)) KB)"
           if [ "$SIZE" -gt 4718592 ]; then
             echo "::error::Firmware exceeds 4.5MB OTA partition limit!"
@@ -116,7 +122,7 @@ jobs:
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Run Rust kernel tests
         working-directory: components/kernel_rs
@@ -203,7 +209,7 @@ jobs:
           submodules: recursive
 
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: .
@@ -213,7 +219,7 @@ jobs:
 
       - name: Run Trivy (SARIF for GitHub Security tab)
         if: always()
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: .

@@ -11,6 +11,9 @@ on:
       - 'tools/build_catalog.py'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-apps:
     runs-on: ubuntu-latest
@@ -37,6 +40,7 @@ jobs:
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
+          set -e
           . $IDF_PATH/export.sh
           mkdir -p "artifacts/$TARGET_ARCH"
 
@@ -51,12 +55,15 @@ jobs:
             cd -
 
             # Copy artifacts
+            mkdir -p "artifacts/$TARGET_ARCH"
             elf=$(find "$app_dir/build" -name "*.app.elf" | head -1)
             if [ -n "$elf" ]; then
               cp "$elf" "artifacts/$TARGET_ARCH/"
               if [ -f "$app_dir/manifest.json" ]; then
                 cp "$app_dir/manifest.json" "artifacts/$TARGET_ARCH/${app_name}.manifest.json"
               fi
+            else
+              echo "::warning::No .app.elf found for $app_name"
             fi
           done
 
@@ -81,6 +88,9 @@ jobs:
     needs: build-apps
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -105,11 +115,9 @@ jobs:
 
           # Copy any existing static assets
           cp -r appstore-site/* publish/ 2>/dev/null || true
-          # Catalog takes precedence
-          cp publish/catalog.json publish/catalog.json
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./publish

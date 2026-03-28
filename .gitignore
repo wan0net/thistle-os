@@ -19,9 +19,8 @@ managed_components/
 .cache/
 
 # Signing keys (NEVER commit private keys)
-*.key
-tools/dev_private.key
-tools/dev_public.key
+*_private.key
+tools/*_private.key
 
 # Rust build artifacts
 components/kernel_rs/target/
