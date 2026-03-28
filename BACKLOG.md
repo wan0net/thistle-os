@@ -90,3 +90,15 @@
 **Status:** DONE (unmerged, branch: feat/lora-msg-queue)
 **Personas:** Cairn (multi-hop SAR), Ember (field station mesh)
 **Description:** Queue outbound LoRa messages when no recipients in range. Auto-send when relay node comes in range. Persistent queue on SD card survives reboots. Retry with exponential backoff.
+
+## Post-1.0 — 2026-03-28
+
+### Priority 18: Voice Calls via A7682E Modem
+**Status:** PENDING
+**Personas:** Cairn (SAR coordination), Thorn (secure comms)
+**Description:** Add voice call support using A7682E AT commands (ATD, ATA, ATH, +RING URC). Requires I2S audio bridge between modem PCM output and PCM5102A DAC, plus microphone input from T-Deck Pro keyboard PCB. Needs call UI: dialer, incoming call screen, in-call controls with mute/speaker/hangup.
+
+### Priority 19: Messenger Internet Transport (LTE/WiFi)
+**Status:** PENDING
+**Personas:** Cairn, Thorn, Ember
+**Description:** Wire messenger Internet transport to use PPP (4G) or WiFi for message delivery. The modem driver's PPP stack is already implemented — once connected, esp_http_client routes over LTE transparently. Needs: backend API endpoint definition (REST or WebSocket), message relay server, auth token storage in NVS. Could use a simple self-hosted relay or a public service.
