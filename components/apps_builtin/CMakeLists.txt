@@ -30,5 +30,5 @@ idf_component_register(
         "vault/vault_app.c"
         "vault/vault_ui.c"
     INCLUDE_DIRS "."
-    REQUIRES kernel ui thistle_hal mbedtls esp_http_client
+    REQUIRES kernel ui thistle_hal mbedtls esp_http_client drv_modem_a7682e
 )

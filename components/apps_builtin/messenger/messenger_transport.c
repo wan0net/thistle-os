@@ -5,7 +5,7 @@
  * Four backends are registered at init time:
  *
  *  MSG_TRANSPORT_LORA     — uses hal_registry_t->radio (fully implemented)
- *  MSG_TRANSPORT_SMS      — A7682E 4G modem stub (logs TODO, returns NOT_SUPPORTED)
+ *  MSG_TRANSPORT_SMS      — A7682E 4G modem (send/receive via AT commands)
  *  MSG_TRANSPORT_BLE      — ble_manager relay stub (logs TODO, returns NOT_SUPPORTED)
  *  MSG_TRANSPORT_INTERNET — HTTP/WebSocket stub    (logs TODO, returns NOT_SUPPORTED)
  *
@@ -21,6 +21,7 @@
 #include "string.h"
 
 #include "hal/board.h"   /* hal_get_registry() / hal_registry_t */
+#include "drv_modem_a7682e.h"
 #include "thistle/ble_manager.h"
 
 static const char *TAG = "msg_transport";
@@ -163,47 +164,49 @@ static const msg_transport_driver_t s_lora_driver = {
 };
 
 /* ------------------------------------------------------------------ */
-/* SMS transport (stub)                                                 */
+/* SMS transport (A7682E modem)                                         */
 /* ------------------------------------------------------------------ */
+
+static msg_rx_cb_t s_sms_rx_cb;
 
 static bool sms_is_available(void)
 {
-    /*
-     * TODO: replace with drv_a7682e_is_ready() once the modem driver
-     * exposes a readiness check.  For now the modem is treated as
-     * unavailable so the stub never transmits anything.
-     */
-    return false;
+    return drv_a7682e_is_ready();
 }
 
 static esp_err_t sms_send(const char *dest, const char *text)
 {
-    (void)dest;
-    (void)text;
-    /*
-     * TODO: implement via A7682E AT command sequence:
-     *   AT+CMGF=1                    — set text mode
-     *   AT+CMGS="<dest>"\r           — start message to number
-     *   <text>\x1A                   — body + Ctrl-Z to send
-     */
-    ESP_LOGW(TAG, "SMS send: not yet implemented (dest=%s)", dest ? dest : "(null)");
-    return ESP_ERR_NOT_SUPPORTED;
+    if (!dest || !text) return ESP_ERR_INVALID_ARG;
+    return drv_a7682e_send_sms(dest, text);
+}
+
+static void sms_incoming_handler(int index, void *user_data)
+{
+    (void)user_data;
+    if (!s_sms_rx_cb) return;
+
+    char sender[32] = {0};
+    char body[200]  = {0};
+    if (drv_a7682e_read_sms(index, sender, sizeof(sender),
+                             body, sizeof(body)) == ESP_OK) {
+        s_sms_rx_cb(MSG_TRANSPORT_SMS, sender, body);
+        drv_a7682e_delete_sms(index);
+    }
 }
 
 static esp_err_t sms_start_receive(msg_rx_cb_t cb)
 {
-    (void)cb;
-    /*
-     * TODO: register AT+CMTI unsolicited result code handler with the
-     * A7682E driver so incoming SMS events invoke cb().
-     */
-    ESP_LOGW(TAG, "SMS start_receive: not yet implemented");
-    return ESP_ERR_NOT_SUPPORTED;
+    s_sms_rx_cb = cb;
+    esp_err_t ret = drv_a7682e_sms_init();
+    if (ret != ESP_OK) return ret;
+    drv_a7682e_register_sms_cb(sms_incoming_handler, NULL);
+    return ESP_OK;
 }
 
 static void sms_stop_receive(void)
 {
-    /* TODO: deregister CMTI handler */
+    drv_a7682e_register_sms_cb(NULL, NULL);
+    s_sms_rx_cb = NULL;
 }
 
 static const msg_transport_driver_t s_sms_driver = {
