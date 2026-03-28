@@ -42,7 +42,11 @@ def scan_artifacts(artifact_dir: str, base_url: str) -> list:
         has_sig = sig_path.exists()
 
         # Build relative URL path
-        rel_path = elf_path.relative_to(artifact_path)
+        try:
+            rel_path = elf_path.relative_to(artifact_path)
+        except ValueError:
+            print(f"Warning: skipping {manifest_file} — entry path outside artifact dir", file=sys.stderr)
+            continue
         elf_url = f"{base_url}/{rel_path}"
         sig_url = f"{base_url}/{rel_path}.sig" if has_sig else ""
 

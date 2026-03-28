@@ -74,6 +74,7 @@ jobs:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
           pip install pynacl
+          shopt -s nullglob
           for elf in "artifacts/$TARGET_ARCH/"*.app.elf; do
             python3 tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
           done

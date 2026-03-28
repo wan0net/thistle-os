@@ -70,7 +70,7 @@ extern "C" {
     fn vTaskDelete(task: *mut c_void);
 
     // Signing (Rust)
-    fn signing_verify_file(path: *const c_char) -> i32;
+    fn signing_verify(data: *const u8, data_len: usize, signature: *const u8) -> i32;
 
     // Permissions (Rust)
     fn permissions_grant(app_id: *const c_char, perms: u32) -> i32;
@@ -343,8 +343,17 @@ pub unsafe extern "C" fn elf_app_load(
         path
     };
 
-    // 4. Verify signature and set permissions using the correct identity
-    let sig_ret = signing_verify_file(path);
+    // 4. Verify signature on in-memory ELF data (avoids TOCTOU — no re-read from disk)
+    let sig_ret = {
+        let sig_path = format!("{}.sig", path_str);
+        match std::fs::read(&sig_path) {
+            Ok(sig_bytes) if sig_bytes.len() == 64 => {
+                signing_verify(buf as *const u8, size, sig_bytes.as_ptr())
+            }
+            Ok(_) => ESP_ERR_INVALID_SIZE,
+            Err(_) => ESP_ERR_NOT_FOUND,
+        }
+    };
     if sig_ret == ESP_OK {
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF signature verified: %s\0".as_ptr(), path);
         permissions_grant(perm_id, PERM_ALL);

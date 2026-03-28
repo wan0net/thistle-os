@@ -72,17 +72,19 @@ jobs:
       - name: Check firmware size
         shell: bash
         run: |
-          . $IDF_PATH/export.sh
-          SIZE=$(idf.py size 2>&1 | grep "Total image" | grep -oE '[0-9]+' | head -1)
-          if [ -z "$SIZE" ]; then
-            echo "::error::Could not determine firmware size"
+          BIN_PATH="build/thistle_os.bin"
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "::error::Firmware binary not found"
             exit 1
           fi
-          echo "Firmware size: $SIZE bytes ($(($SIZE / 1024)) KB)"
-          if [ "$SIZE" -gt 4718592 ]; then
-            echo "::error::Firmware exceeds 4.5MB OTA partition limit!"
+          SIZE=$(stat -c%s "$BIN_PATH" 2>/dev/null || stat -f%z "$BIN_PATH")
+          echo "Firmware size: $SIZE bytes"
+          MAX_SIZE=4718592
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::Firmware too large: $SIZE > $MAX_SIZE bytes (OTA partition limit)"
             exit 1
           fi
+          echo "Firmware size OK: $SIZE / $MAX_SIZE bytes"
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4

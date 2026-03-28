@@ -77,6 +77,10 @@ public:
 
     void finalizeHMAC(const uint8_t* key, size_t key_len, void* hmac_out, size_t hmac_len) {
         (void)key; (void)key_len;
+        if (_overflow) {
+            memset(hmac_out, 0, hmac_len);
+            return;
+        }
         // Use stored key from resetHMAC
         thistle_crypto_hmac_sha256(_hmac_key, _hmac_key_len, _buf, _buf_len, _hash);
         size_t n = (hmac_len < 32) ? hmac_len : 32;

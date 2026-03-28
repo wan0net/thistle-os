@@ -22,8 +22,8 @@ static inline void delay(unsigned long ms) {
 
 // ltoa stub (used by TxtDataHelpers)
 static inline char* ltoa(long val, char* buf, int radix) {
-    if (radix == 10) { sprintf(buf, "%ld", val); }
-    else if (radix == 16) { sprintf(buf, "%lx", val); }
+    if (radix == 10) { snprintf(buf, 12, "%ld", val); }
+    else if (radix == 16) { snprintf(buf, 12, "%lx", val); }
     else { buf[0] = '\0'; }
     return buf;
 }

@@ -31,6 +31,5 @@ recovery/target/
 simulator/build/
 .playwright-mcp/
 appstore-site/
-appstore-site/
 external/ghostty
 crates/thistle-tk/target/

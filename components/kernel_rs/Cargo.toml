@@ -25,5 +25,5 @@ embuild = "0.33"
 
 [profile.release]
 opt-level = "s"
-lto = false
-codegen-units = 16
+lto = "thin"
+codegen-units = 1

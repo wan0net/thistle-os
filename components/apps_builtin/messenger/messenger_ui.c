@@ -37,9 +37,11 @@
 #include "thistle/wifi_manager.h"
 #include "ui/theme.h"
 
+#include <stdatomic.h>
+
 static const char *TAG = "messenger_ui";
 
-static volatile int s_pending_rx = 0;
+static atomic_int s_pending_rx = 0;
 #define MAX_PENDING_RX 10
 
 /* ------------------------------------------------------------------ */
@@ -159,7 +161,7 @@ static void rx_async_handler(void *arg)
 {
     rx_async_arg_t *rx = (rx_async_arg_t *)arg;
     if (!rx) return;
-    s_pending_rx--;
+    atomic_fetch_sub(&s_pending_rx, 1);
 
     /* Find the matching conversation by transport type */
     int ci = -1;
@@ -255,13 +257,13 @@ static void transport_rx_cb(msg_transport_t transport,
                             const char *sender,
                             const char *text)
 {
-    if (s_pending_rx >= MAX_PENDING_RX) {
+    if (atomic_load(&s_pending_rx) >= MAX_PENDING_RX) {
         ESP_LOGW(TAG, "RX queue full, dropping message");
         return;
     }
-    s_pending_rx++;
+    atomic_fetch_add(&s_pending_rx, 1);
     rx_async_arg_t *arg = malloc(sizeof(rx_async_arg_t));
-    if (!arg) { s_pending_rx--; return; }
+    if (!arg) { atomic_fetch_sub(&s_pending_rx, 1); return; }
 
     arg->transport = transport;
     strncpy(arg->sender, sender ? sender : "?", sizeof(arg->sender) - 1);

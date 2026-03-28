@@ -133,7 +133,11 @@ static esp_err_t hw_aes128_ecb_encrypt(const uint8_t *key, const uint8_t *plaint
     }
 
     for (size_t i = 0; i < len; i += 16) {
-        mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_ENCRYPT, plaintext + i, ciphertext_out + i);
+        int ret = mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_ENCRYPT, plaintext + i, ciphertext_out + i);
+        if (ret != 0) {
+            mbedtls_aes_free(&ctx);
+            return ESP_FAIL;
+        }
     }
 
     mbedtls_aes_free(&ctx);
@@ -154,7 +158,11 @@ static esp_err_t hw_aes128_ecb_decrypt(const uint8_t *key, const uint8_t *cipher
     }
 
     for (size_t i = 0; i < len; i += 16) {
-        mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_DECRYPT, ciphertext + i, plaintext_out + i);
+        int ret = mbedtls_aes_crypt_ecb(&ctx, MBEDTLS_AES_DECRYPT, ciphertext + i, plaintext_out + i);
+        if (ret != 0) {
+            mbedtls_aes_free(&ctx);
+            return ESP_FAIL;
+        }
     }
 
     mbedtls_aes_free(&ctx);

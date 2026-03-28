@@ -68,7 +68,8 @@ static esp_err_t bhi260_write_reg(uint8_t reg, const uint8_t *data, size_t len)
     }
 
     // Build buffer: [reg, data...]
-    uint8_t buf[len + 1];
+    if (len > 63) return ESP_ERR_INVALID_SIZE;
+    uint8_t buf[64];
     buf[0] = reg;
     memcpy(&buf[1], data, len);
     return i2c_master_transmit(s_state.dev, buf, len + 1, BHI260_I2C_TIMEOUT);

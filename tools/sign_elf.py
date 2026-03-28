@@ -70,9 +70,12 @@ def main():
     if args.command == "keygen":
         keygen()
     elif args.command == "sign":
-        key = args.key
+        key = args.key.strip()
         if key.startswith("@"):
             key = Path(key[1:]).read_text().strip()
+        if len(key) != 64:
+            print(f"Error: private key must be 64 hex characters, got {len(key)}", file=sys.stderr)
+            sys.exit(1)
         sig_path, sha256, size = sign_file(args.elf, key)
         print(f"Signed: {sig_path}")
         print(f"SHA-256: {sha256}")

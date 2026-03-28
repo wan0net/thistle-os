@@ -79,13 +79,12 @@ pub unsafe extern "C" fn signing_init(key: *const u8) -> i32 {
     bytes_to_hex(&key_bytes, &mut hex[..64]);
     hex[64] = 0;
 
-    // Write hex buf once — safe because signing_init is called once at boot
-    {
-        HEX_BUF = hex;
-    }
-
+    // Write hex buf and verifying key under the same lock to avoid data races.
     match VERIFYING_KEY.lock() {
-        Ok(mut guard) => *guard = Some(verifying_key),
+        Ok(mut guard) => {
+            HEX_BUF = hex;
+            *guard = Some(verifying_key);
+        }
         Err(_) => return ESP_ERR_NO_MEM,
     }
 

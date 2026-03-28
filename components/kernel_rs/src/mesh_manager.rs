@@ -312,27 +312,45 @@ pub unsafe extern "C" fn rs_mesh_init(name: *const c_char, node_type: u8) -> i32
 }
 
 /// Deinitialise the mesh manager.
+///
+/// The deinit sequence mirrors init: drop the Mutex before calling into C
+/// to avoid deadlock if meshcore_deinit triggers callbacks that acquire
+/// MESH_STATE.
 #[no_mangle]
 pub extern "C" fn rs_mesh_deinit() -> i32 {
-    let mut state = match MESH_STATE.lock() {
-        Ok(s) => s,
-        Err(_) => return ESP_FAIL,
-    };
+    // Phase 1: mark as not initialized under lock, then drop lock
+    {
+        let mut state = match MESH_STATE.lock() {
+            Ok(s) => s,
+            Err(_) => return ESP_FAIL,
+        };
 
-    if !state.initialized {
-        return ESP_ERR_INVALID_STATE;
+        if !state.initialized {
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        state.initialized = false;
+        // Lock drops here
     }
 
+    // Phase 2: call meshcore_deinit with no lock held
     #[cfg(target_os = "espidf")]
     {
         let rc = unsafe { meshcore_deinit() };
         if rc != ESP_OK {
+            // Rollback: re-acquire lock, mark as initialized again
+            if let Ok(mut state) = MESH_STATE.lock() {
+                state.initialized = true;
+            }
             return rc;
         }
     }
 
-    state.initialized = false;
-    state.inbox_clear();
+    // Phase 3: clear inbox under lock
+    if let Ok(mut state) = MESH_STATE.lock() {
+        state.inbox_clear();
+    }
+
     ESP_OK
 }
 

@@ -338,8 +338,10 @@ int meshcore_send_message(const uint8_t* dest_pub_key, const char* text) {
     uint32_t expected_ack = 0, est_timeout = 0;
     int result = s_mesh->sendMessage(ci, timestamp, 0, text, expected_ack, est_timeout);
 
-    s_mesh->stats()->messages_sent++;
-    s_mesh->stats()->packets_sent++;
+    if (result != MESHCORE_SEND_FAILED) {
+        s_mesh->stats()->messages_sent++;
+        s_mesh->stats()->packets_sent++;
+    }
 
     return result;
 }

@@ -237,5 +237,5 @@ pub extern "C" fn kernel_run() {
 pub extern "C" fn kernel_uptime_ms() -> u32 {
     let boot = BOOT_TIME_US.lock().map(|t| *t).unwrap_or(0);
     let now = unsafe { esp_timer_get_time() };
-    ((now - boot) / 1000) as u32
+    ((now - boot) / 1000).min(u32::MAX as i64) as u32
 }
