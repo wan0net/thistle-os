@@ -470,6 +470,14 @@ esp_err_t ghostterm_ui_create(lv_obj_t *parent)
     s_ghost.input_ta = lv_textarea_create(input_bar);
     lv_textarea_set_one_line(s_ghost.input_ta, true);
     lv_textarea_set_placeholder_text(s_ghost.input_ta, "type here...");
+
+    /* Add to default input group so keyboard events reach this textarea */
+    lv_group_t *grp = lv_group_get_default();
+    if (grp) {
+        lv_group_add_obj(grp, s_ghost.input_ta);
+        lv_group_focus_obj(s_ghost.input_ta);
+    }
+
     lv_obj_set_flex_grow(s_ghost.input_ta, 1);
     lv_obj_set_height(s_ghost.input_ta, INPUT_BAR_H - 4);
     lv_obj_set_style_bg_color(s_ghost.input_ta, clr->bg, LV_PART_MAIN);

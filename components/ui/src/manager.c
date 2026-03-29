@@ -319,6 +319,11 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     lv_indev_set_type(s_kbd_indev, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(s_kbd_indev, ui_kbd_read_cb);
 
+    /* 4b2. Create a default input group so keyboard events reach focused widgets */
+    lv_group_t *default_group = lv_group_create();
+    lv_group_set_default(default_group);
+    lv_indev_set_group(s_kbd_indev, default_group);
+
     /* 4c. Wire HAL input callbacks to every registered input driver.
      *     A single combined callback handles both touch and key events so
      *     that drivers which emit both types (e.g. SDL2 simulator) work
