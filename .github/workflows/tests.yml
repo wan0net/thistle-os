@@ -54,7 +54,7 @@ jobs:
             ~/.cargo/registry
             ~/.rustup
             components/kernel_rs/target
-          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock', 'components/kernel_rs/src/**', 'crates/thistle-tk/src/**') }}
 
       - name: Install Rust
         run: |
@@ -105,7 +105,7 @@ jobs:
             ~/.cargo/registry
             ~/.rustup
             components/kernel_rs/target
-          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock', 'components/kernel_rs/src/**', 'crates/thistle-tk/src/**') }}
 
       - name: Install Rust
         run: |
