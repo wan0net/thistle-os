@@ -55,7 +55,8 @@ static esp_err_t sim_display_init(const void *config)
         printf("sim_display: framebuffer alloc failed\n");
         free(s_fb);
         free(s_fb32);
-        s_fb = s_fb32 = NULL;
+        s_fb = NULL;
+        s_fb32 = NULL;
         return ESP_ERR_NO_MEM;
     }
 
