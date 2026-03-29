@@ -46,10 +46,8 @@ static const sim_device_t DEVICES[] = {
     { "tdisplay",   "T-Display-S3 (Simulator)",    320, 170, false, true,  false, false, false },
     { "heltec-v3",  "Heltec V3 (Simulator)",       128, 64,  false, false, true,  false, false },
     { "cardputer",  "Cardputer (Simulator)",        240, 135, true,  false, false, false, false },
-    { "cyd-s022",   "CYD S022 (Simulator)",         240, 320, false, true,  false, false, false },
-    { "cyd-s028",   "CYD S028 (Simulator)",         320, 240, false, true,  false, false, false },
     { "t3-s3",      "T3-S3 (Simulator)",            128, 64,  false, false, true,  false, false },
-    { "c3-mini",    "C3-Mini (Simulator)",           128, 64,  false, false, false, false, false },
+    { "rak3312",    "RAK3312 (Simulator)",           128, 64,  false, false, true,  false, false },
     { NULL, NULL, 0, 0, false, false, false, false, false },
 };
 

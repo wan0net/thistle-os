@@ -51,14 +51,14 @@ if [ ! -x "$SIM" ]; then
 fi
 
 echo "[Boot Tests — All Devices]"
-for device in tdeck-pro tdeck tdeck-plus tdisplay heltec-v3 cardputer cyd-s022 cyd-s028 t3-s3 c3-mini; do
+for device in tdeck-pro tdeck tdeck-plus tdisplay heltec-v3 cardputer t3-s3 rak3312; do
     run_test "boot/$device" "$device" "$TESTS_DIR/boot_assertions.txt"
 done
 
 echo ""
 echo "[HAL Completeness]"
 run_test "hal/tdeck (full device)" "tdeck" "$TESTS_DIR/hal_complete_assertions.txt"
-run_test "hal/c3-mini (minimal)" "c3-mini" "$TESTS_DIR/hal_complete_assertions.txt"
+run_test "hal/heltec-v3 (minimal)" "heltec-v3" "$TESTS_DIR/hal_complete_assertions.txt"
 
 echo ""
 echo "[Driver Init — Virtual I2C]"
@@ -75,7 +75,7 @@ run_test "scenario/tdeck" "tdeck" "$TESTS_DIR/scenario_assertions.txt" "--scenar
 
 echo ""
 echo "[Minimal Devices]"
-run_test "minimal/c3-mini" "c3-mini" "$TESTS_DIR/minimal_device_assertions.txt"
+run_test "minimal/heltec-v3" "heltec-v3" "$TESTS_DIR/minimal_device_assertions.txt"
 run_test "minimal/tdisplay" "tdisplay" "$TESTS_DIR/minimal_device_assertions.txt"
 
 echo ""

@@ -40,7 +40,7 @@ static TAG: &[u8] = b"ble_scan\0";
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_DEVICES: usize = 64;
+const MAX_DEVICES: usize = 32;
 const MAX_NAME_LEN: usize = 32;
 const MAX_ADV_LEN: usize = 31;
 const MAX_SERVICES: usize = 8;
@@ -94,7 +94,9 @@ struct BleGapDiscEvent {
 // Data model
 // ---------------------------------------------------------------------------
 
-/// A discovered BLE device.
+/// A discovered BLE device (~216 bytes, down from ~280).
+/// The raw adv_data/scan_rsp buffers were removed — they were only used as
+/// temporary parse buffers in the scan callback and never read back.
 #[derive(Clone)]
 pub(crate) struct BleDevice {
     addr: [u8; 6],
@@ -102,10 +104,6 @@ pub(crate) struct BleDevice {
     name: [u8; MAX_NAME_LEN],
     name_len: usize,
     rssi: i8,
-    adv_data: [u8; MAX_ADV_LEN],
-    adv_len: usize,
-    scan_rsp: [u8; MAX_ADV_LEN],
-    scan_rsp_len: usize,
     services: [[u8; 16]; MAX_SERVICES],
     service_count: usize,
     mfg_data: [u8; MAX_ADV_LEN],
@@ -124,10 +122,6 @@ impl BleDevice {
             name: [0u8; MAX_NAME_LEN],
             name_len: 0,
             rssi: -127,
-            adv_data: [0u8; MAX_ADV_LEN],
-            adv_len: 0,
-            scan_rsp: [0u8; MAX_ADV_LEN],
-            scan_rsp_len: 0,
             services: [[0u8; 16]; MAX_SERVICES],
             service_count: 0,
             mfg_data: [0u8; MAX_ADV_LEN],
@@ -215,7 +209,9 @@ fn device_to_c(dev: &BleDevice) -> CBleDeviceInfo {
 // ---------------------------------------------------------------------------
 
 struct BleScanner {
-    devices: [Option<BleDevice>; MAX_DEVICES],
+    /// Lazily allocated on first scan — `None` when idle (8 bytes DRAM).
+    /// When allocated, ~7 KB goes to PSRAM (exceeds SPIRAM_MALLOC_ALWAYSINTERNAL).
+    devices: Option<Box<[Option<BleDevice>; MAX_DEVICES]>>,
     device_count: usize,
     scanning: bool,
     scan_type: u8,
@@ -228,9 +224,8 @@ struct BleScanner {
 
 impl BleScanner {
     const fn new() -> Self {
-        const NONE: Option<BleDevice> = None;
         BleScanner {
-            devices: [NONE; MAX_DEVICES],
+            devices: None,
             device_count: 0,
             scanning: false,
             scan_type: 0,
@@ -242,9 +237,20 @@ impl BleScanner {
         }
     }
 
+    /// Ensure the device array is heap-allocated, returning a mutable ref.
+    fn ensure_devices(&mut self) -> &mut [Option<BleDevice>; MAX_DEVICES] {
+        if self.devices.is_none() {
+            const NONE: Option<BleDevice> = None;
+            self.devices = Some(Box::new([NONE; MAX_DEVICES]));
+        }
+        self.devices.as_mut().unwrap()
+    }
+
     fn clear_devices(&mut self) {
-        for slot in self.devices.iter_mut() {
-            *slot = None;
+        if let Some(ref mut devices) = self.devices {
+            for slot in devices.iter_mut() {
+                *slot = None;
+            }
         }
         self.device_count = 0;
         self.total_adv_seen = 0;
@@ -252,8 +258,12 @@ impl BleScanner {
 
     /// Find device index by BLE MAC address.
     fn find_by_addr(&self, addr: &[u8; 6]) -> Option<usize> {
+        let devices = match self.devices.as_ref() {
+            Some(d) => &**d,
+            None => return None,
+        };
         for i in 0..MAX_DEVICES {
-            if let Some(ref dev) = self.devices[i] {
+            if let Some(ref dev) = devices[i] {
                 if dev.addr == *addr {
                     return Some(i);
                 }
@@ -262,10 +272,11 @@ impl BleScanner {
         None
     }
 
-    /// Find first empty slot.
-    fn find_empty_slot(&self) -> Option<usize> {
+    /// Find first empty slot (allocates device array if needed).
+    fn find_empty_slot(&mut self) -> Option<usize> {
+        let devices = self.ensure_devices();
         for i in 0..MAX_DEVICES {
-            if self.devices[i].is_none() {
+            if devices[i].is_none() {
                 return Some(i);
             }
         }
@@ -274,10 +285,14 @@ impl BleScanner {
 
     /// Find the device with the weakest RSSI (for eviction at capacity).
     fn find_weakest_rssi_index(&self) -> Option<usize> {
+        let devices = match self.devices.as_ref() {
+            Some(d) => &**d,
+            None => return None,
+        };
         let mut weakest_idx: Option<usize> = None;
         let mut weakest_rssi: i8 = 127;
         for i in 0..MAX_DEVICES {
-            if let Some(ref dev) = self.devices[i] {
+            if let Some(ref dev) = devices[i] {
                 if dev.rssi < weakest_rssi {
                     weakest_rssi = dev.rssi;
                     weakest_idx = Some(i);
@@ -314,7 +329,8 @@ impl BleScanner {
 
         if let Some(idx) = self.find_by_addr(&new_dev.addr) {
             // Update existing device
-            if let Some(ref mut dev) = self.devices[idx] {
+            let devices = self.ensure_devices();
+            if let Some(ref mut dev) = devices[idx] {
                 dev.rssi = new_dev.rssi;
                 dev.last_seen = new_dev.last_seen;
                 dev.seen_count += 1;
@@ -358,7 +374,7 @@ impl BleScanner {
                 // At capacity — evict weakest RSSI
                 match self.find_weakest_rssi_index() {
                     Some(i) => {
-                        self.devices[i] = None;
+                        self.ensure_devices()[i] = None;
                         self.device_count -= 1;
                         i
                     }
@@ -367,15 +383,19 @@ impl BleScanner {
             };
             let mut dev = new_dev.clone();
             dev.seen_count = 1;
-            self.devices[idx] = Some(dev);
+            self.ensure_devices()[idx] = Some(dev);
             self.device_count += 1;
         }
     }
 
     /// Get the nth populated device (skipping empty slots).
     fn get_device_by_index(&self, index: usize) -> Option<&BleDevice> {
+        let devices = match self.devices.as_ref() {
+            Some(d) => &**d,
+            None => return None,
+        };
         let mut count = 0usize;
-        for slot in self.devices.iter() {
+        for slot in devices.iter() {
             if let Some(ref dev) = slot {
                 if count == index {
                     return Some(dev);
@@ -386,36 +406,33 @@ impl BleScanner {
         None
     }
 
-    /// Sort devices by RSSI (strongest first).  Uses simple insertion sort
-    /// since MAX_DEVICES is small.
+    /// Sort devices by RSSI (strongest first).  Uses heap-allocated Vec
+    /// for temporaries to avoid large stack allocations.
     fn sort_by_rssi(&mut self) {
-        // Collect all devices into a temporary vec-like array
-        let mut sorted: [Option<BleDevice>; MAX_DEVICES] = {
-            const NONE: Option<BleDevice> = None;
-            [NONE; MAX_DEVICES]
+        let devices = match self.devices.as_mut() {
+            Some(d) => &mut **d,
+            None => return,
         };
-        let mut count = 0usize;
-        for slot in self.devices.iter() {
-            if let Some(ref dev) = slot {
-                sorted[count] = Some(dev.clone());
-                count += 1;
-            }
+        // Collect populated indices
+        let mut indices: Vec<usize> = (0..MAX_DEVICES)
+            .filter(|&i| devices[i].is_some())
+            .collect();
+        // Sort indices by RSSI descending
+        indices.sort_by(|&a, &b| {
+            let rssi_a = devices[a].as_ref().map(|d| d.rssi).unwrap_or(-127);
+            let rssi_b = devices[b].as_ref().map(|d| d.rssi).unwrap_or(-127);
+            rssi_b.cmp(&rssi_a)
+        });
+        // Rebuild array in sorted order
+        let mut sorted: Vec<Option<BleDevice>> = indices.iter().map(|&i| devices[i].take()).collect();
+        // Clear remaining slots
+        for slot in devices.iter_mut() {
+            *slot = None;
         }
-        // Insertion sort by RSSI descending
-        for i in 1..count {
-            let mut j = i;
-            while j > 0 {
-                let rssi_j = sorted[j].as_ref().map(|d| d.rssi).unwrap_or(-127);
-                let rssi_jm1 = sorted[j - 1].as_ref().map(|d| d.rssi).unwrap_or(-127);
-                if rssi_j > rssi_jm1 {
-                    sorted.swap(j, j - 1);
-                    j -= 1;
-                } else {
-                    break;
-                }
-            }
+        // Place sorted devices at the front
+        for (i, dev) in sorted.drain(..).enumerate() {
+            devices[i] = dev;
         }
-        self.devices = sorted;
     }
 }
 
@@ -579,8 +596,6 @@ unsafe extern "C" fn scan_event_cb(event: *mut BleGapDiscEvent, _arg: *mut c_voi
 
     if !data_ptr.is_null() && data_len > 0 && data_len <= MAX_ADV_LEN {
         let raw = std::slice::from_raw_parts(data_ptr, data_len);
-        dev.adv_data[..data_len].copy_from_slice(raw);
-        dev.adv_len = data_len;
         parse_adv_data(raw, &mut dev);
     }
 
@@ -783,9 +798,11 @@ pub unsafe extern "C" fn rs_ble_scanner_find_by_addr(
         Ok(s) => {
             match s.find_by_addr(&addr_buf) {
                 Some(idx) => {
-                    if let Some(ref dev) = s.devices[idx] {
-                        *out = device_to_c(dev);
-                        return ESP_OK;
+                    if let Some(ref devices) = s.devices {
+                        if let Some(ref dev) = devices[idx] {
+                            *out = device_to_c(dev);
+                            return ESP_OK;
+                        }
                     }
                     ESP_ERR_NOT_FOUND
                 }
@@ -822,19 +839,21 @@ pub unsafe extern "C" fn rs_ble_scanner_find_by_name(
     match SCANNER.lock() {
         Ok(s) => {
             let mut found = 0u32;
-            for slot in s.devices.iter() {
-                if found >= max {
-                    break;
-                }
-                if let Some(ref dev) = slot {
-                    if dev.name_len == 0 {
-                        continue;
+            if let Some(ref devices) = s.devices {
+                for slot in devices.iter() {
+                    if found >= max {
+                        break;
                     }
-                    // Case-insensitive substring search
-                    let dev_name = &dev.name[..dev.name_len];
-                    if contains_ci(dev_name, &needle_lower) {
-                        *results.add(found as usize) = device_to_c(dev);
-                        found += 1;
+                    if let Some(ref dev) = slot {
+                        if dev.name_len == 0 {
+                            continue;
+                        }
+                        // Case-insensitive substring search
+                        let dev_name = &dev.name[..dev.name_len];
+                        if contains_ci(dev_name, &needle_lower) {
+                            *results.add(found as usize) = device_to_c(dev);
+                            found += 1;
+                        }
                     }
                 }
             }
@@ -932,13 +951,15 @@ pub unsafe extern "C" fn rs_ble_scanner_get_stats(out: *mut CBleScanStats) -> i3
         Ok(s) => {
             let mut strongest: i8 = -127;
             let mut weakest: i8 = 127;
-            for slot in s.devices.iter() {
-                if let Some(ref dev) = slot {
-                    if dev.rssi > strongest {
-                        strongest = dev.rssi;
-                    }
-                    if dev.rssi < weakest {
-                        weakest = dev.rssi;
+            if let Some(ref devices) = s.devices {
+                for slot in devices.iter() {
+                    if let Some(ref dev) = slot {
+                        if dev.rssi > strongest {
+                            strongest = dev.rssi;
+                        }
+                        if dev.rssi < weakest {
+                            weakest = dev.rssi;
+                        }
                     }
                 }
             }
@@ -1111,7 +1132,9 @@ mod tests {
         assert_eq!(rs_ble_scanner_get_count(), 1);
         // Check updated fields
         if let Ok(s) = SCANNER.lock() {
-            let d = s.find_by_addr(&addr).and_then(|i| s.devices[i].as_ref()).unwrap();
+            let d = s.find_by_addr(&addr)
+                .and_then(|i| s.devices.as_ref().and_then(|devs| devs[i].as_ref()))
+                .unwrap();
             assert_eq!(d.rssi, -45);
             assert_eq!(d.seen_count, 2);
             assert_eq!(d.name_len, 10); // "LongerName" is longer
@@ -1605,8 +1628,10 @@ mod tests {
         // Make device at index 0 the weakest
         {
             let mut s = SCANNER.lock().unwrap();
-            if let Some(ref mut d) = s.devices[0] {
-                d.rssi = -100;
+            if let Some(ref mut devices) = s.devices {
+                if let Some(ref mut d) = devices[0] {
+                    d.rssi = -100;
+                }
             }
         }
 

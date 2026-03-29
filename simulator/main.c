@@ -88,7 +88,7 @@ int main(int argc, char **argv)
             printf("  --scenario FILE     Replay input scenario from FILE (future)\n");
             printf("  -h, --help          Show this help\n");
             printf("Devices: tdeck-pro, tdeck, tdeck-plus, tdisplay, heltec-v3,\n");
-            printf("         cardputer, cyd-s022, cyd-s028, t3-s3, c3-mini\n");
+            printf("         cardputer, t3-s3, rak3312\n");
             return 0;
         }
     }
