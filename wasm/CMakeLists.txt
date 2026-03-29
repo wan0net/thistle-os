@@ -60,6 +60,8 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/terminal/terminal_ui.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_app.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_ui.c
+    ${THISTLE_DIR}/components/apps_builtin/ghostterm/ghostterm_app.c
+    ${THISTLE_DIR}/components/apps_builtin/ghostterm/ghostterm_ui.c
 )
 
 # WASM-specific sources
@@ -72,6 +74,21 @@ set(WASM_SRCS
     ${SIM_DIR}/drivers/sim_input.c
     ${SIM_DIR}/drivers/sim_storage.c
     ${SIM_DIR}/drivers/sim_network.c
+    ${SIM_DIR}/drivers/sim_power.c
+    ${SIM_DIR}/drivers/sim_gps.c
+    ${SIM_DIR}/drivers/sim_imu.c
+    ${SIM_DIR}/drivers/sim_rtc.c
+    ${SIM_DIR}/drivers/sim_audio.c
+    ${SIM_DIR}/drivers/sim_radio.c
+    ${SIM_DIR}/drivers/sim_scenario.c
+    ${SIM_DIR}/platform/sim_i2c_bus.c
+    ${SIM_DIR}/platform/sim_spi_bus.c
+    ${SIM_DIR}/devices/dev_pcf8563.c
+    ${SIM_DIR}/devices/dev_qmi8658c.c
+    ${SIM_DIR}/devices/dev_tca8418.c
+    ${SIM_DIR}/devices/dev_cst328.c
+    ${SIM_DIR}/devices/dev_ltr553.c
+    ${SIM_DIR}/sim_assert.c
     ${SIM_DIR}/board_simulator.c
     ${SIM_DIR}/platform/sim_vfs.c
 )
@@ -87,6 +104,7 @@ target_include_directories(thistle_wasm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../simulator/platform
     ${CMAKE_CURRENT_SOURCE_DIR}/../simulator/drivers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../simulator/devices
     ${CMAKE_CURRENT_SOURCE_DIR}/../simulator
     # LVGL
     ${LVGL_DIR}

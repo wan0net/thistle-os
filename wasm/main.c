@@ -31,6 +31,7 @@
 #include "weather/weather_app.h"
 #include "terminal/terminal_app.h"
 #include "vault/vault_app.h"
+#include "ghostterm/ghostterm_app.h"
 
 #include "lvgl.h"
 #include "hal/board.h"
@@ -66,13 +67,14 @@ extern int rs_meshchat_update(void);
 /* Device selection — JS calls _wasm_set_device(idx) before main runs */
 static const char *DEVICE_NAMES[] = {
     "tdeck","tdeck-pro","tdeck-plus","tdisplay","heltec-v3",
-    "cardputer","cyd-s022","cyd-s028","t3-s3","c3-mini"
+    "cardputer","t3-s3","rak3312"
 };
+#define NUM_DEVICES 8
 static const char *wasm_device_name = "tdeck";
 
 EMSCRIPTEN_KEEPALIVE
 void wasm_set_device(int idx) {
-    if (idx >= 0 && idx < 10) {
+    if (idx >= 0 && idx < NUM_DEVICES) {
         wasm_device_name = DEVICE_NAMES[idx];
     }
 }
@@ -106,6 +108,7 @@ int main(void)
     vault_app_register();
     appstore_app_register();
     terminal_app_register();
+    ghostterm_app_register();
 
     /* Conditional apps based on device capabilities */
     if (sim_board_has_radio()) {
@@ -120,9 +123,7 @@ int main(void)
     assistant_app_register();  /* works on any device with network */
     weather_app_register();
 
-    printf("%d apps registered for %s\n",
-        9 + (sim_board_has_radio() ? 2 : 0) + (sim_board_has_gps() ? 1 : 0) + 2,
-        device_buf);
+    printf("Apps registered for %s\n", wasm_device_name);
 
     /* Grant permissions */
     permissions_grant("com.thistle.launcher",   0x7F);
@@ -139,6 +140,7 @@ int main(void)
     permissions_grant("com.thistle.weather",    0x02);
     permissions_grant("com.thistle.terminal",   0x7F);
     permissions_grant("com.thistle.vault",      0x24);
+    permissions_grant("com.thistle.ghostterm",  0x7F);
 
     /* Launch launcher */
     app_manager_launch("com.thistle.launcher");

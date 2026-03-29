@@ -156,3 +156,37 @@ void sim_http_client_cleanup(sim_http_client_handle_t c) { (void)c; }
 int drv_a7682e_start_ppp(void) { return -1; }
 int drv_a7682e_stop_ppp(void) { return 0; }
 int drv_a7682e_ppp_connected(void) { return 0; }
+
+/* ── Crypto driver stub ───────────────────────────────────────────── */
+void *drv_crypto_mbedtls_get(void) { return NULL; }
+
+/* ── GPIO stubs ───────────────────────────────────────────────────── */
+int gpio_config(const void *cfg) { (void)cfg; return 0; }
+int gpio_set_level(int pin, unsigned int level) { (void)pin; (void)level; return 0; }
+int gpio_get_level(int pin) { (void)pin; return 0; }
+int gpio_install_isr_service(int flags) { (void)flags; return 0; }
+int gpio_isr_handler_add(int pin, void(*fn)(void*), void *arg) { (void)pin; (void)fn; (void)arg; return 0; }
+int gpio_isr_handler_remove(int pin) { (void)pin; return 0; }
+int gpio_set_direction(int pin, int mode) { (void)pin; (void)mode; return 0; }
+int gpio_set_pull_mode(int pin, int mode) { (void)pin; (void)mode; return 0; }
+int gpio_set_intr_type(int pin, int type) { (void)pin; (void)type; return 0; }
+int gpio_intr_enable(int pin) { (void)pin; return 0; }
+
+/* ── UART stubs ───────────────────────────────────────────────────── */
+int uart_param_config(int num, const void *cfg) { (void)num; (void)cfg; return 0; }
+int uart_set_pin(int num, int tx, int rx, int rts, int cts) { (void)num; (void)tx; (void)rx; (void)rts; (void)cts; return 0; }
+int uart_driver_install(int num, int rx, int tx, int q, void *qh, int f) { (void)num; (void)rx; (void)tx; (void)q; (void)qh; (void)f; return 0; }
+int uart_driver_delete(int num) { (void)num; return 0; }
+int uart_write_bytes(int num, const void *data, int len) { (void)num; (void)data; return len; }
+int uart_read_bytes(int num, void *buf, int len, int timeout) { (void)num; (void)buf; (void)len; (void)timeout; return 0; }
+
+/* ── Queue wrappers (C callers) ───────────────────────────────────── */
+void *xQueueCreate(unsigned int len, unsigned int sz) { return xQueueGenericCreate(len, sz, 0); }
+int xQueueSend(void *q, const void *item, unsigned int ticks) { return xQueueGenericSend(q, item, ticks, 0); }
+
+/* ── Kernel function stubs needed by new modules ──────────────────── */
+unsigned int esp_get_free_heap_size(void) { return 4 * 1024 * 1024; }
+void esp_restart(void) { printf("esp_restart called (WASM: no-op)\n"); }
+int app_manager_get_count(void) { return 0; }
+unsigned long long hal_storage_get_total_bytes(void) { return 16ULL * 1024 * 1024 * 1024; }
+unsigned long long hal_storage_get_free_bytes(void) { return 14ULL * 1024 * 1024 * 1024; }
