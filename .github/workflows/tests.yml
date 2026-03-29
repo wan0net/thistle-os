@@ -14,7 +14,7 @@ jobs:
     name: Unit Tests (Host)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -37,7 +37,7 @@ jobs:
     name: Simulator Boot Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: simulator-boot  # Only run if basic boot passes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -121,7 +121,7 @@ jobs:
     name: Rust Kernel Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
