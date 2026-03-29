@@ -574,6 +574,261 @@ fn is_leap(year: u64) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// WiFi credential persistence — save/load from system.json
+// ---------------------------------------------------------------------------
+
+/// Resolve the path to system.json (SD card first, then SPIFFS, then simulator).
+fn system_json_path() -> &'static str {
+    #[cfg(target_os = "espidf")]
+    {
+        if std::path::Path::new("/sdcard/config/system.json").exists() {
+            return "/sdcard/config/system.json";
+        }
+        "/spiffs/config/system.json"
+    }
+    #[cfg(not(target_os = "espidf"))]
+    {
+        "/tmp/thistle_sdcard/config/system.json"
+    }
+}
+
+/// Replace a JSON string value for a given key in-place.
+/// Finds `"key": "old_value"` and replaces `old_value` with `new_value`.
+fn replace_json_string_value(json: &str, key: &str, new_value: &str) -> String {
+    let key_pattern = format!("\"{}\"", key);
+    if let Some(key_pos) = json.find(&key_pattern) {
+        let after_key_quote = &json[key_pos + key_pattern.len()..];
+        // Skip optional whitespace then colon
+        let after_ws = after_key_quote.trim_start();
+        if !after_ws.starts_with(':') {
+            return json.to_string();
+        }
+        let after_colon = &after_ws[1..];
+        let trimmed = after_colon.trim_start();
+        if trimmed.starts_with('"') {
+            // Calculate absolute position of the character after the opening quote
+            let value_start = json.len() - trimmed.len() + 1;
+            if let Some(end_quote) = json[value_start..].find('"') {
+                let mut result = String::new();
+                result.push_str(&json[..value_start]);
+                result.push_str(new_value);
+                result.push_str(&json[value_start + end_quote..]);
+                return result;
+            }
+        }
+    }
+    json.to_string()
+}
+
+/// Replace a JSON boolean value for a given key in-place.
+/// Finds `"key": true/false` and replaces with the new boolean.
+fn replace_json_bool_value(json: &str, key: &str, new_value: bool) -> String {
+    let key_pattern = format!("\"{}\"", key);
+    if let Some(key_pos) = json.find(&key_pattern) {
+        let after_key_quote = &json[key_pos + key_pattern.len()..];
+        let after_ws = after_key_quote.trim_start();
+        if !after_ws.starts_with(':') {
+            return json.to_string();
+        }
+        let after_colon = &after_ws[1..];
+        let trimmed = after_colon.trim_start();
+        let old_token;
+        if trimmed.starts_with("true") {
+            old_token = "true";
+        } else if trimmed.starts_with("false") {
+            old_token = "false";
+        } else {
+            return json.to_string();
+        }
+        let token_start = json.len() - trimmed.len();
+        let token_end = token_start + old_token.len();
+        let new_token = if new_value { "true" } else { "false" };
+        let mut result = String::new();
+        result.push_str(&json[..token_start]);
+        result.push_str(new_token);
+        result.push_str(&json[token_end..]);
+        return result;
+    }
+    json.to_string()
+}
+
+/// Extract a string value for a given key from JSON text.
+/// Lightweight helper matching the approach in manifest.rs.
+fn find_string_value(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":", key);
+    let start = json.find(&pattern)?;
+    let after_key = &json[start + pattern.len()..];
+    let trimmed = after_key.trim_start();
+    if !trimmed.starts_with('"') {
+        return None;
+    }
+    let value_start = &trimmed[1..];
+    let end = value_start.find('"')?;
+    Some(value_start[..end].to_string())
+}
+
+/// Extract a boolean value for a given key from JSON text.
+fn find_bool_value(json: &str, key: &str) -> Option<bool> {
+    let pattern = format!("\"{}\":", key);
+    let start = json.find(&pattern)?;
+    let after_key = &json[start + pattern.len()..];
+    let trimmed = after_key.trim_start();
+    if trimmed.starts_with("true") {
+        Some(true)
+    } else if trimmed.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Save WiFi credentials to system.json for auto-connect on boot.
+///
+/// # Safety
+/// `ssid` and `password` must be valid null-terminated C strings.
+/// `password` may be NULL for open networks.
+#[no_mangle]
+pub unsafe extern "C" fn wifi_manager_save_credentials(
+    ssid: *const c_char,
+    password: *const c_char,
+) -> i32 {
+    if ssid.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let ssid_str = match std::ffi::CStr::from_ptr(ssid).to_str() {
+        Ok(s) => s,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+    let pass_str = if password.is_null() {
+        ""
+    } else {
+        match std::ffi::CStr::from_ptr(password).to_str() {
+            Ok(s) => s,
+            Err(_) => "",
+        }
+    };
+
+    let path = system_json_path();
+    let json = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Cannot read %s for credential save\0".as_ptr(),
+                path.as_ptr(),
+            );
+            return ESP_ERR_NOT_FOUND;
+        }
+    };
+
+    // Update the wifi section fields
+    let json = replace_json_string_value(&json, "ssid", ssid_str);
+    let json = replace_json_string_value(&json, "password", pass_str);
+    let json = replace_json_bool_value(&json, "enabled", true);
+
+    match std::fs::write(path, &json) {
+        Ok(_) => {
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"WiFi credentials saved to system.json\0".as_ptr(),
+            );
+            ESP_OK
+        }
+        Err(_) => {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Failed to write system.json\0".as_ptr(),
+            );
+            ESP_ERR_NO_MEM
+        }
+    }
+}
+
+const ESP_ERR_NOT_FOUND: i32 = 0x105;
+
+/// Load saved WiFi credentials from system.json and attempt to connect.
+/// Called from kernel_init after WiFi manager is ready.
+///
+/// # Safety
+/// May be called from C.
+#[no_mangle]
+pub unsafe extern "C" fn wifi_manager_auto_connect() -> i32 {
+    let path = system_json_path();
+    let json = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => {
+            esp_log_write(
+                ESP_LOG_DEBUG,
+                TAG.as_ptr(),
+                b"No system.json found, skipping auto-connect\0".as_ptr(),
+            );
+            return ESP_OK;
+        }
+    };
+
+    // Look inside the "wifi" sub-object
+    let wifi_obj = match crate::board_config::extract_object(&json, "wifi") {
+        Some(s) => s,
+        None => return ESP_OK,
+    };
+
+    let enabled = find_bool_value(&wifi_obj, "enabled").unwrap_or(false);
+    if !enabled {
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"WiFi auto-connect disabled in system.json\0".as_ptr(),
+        );
+        return ESP_OK;
+    }
+
+    let ssid = match find_string_value(&wifi_obj, "ssid") {
+        Some(s) if !s.is_empty() => s,
+        _ => return ESP_OK,
+    };
+
+    let password = find_string_value(&wifi_obj, "password").unwrap_or_default();
+
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"Auto-connecting to saved WiFi network...\0".as_ptr(),
+    );
+
+    let c_ssid = match std::ffi::CString::new(ssid) {
+        Ok(s) => s,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+    let c_pass = match std::ffi::CString::new(password) {
+        Ok(s) => s,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
+
+    let ret = wifi_manager_connect(c_ssid.as_ptr(), c_pass.as_ptr(), 10000);
+    if ret == ESP_OK {
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Auto-connect: success\0".as_ptr(),
+        );
+    } else if ret == ESP_ERR_NOT_SUPPORTED {
+        // Simulator — silently ignore
+    } else {
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"Auto-connect failed: 0x%x\0".as_ptr(),
+            ret,
+        );
+    }
+    ret
+}
+
+// ---------------------------------------------------------------------------
 // Internal state update — called from the C wifi_event_handler shim
 // ---------------------------------------------------------------------------
 
@@ -743,5 +998,106 @@ mod tests {
         assert_eq!(year, 1970, "epoch day 0 must be 1970");
         assert_eq!(month, 1,   "epoch day 0 must be January");
         assert_eq!(day,   1,   "epoch day 0 must be the 1st");
+    }
+
+    // -----------------------------------------------------------------------
+    // JSON helper tests for credential persistence
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_replace_json_string_value() {
+        let json = r#"{"ssid": "old_network", "password": "secret"}"#;
+        let result = replace_json_string_value(json, "ssid", "new_network");
+        assert_eq!(result, r#"{"ssid": "new_network", "password": "secret"}"#);
+    }
+
+    #[test]
+    fn test_replace_json_string_value_empty() {
+        let json = r#"{"ssid": "", "password": ""}"#;
+        let result = replace_json_string_value(json, "ssid", "my_wifi");
+        assert_eq!(result, r#"{"ssid": "my_wifi", "password": ""}"#);
+    }
+
+    #[test]
+    fn test_replace_json_string_value_missing_key() {
+        let json = r#"{"other": "value"}"#;
+        let result = replace_json_string_value(json, "ssid", "test");
+        assert_eq!(result, json, "missing key should return unchanged JSON");
+    }
+
+    #[test]
+    fn test_replace_json_bool_value_false_to_true() {
+        let json = r#"{"enabled": false, "other": 1}"#;
+        let result = replace_json_bool_value(json, "enabled", true);
+        assert_eq!(result, r#"{"enabled": true, "other": 1}"#);
+    }
+
+    #[test]
+    fn test_replace_json_bool_value_true_to_false() {
+        let json = r#"{"enabled": true}"#;
+        let result = replace_json_bool_value(json, "enabled", false);
+        assert_eq!(result, r#"{"enabled": false}"#);
+    }
+
+    #[test]
+    fn test_replace_json_bool_value_same() {
+        let json = r#"{"enabled": true}"#;
+        let result = replace_json_bool_value(json, "enabled", true);
+        assert_eq!(result, r#"{"enabled": true}"#);
+    }
+
+    #[test]
+    fn test_replace_json_bool_value_missing_key() {
+        let json = r#"{"other": true}"#;
+        let result = replace_json_bool_value(json, "enabled", true);
+        assert_eq!(result, json);
+    }
+
+    #[test]
+    fn test_find_string_value() {
+        let json = r#"{"ssid": "my_network", "password": "pass123"}"#;
+        assert_eq!(find_string_value(json, "ssid"), Some("my_network".to_string()));
+        assert_eq!(find_string_value(json, "password"), Some("pass123".to_string()));
+        assert_eq!(find_string_value(json, "missing"), None);
+    }
+
+    #[test]
+    fn test_find_string_value_empty() {
+        let json = r#"{"ssid": ""}"#;
+        assert_eq!(find_string_value(json, "ssid"), Some("".to_string()));
+    }
+
+    #[test]
+    fn test_find_bool_value() {
+        let json = r#"{"enabled": true, "disabled": false}"#;
+        assert_eq!(find_bool_value(json, "enabled"), Some(true));
+        assert_eq!(find_bool_value(json, "disabled"), Some(false));
+        assert_eq!(find_bool_value(json, "missing"), None);
+    }
+
+    #[test]
+    fn test_replace_json_string_value_with_whitespace() {
+        let json = r#"{"ssid" :  "old"}"#;
+        let result = replace_json_string_value(json, "ssid", "new");
+        assert_eq!(result, r#"{"ssid" :  "new"}"#);
+    }
+
+    #[test]
+    fn test_full_system_json_roundtrip() {
+        let json = r#"{
+    "thistle_os": {
+        "wifi": {
+            "enabled": false,
+            "ssid": "",
+            "password": ""
+        }
+    }
+}"#;
+        let json = replace_json_string_value(&json, "ssid", "TestNetwork");
+        let json = replace_json_string_value(&json, "password", "secret123");
+        let json = replace_json_bool_value(&json, "enabled", true);
+        assert!(json.contains(r#""ssid": "TestNetwork""#));
+        assert!(json.contains(r#""password": "secret123""#));
+        assert!(json.contains(r#""enabled": true"#));
     }
 }

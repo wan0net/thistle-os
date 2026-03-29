@@ -148,7 +148,7 @@ fn find_array(json: &str, key: &str) -> Option<String> {
     None
 }
 
-fn extract_object(json: &str, key: &str) -> Option<String> {
+pub fn extract_object(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{}\"", key);
     let start = json.find(&pattern)?;
     let after = &json[start + pattern.len()..];

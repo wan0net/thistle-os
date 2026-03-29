@@ -33,6 +33,9 @@
 #include <string.h>
 #include <stdint.h>
 
+/* WiFi credential persistence (Rust FFI) */
+extern int wifi_manager_save_credentials(const char *ssid, const char *password);
+
 static const char *TAG = "settings_ui";
 
 /* ------------------------------------------------------------------ */
@@ -461,6 +464,7 @@ static void wifi_pwd_connect_cb(lv_event_t *e)
     esp_err_t err = wifi_manager_connect(ctx->ssid, password, 10000);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "WiFi: connected to \"%s\"", ctx->ssid);
+        wifi_manager_save_credentials(ctx->ssid, password);
         wifi_manager_ntp_sync();
     } else if (err == ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGI(TAG, "WiFi: connect not supported in simulator");
@@ -597,6 +601,7 @@ static void wifi_network_clicked_cb(lv_event_t *e)
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "WiFi: connected to \"%s\"", net->ssid);
+        wifi_manager_save_credentials(net->ssid, NULL);
         wifi_manager_ntp_sync();
     } else if (err == ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGI(TAG, "WiFi: connect not supported in simulator");

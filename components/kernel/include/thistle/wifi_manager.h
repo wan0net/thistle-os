@@ -43,6 +43,12 @@ int8_t wifi_manager_get_rssi(void);
 /* Get current IP address as string (returns NULL if not connected) */
 const char *wifi_manager_get_ip(void);
 
+/* Save WiFi credentials to system.json for auto-connect on boot */
+esp_err_t wifi_manager_save_credentials(const char *ssid, const char *password);
+
+/* Load saved WiFi credentials from system.json and attempt to connect */
+esp_err_t wifi_manager_auto_connect(void);
+
 /* Sync time via NTP (call after WiFi connected). Updates system time. */
 esp_err_t wifi_manager_ntp_sync(void);
 

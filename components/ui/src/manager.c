@@ -319,6 +319,9 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     lv_indev_set_type(s_kbd_indev, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(s_kbd_indev, ui_kbd_read_cb);
 
+    /* Use event mode so quick taps aren't lost between LVGL poll cycles */
+    lv_indev_set_mode(s_touch_indev, LV_INDEV_MODE_EVENT);
+
     /* 4b2. Create a default input group so keyboard events reach focused widgets */
     lv_group_t *default_group = lv_group_create();
     lv_group_set_default(default_group);

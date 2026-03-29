@@ -153,8 +153,12 @@ esp_err_t board_init(void) {
     // 9. Register audio (stub)
     hal_audio_register(drv_audio_pcm5102a_get(), NULL);
 
-    // 10. Register power management (stub)
-    hal_power_register(drv_power_tp4065b_get(), NULL);
+    // 10. Register power management (battery ADC + charge status)
+    static const struct { int adc_channel; int pin_charge_status; } power_config = {
+        .adc_channel = 3,            /* ADC1 channel 3 = GPIO4 (BOARD_BAT_ADC) */
+        .pin_charge_status = 10,     /* GPIO10 (BOARD_CHARGE_STATUS) */
+    };
+    hal_power_register(drv_power_tp4065b_get(), &power_config);
 
     // 11. Register IMU (stub)
     hal_imu_register(drv_imu_bhi260ap_get(), NULL);

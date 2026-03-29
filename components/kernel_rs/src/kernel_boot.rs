@@ -112,6 +112,7 @@ extern "C" {
     fn drv_crypto_mbedtls_get() -> *const std::os::raw::c_void;
     fn hal_crypto_register(driver: *const std::os::raw::c_void) -> i32;
     fn wifi_manager_init() -> i32;
+    fn wifi_manager_auto_connect() -> i32;
     fn net_manager_register_wifi();
 }
 
@@ -209,6 +210,8 @@ pub extern "C" fn kernel_init() -> i32 {
     let ret = unsafe { wifi_manager_init() };
     if ret == ESP_OK {
         unsafe { net_manager_register_wifi(); }
+        // Auto-connect to saved WiFi credentials from system.json
+        unsafe { wifi_manager_auto_connect(); }
     }
 
     // Publish SYSTEM_BOOT event
