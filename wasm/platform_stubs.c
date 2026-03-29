@@ -193,6 +193,6 @@ int xQueueSend(void *q, const void *item, unsigned int ticks) { return xQueueGen
 /* ── Kernel function stubs needed by new modules ──────────────────── */
 unsigned int esp_get_free_heap_size(void) { return 4 * 1024 * 1024; }
 void esp_restart(void) { printf("esp_restart called (WASM: no-op)\n"); }
-int app_manager_get_count(void) { return 0; }
+/* app_manager_get_count now provided by Rust app_manager.rs */
 unsigned long long hal_storage_get_total_bytes(void) { return 16ULL * 1024 * 1024 * 1024; }
 unsigned long long hal_storage_get_free_bytes(void) { return 14ULL * 1024 * 1024 * 1024; }

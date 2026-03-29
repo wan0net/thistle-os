@@ -857,6 +857,15 @@ pub extern "C" fn app_manager_get_state(handle: i32) -> u32 {
     get_state(handle)
 }
 
+/// Return the number of registered apps.
+#[no_mangle]
+pub extern "C" fn app_manager_get_count() -> i32 {
+    APP_MANAGER
+        .lock()
+        .map(|mgr| mgr.slot_count as i32)
+        .unwrap_or(0)
+}
+
 /// Suspend the app identified by `handle`.
 #[no_mangle]
 pub unsafe extern "C" fn app_manager_suspend(handle: i32) -> i32 {

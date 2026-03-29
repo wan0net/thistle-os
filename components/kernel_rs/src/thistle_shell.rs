@@ -125,6 +125,8 @@ extern "C" {
     fn ble_manager_get_peer_name() -> *const c_char;
     fn hal_storage_get_total_bytes() -> u64;
     fn hal_storage_get_free_bytes() -> u64;
+    fn driver_loader_get_count() -> i32;
+    fn hal_get_registry() -> *const crate::hal_registry::HalRegistry;
 }
 
 // Test stubs — provide linkable C symbols for functions not already defined
@@ -142,6 +144,7 @@ mod test_stubs {
     #[no_mangle] pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
     #[no_mangle] pub extern "C" fn hal_storage_get_total_bytes() -> u64 { 10 * 1024 * 1024 }
     #[no_mangle] pub extern "C" fn hal_storage_get_free_bytes() -> u64 { 5 * 1024 * 1024 }
+    #[no_mangle] pub extern "C" fn driver_loader_get_count() -> i32 { 0 }
     // Transitive dependency: kernel_uptime_ms (kernel_boot.rs) calls esp_timer_get_time
     #[no_mangle] pub extern "C" fn esp_timer_get_time() -> i64 { 0 }
 }
@@ -411,12 +414,26 @@ fn cmd_uptime(_args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
 }
 
 fn cmd_version(_args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
-    sprint!(
-        print,
-        ctx,
-        "ThistleOS v{}",
-        crate::version::VERSION_STRING
-    );
+    sprint!(print, ctx, "ThistleOS v{}", crate::version::VERSION_STRING);
+    sprint!(print, ctx, "  Kernel:   Rust (thistle-kernel)");
+    sprint!(print, ctx, "  Recovery: Rust (thistle-recovery)");
+
+    let reg = unsafe { hal_get_registry() };
+    if !reg.is_null() {
+        let board = unsafe { (*reg).board_name };
+        if !board.is_null() {
+            let name = unsafe { std::ffi::CStr::from_ptr(board) }
+                .to_str()
+                .unwrap_or("unknown");
+            sprint!(print, ctx, "  Board:    {}", name);
+        }
+    }
+
+    let drv_count = unsafe { driver_loader_get_count() };
+    sprint!(print, ctx, "  Drivers:  {} loaded", drv_count);
+
+    let app_count = unsafe { app_manager_get_count() };
+    sprint!(print, ctx, "  Apps:     {} registered", app_count);
     0
 }
 
