@@ -68,6 +68,10 @@
     </div>
 
     <h2>Layer diagram</h2>
+    <img src="diagrams/architecture.svg" alt="ThistleOS three-tier architecture: Recovery, Kernel, and Userspace" style="width:100%;max-width:800px;margin:1em 0;">
+
+    <details style="margin-bottom:1.5em">
+      <summary style="cursor:pointer;color:#64748b;font-size:0.9em">Show text-based diagram</summary>
     <div class="diagram">&#x250c;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;
 &#x2502;  <span class="d-purple">Apps (.app.elf)  — PSRAM, loaded at runtime</span>        &#x2502;
 &#x2502;  launcher / messenger / navigator / your-app        &#x2502;
@@ -94,6 +98,7 @@
 &#x2502;  pin assignments, bus config, driver list             &#x2502;
 &#x2502;  detected by Recovery OS (I2C/SPI/UART scan)         &#x2502;
 &#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</div>
+    </details>
 
     <h2>HAL vtable design</h2>
     <p>Every piece of hardware is represented by a C struct of function pointers — a vtable. The kernel calls these function pointers without knowing which chip is behind them. A display driver for an SSD1306 OLED and one for a GDEQ031T10 e-paper display both implement the same <code>hal_display_driver_t</code> interface.</p>

@@ -67,6 +67,8 @@
       <a href="https://github.com/wan0net/thistle-os/blob/main/docs/simulator-testing.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
+    <img src="diagrams/simulator.svg" alt="ThistleOS simulator architecture: SDL2, real Rust kernel, fake HAL drivers, virtual I2C bus" style="width:100%;max-width:800px;margin:1em 0;">
+
     <!-- 1. Overview -->
     <h2>Overview</h2>
     <p>The ThistleOS simulator compiles the same kernel, display server, window manager, and app code that runs on real ESP32 hardware into a native x86/ARM desktop binary. SDL2 provides the display window and keyboard/mouse input; libcurl provides HTTP networking. Everything else — HAL registration, driver vtables, IPC, permissions, the ELF syscall table — is the real production code.</p>
