@@ -16,7 +16,7 @@ sha2 = { version = "0.10", default-features = false, features = ["std"] }
 hmac = { version = "0.12", default-features = false }
 aes = { version = "0.8", default-features = false }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-getrandom = { version = "0.2", default-features = false, features = ["std"] }
+getrandom = { version = "0.4", default-features = false, features = ["std"] }
 thistle-tk = { path = "../../crates/thistle-tk" }
 embedded-graphics = "0.8"
 libc = { version = "0.2", optional = true }
