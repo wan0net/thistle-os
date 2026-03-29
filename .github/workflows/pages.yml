@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: components/kernel_rs/target
-          key: rust-wasm-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+          key: rust-wasm-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock', 'components/kernel_rs/src/**', 'crates/thistle-tk/src/**') }}
           restore-keys: rust-wasm-target-${{ runner.os }}-
 
       - name: Cache LVGL
