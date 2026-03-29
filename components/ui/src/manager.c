@@ -75,6 +75,10 @@ static struct {
  * Touch events update s_touch_state; key events update s_kbd_state.
  * A single callback is registered on every driver so that combined drivers
  * (e.g. the SDL2 simulator driver) work correctly regardless of is_touch. */
+/* Deferred release: LVGL needs to see PRESSED for at least one poll cycle
+ * before seeing RELEASED, otherwise quick taps are lost in the simulator. */
+static bool s_touch_release_pending = false;
+
 static void ui_input_hal_cb(const hal_input_event_t *event, void *user_data)
 {
     (void)user_data;
@@ -86,7 +90,8 @@ static void ui_input_hal_cb(const hal_input_event_t *event, void *user_data)
             s_touch_state.state = LV_INDEV_STATE_PRESSED;
             break;
         case HAL_INPUT_EVENT_TOUCH_UP:
-            s_touch_state.state = LV_INDEV_STATE_RELEASED;
+            /* Don't release immediately — let LVGL see PRESSED first */
+            s_touch_release_pending = true;
             break;
         case HAL_INPUT_EVENT_KEY_DOWN: {
             uint32_t lv_key = event->key.keycode;
@@ -118,7 +123,14 @@ static void ui_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     (void)indev;
     data->point.x = s_touch_state.x;
     data->point.y = s_touch_state.y;
-    data->state   = s_touch_state.state;
+
+    if (s_touch_release_pending) {
+        /* LVGL already saw PRESSED on the previous poll — now release */
+        data->state = LV_INDEV_STATE_RELEASED;
+        s_touch_release_pending = false;
+    } else {
+        data->state = s_touch_state.state;
+    }
 }
 
 static void ui_kbd_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
@@ -319,8 +331,7 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     lv_indev_set_type(s_kbd_indev, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(s_kbd_indev, ui_kbd_read_cb);
 
-    /* Use event mode so quick taps aren't lost between LVGL poll cycles */
-    lv_indev_set_mode(s_touch_indev, LV_INDEV_MODE_EVENT);
+    /* Touch stays in TIMER mode — LVGL polls at each lv_timer_handler call */
 
     /* 4b2. Create a default input group so keyboard events reach focused widgets */
     lv_group_t *default_group = lv_group_create();
