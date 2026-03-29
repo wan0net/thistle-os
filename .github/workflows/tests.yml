@@ -63,6 +63,13 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Fetch LVGL (managed component for simulator)
+        run: |
+          if [ ! -d "managed_components/lvgl__lvgl/src" ]; then
+            mkdir -p managed_components/lvgl__lvgl
+            git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git managed_components/lvgl__lvgl
+          fi
+
       - name: Build simulator
         working-directory: simulator
         run: |
@@ -106,6 +113,13 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch LVGL (managed component for simulator)
+        run: |
+          if [ ! -d "managed_components/lvgl__lvgl/src" ]; then
+            mkdir -p managed_components/lvgl__lvgl
+            git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git managed_components/lvgl__lvgl
+          fi
 
       - name: Build simulator
         working-directory: simulator
