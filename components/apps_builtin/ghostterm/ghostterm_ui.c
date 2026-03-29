@@ -62,7 +62,7 @@ static struct {
     int        baud_rate;
     bool       local_echo;
     bool       uart_running;
-    void      *rx_task_handle;  /* TaskHandle_t */
+    TaskHandle_t rx_task_handle;
 } s_ghost;
 
 /* ------------------------------------------------------------------ */
