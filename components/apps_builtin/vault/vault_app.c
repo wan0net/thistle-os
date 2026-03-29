@@ -58,7 +58,8 @@ static void vault_on_resume(void)
 static void vault_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* LVGL objects cleaned up when app area parent is destroyed */
+    vault_ui_lock();
+    vault_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

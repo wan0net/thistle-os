@@ -45,7 +45,7 @@ static void navigator_on_resume(void)
 static void navigator_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI objects are cleaned up by LVGL when the app area parent is destroyed */
+    navigator_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

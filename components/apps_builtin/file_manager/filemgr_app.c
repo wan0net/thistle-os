@@ -41,6 +41,7 @@ static void filemgr_on_resume(void)
 static void filemgr_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
+    filemgr_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

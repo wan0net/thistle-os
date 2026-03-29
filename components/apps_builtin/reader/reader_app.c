@@ -45,8 +45,7 @@ static void reader_on_resume(void)
 static void reader_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* reader_ui_cleanup() is called implicitly via LVGL object deletion
-     * when the parent app area is cleaned up by the app manager. */
+    reader_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

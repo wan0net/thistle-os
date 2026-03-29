@@ -10,3 +10,4 @@ esp_err_t appstore_app_register(void);
 esp_err_t appstore_ui_create(lv_obj_t *parent);
 void appstore_ui_show(void);
 void appstore_ui_hide(void);
+void appstore_ui_destroy(void);

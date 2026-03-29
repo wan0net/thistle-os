@@ -650,3 +650,20 @@ void reader_ui_hide(void)
         lv_obj_add_flag(s_reader.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void reader_ui_destroy(void)
+{
+    /* Free heap-allocated book data */
+    if (s_reader.book_text) {
+        free(s_reader.book_text);
+        s_reader.book_text = NULL;
+    }
+    if (s_reader.page_offsets) {
+        free(s_reader.page_offsets);
+        s_reader.page_offsets = NULL;
+    }
+    if (s_reader.root) {
+        lv_obj_delete(s_reader.root);
+        s_reader.root = NULL;
+    }
+}

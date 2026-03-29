@@ -10,3 +10,4 @@ esp_err_t reader_app_register(void);
 esp_err_t reader_ui_create(lv_obj_t *parent);
 void reader_ui_show(void);
 void reader_ui_hide(void);
+void reader_ui_destroy(void);

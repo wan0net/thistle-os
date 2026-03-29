@@ -10,5 +10,6 @@ esp_err_t terminal_app_register(void);
 esp_err_t terminal_ui_create(lv_obj_t *parent);
 void terminal_ui_show(void);
 void terminal_ui_hide(void);
+void terminal_ui_destroy(void);
 void terminal_uart_stop(void);
 void terminal_uart_start(void);

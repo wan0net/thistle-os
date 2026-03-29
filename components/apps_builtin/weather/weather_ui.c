@@ -330,3 +330,15 @@ void weather_ui_hide(void)
         lv_obj_add_flag(s_wx.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void weather_ui_destroy(void)
+{
+    if (s_wx.refresh_timer) {
+        lv_timer_delete(s_wx.refresh_timer);
+        s_wx.refresh_timer = NULL;
+    }
+    if (s_wx.root) {
+        lv_obj_delete(s_wx.root);
+        s_wx.root = NULL;
+    }
+}

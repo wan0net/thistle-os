@@ -51,6 +51,7 @@ static void terminal_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
     terminal_uart_stop();
+    terminal_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

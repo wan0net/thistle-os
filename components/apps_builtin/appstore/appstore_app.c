@@ -48,8 +48,7 @@ static void appstore_on_resume(void)
 static void appstore_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI root is a child of the app area — will be cleaned up when
-     * the app area is rebuilt.  Nothing extra to free here. */
+    appstore_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

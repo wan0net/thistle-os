@@ -618,3 +618,13 @@ void terminal_uart_start(void)
         terminal_rx_task_start();
     }
 }
+
+void terminal_ui_destroy(void)
+{
+    /* Stop UART RX task before deleting widgets */
+    terminal_rx_task_stop();
+    if (s_term.root) {
+        lv_obj_delete(s_term.root);
+        s_term.root = NULL;
+    }
+}

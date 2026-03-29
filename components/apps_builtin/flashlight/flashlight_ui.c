@@ -353,3 +353,19 @@ void flashlight_ui_hide(void)
         lv_obj_add_flag(s_fl.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void flashlight_ui_destroy(void)
+{
+    /* Stop SOS timer if running */
+    if (s_fl.sos_timer) {
+        lv_timer_delete(s_fl.sos_timer);
+        s_fl.sos_timer = NULL;
+    }
+    if (s_fl.mode != FLASH_MODE_OFF) {
+        apply_mode(FLASH_MODE_OFF);
+    }
+    if (s_fl.root) {
+        lv_obj_delete(s_fl.root);
+        s_fl.root = NULL;
+    }
+}

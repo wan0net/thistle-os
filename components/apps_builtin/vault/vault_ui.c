@@ -1258,3 +1258,11 @@ void vault_ui_hide(void)
         lv_obj_add_flag(s_vault.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void vault_ui_destroy(void)
+{
+    if (s_vault.root) {
+        lv_obj_delete(s_vault.root);
+        s_vault.root = NULL;
+    }
+}

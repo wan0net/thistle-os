@@ -1119,3 +1119,17 @@ void messenger_ui_hide(void)
     /* Persist the message queue to disk on hide */
     rs_msg_queue_save();
 }
+
+void messenger_ui_destroy(void)
+{
+    if (s_tick_timer) {
+        lv_timer_delete(s_tick_timer);
+        s_tick_timer = NULL;
+    }
+    /* Persist before destroying */
+    rs_msg_queue_save();
+    if (s_msg.root) {
+        lv_obj_delete(s_msg.root);
+        s_msg.root = NULL;
+    }
+}

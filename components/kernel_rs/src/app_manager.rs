@@ -420,17 +420,35 @@ impl AppManager {
             return ESP_OK;
         }
 
-        // Pause the current foreground app, if any.
+        // Destroy the current foreground app to free LVGL memory, unless
+        // it is the launcher (which stays loaded for instant return).
         let prev_handle = self.foreground;
         if let Some(fg_idx) = self.find_slot_by_handle(self.foreground) {
             if AppState::from_u32(self.slots[fg_idx].state) == AppState::Running {
-                self.slots[fg_idx].state = AppState::Backgrounded as u32;
-                let entry_ptr = self.slots[fg_idx].entry;
-                if !entry_ptr.is_null() {
-                    unsafe {
-                        let entry = &*entry_ptr;
-                        if let Some(on_pause) = entry.on_pause {
-                            on_pause();
+                let is_launcher = unsafe { slot_app_id(&self.slots[fg_idx]) } == "com.thistle.launcher";
+
+                if is_launcher {
+                    // Just pause the launcher — don't destroy it.
+                    self.slots[fg_idx].state = AppState::Backgrounded as u32;
+                    let entry_ptr = self.slots[fg_idx].entry;
+                    if !entry_ptr.is_null() {
+                        unsafe {
+                            let entry = &*entry_ptr;
+                            if let Some(on_pause) = entry.on_pause {
+                                on_pause();
+                            }
+                        }
+                    }
+                } else {
+                    // Destroy the app to free LVGL widgets.
+                    self.slots[fg_idx].state = AppState::Unloaded as u32;
+                    let entry_ptr = self.slots[fg_idx].entry;
+                    if !entry_ptr.is_null() {
+                        unsafe {
+                            let entry = &*entry_ptr;
+                            if let Some(on_destroy) = entry.on_destroy {
+                                on_destroy();
+                            }
                         }
                     }
                 }

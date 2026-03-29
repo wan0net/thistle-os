@@ -663,3 +663,15 @@ void navigator_ui_hide(void)
         lv_timer_pause(s_ui.update_timer);
     }
 }
+
+void navigator_ui_destroy(void)
+{
+    if (s_ui.update_timer) {
+        lv_timer_delete(s_ui.update_timer);
+        s_ui.update_timer = NULL;
+    }
+    if (s_ui.root) {
+        lv_obj_delete(s_ui.root);
+        s_ui.root = NULL;
+    }
+}

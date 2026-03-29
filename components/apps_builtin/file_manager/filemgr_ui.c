@@ -597,3 +597,11 @@ void filemgr_ui_hide(void)
         lv_obj_add_flag(s_fm.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void filemgr_ui_destroy(void)
+{
+    if (s_fm.root) {
+        lv_obj_delete(s_fm.root);
+        s_fm.root = NULL;
+    }
+}

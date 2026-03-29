@@ -686,3 +686,11 @@ void notes_ui_hide(void)
         lv_obj_add_flag(s_notes.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void notes_ui_destroy(void)
+{
+    if (s_notes.root) {
+        lv_obj_delete(s_notes.root);
+        s_notes.root = NULL;
+    }
+}

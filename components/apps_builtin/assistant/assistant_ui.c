@@ -799,3 +799,11 @@ void assistant_ui_hide(void)
         lv_obj_add_flag(s_ai.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void assistant_ui_destroy(void)
+{
+    if (s_ai.root) {
+        lv_obj_delete(s_ai.root);
+        s_ai.root = NULL;
+    }
+}

@@ -53,7 +53,8 @@ static void notes_on_resume(void)
 static void notes_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI objects are cleaned up by LVGL when the app area parent is destroyed */
+    notes_ui_save_if_needed();
+    notes_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

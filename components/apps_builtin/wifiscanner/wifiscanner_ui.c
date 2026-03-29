@@ -732,3 +732,11 @@ void wifiscanner_ui_hide(void)
         lv_obj_add_flag(s_scanner.root, LV_OBJ_FLAG_HIDDEN);
     }
 }
+
+void wifiscanner_ui_destroy(void)
+{
+    if (s_scanner.root) {
+        lv_obj_delete(s_scanner.root);
+        s_scanner.root = NULL;
+    }
+}

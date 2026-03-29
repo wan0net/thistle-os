@@ -48,7 +48,7 @@ static void flashlight_on_resume(void)
 static void flashlight_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI objects are cleaned up by LVGL when the app area parent is destroyed */
+    flashlight_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */

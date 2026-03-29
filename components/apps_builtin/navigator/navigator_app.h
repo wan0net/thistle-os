@@ -10,3 +10,4 @@ esp_err_t navigator_app_register(void);
 esp_err_t navigator_ui_create(lv_obj_t *parent);
 void navigator_ui_show(void);
 void navigator_ui_hide(void);
+void navigator_ui_destroy(void);

@@ -53,7 +53,8 @@ static void assistant_on_resume(void)
 static void assistant_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI objects are cleaned up by LVGL when the app area parent is destroyed */
+    assistant_ui_save_conversation();
+    assistant_ui_destroy();
 }
 
 /* ------------------------------------------------------------------ */
