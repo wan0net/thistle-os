@@ -253,6 +253,58 @@ int esp_http_client_cleanup(void *c) { (void)c; return 0; }
 /* ── Crypto driver stub ───────────────────────────────────────────── */
 void *drv_crypto_mbedtls_get(void) { return NULL; }
 
+/* ── UART stubs (loopback for simulator) ──────────────────────────── */
+#include "driver/uart.h"
+
+static uint8_t s_uart_loopback[3][256];
+static int s_uart_loopback_len[3] = {0, 0, 0};
+static int s_uart_baud[3] = {115200, 115200, 115200};
+
+esp_err_t uart_param_config(int uart_num, const uart_config_t *cfg) {
+    if (uart_num < 0 || uart_num > 2) return ESP_ERR_INVALID_ARG;
+    if (cfg) s_uart_baud[uart_num] = cfg->baud_rate;
+    return ESP_OK;
+}
+esp_err_t uart_set_pin(int uart_num, int tx, int rx, int rts, int cts) {
+    (void)uart_num; (void)tx; (void)rx; (void)rts; (void)cts; return ESP_OK;
+}
+esp_err_t uart_driver_install(int uart_num, int rx_buf_sz, int tx_buf_sz, int queue_sz, void *queue, int flags) {
+    (void)uart_num; (void)rx_buf_sz; (void)tx_buf_sz; (void)queue_sz; (void)queue; (void)flags;
+    return ESP_OK;
+}
+esp_err_t uart_driver_delete(int uart_num) { (void)uart_num; return ESP_OK; }
+
+int uart_write_bytes(int uart_num, const void *data, size_t len) {
+    if (uart_num < 0 || uart_num > 2 || !data) return -1;
+    /* Loopback: copy TX to RX buffer */
+    size_t copy = len;
+    if (s_uart_loopback_len[uart_num] + (int)copy > 256) copy = 256 - s_uart_loopback_len[uart_num];
+    if (copy > 0) {
+        memcpy(s_uart_loopback[uart_num] + s_uart_loopback_len[uart_num], data, copy);
+        s_uart_loopback_len[uart_num] += (int)copy;
+    }
+    /* Also print to stdout for debugging */
+    printf("[UART%d TX] %.*s", uart_num, (int)len, (const char *)data);
+    return (int)len;
+}
+
+int uart_read_bytes(int uart_num, void *buf, size_t len, int timeout_ms) {
+    if (uart_num < 0 || uart_num > 2 || !buf) return -1;
+    int avail = s_uart_loopback_len[uart_num];
+    if (avail == 0) {
+        usleep(timeout_ms * 1000);
+        return 0;
+    }
+    int to_read = avail < (int)len ? avail : (int)len;
+    memcpy(buf, s_uart_loopback[uart_num], to_read);
+    int remaining = avail - to_read;
+    if (remaining > 0) {
+        memmove(s_uart_loopback[uart_num], s_uart_loopback[uart_num] + to_read, remaining);
+    }
+    s_uart_loopback_len[uart_num] = remaining;
+    return to_read;
+}
+
 /* ── GPIO stubs ───────────────────────────────────────────────────── */
 #include "driver/gpio.h"
 esp_err_t gpio_config(const gpio_config_t *cfg) { (void)cfg; return 0; }

@@ -3,7 +3,7 @@
 ## Iteration 1 — 2026-03-26
 
 ### Priority 1: GPS Track Logger & GPX Export Module
-**Status:** DONE (unmerged, branch: feat/gps-track-gpx)
+**Status:** DONE (merged to main)
 **Personas:** Cairn (SAR coordinate sharing), Ember (field transect logging)
 **Description:** Add a `gps_track` kernel module that records GPS positions over time and exports them as GPX XML. Enables track recording, waypoint management, and GPX file generation for SD card export. Pure Rust, no hardware dependency beyond existing GPS HAL.
 
@@ -18,27 +18,27 @@
 **Description:** Implement the WiFi/WebSocket transport path in messenger_transport.c. Currently stubbed with TODO, returns ESP_ERR_NOT_SUPPORTED.
 
 ### Priority 4: BLE Scanner App
-**Status:** DONE (unmerged, branch: feat/ble-scanner)
+**Status:** DONE (merged to main, branch: feat/ble-scanner)
 **Personas:** Spark (primary), Thorn (security awareness)
 **Description:** New app that discovers and displays nearby BLE devices, their services, RSSI, and manufacturer data. Builds on the pure Rust BLE manager.
 
 ### Priority 5: SOS Beacon Mode
-**Status:** DONE (unmerged, branch: feat/sos-beacon)
+**Status:** DONE (merged to main, branch: feat/sos-beacon)
 **Personas:** Cairn (emergency), Ember (safety)
 **Description:** Emergency mode that broadcasts GPS position over LoRa at regular intervals with SOS flag. Minimal UI, maximum battery conservation.
 
 ### Priority 6: Device Wipe / Panic Button
-**Status:** DONE (unmerged, branch: feat/secure-wipe)
+**Status:** DONE (merged to main, branch: feat/secure-wipe)
 **Personas:** Thorn (journalist safety)
 **Description:** Secure wipe of SD card contents and SPIFFS user data on long-press of a configurable key combination.
 
 ### Priority 7: Structured Data Logger
-**Status:** DONE (unmerged, branch: feat/data-logger)
+**Status:** DONE (merged to main, branch: feat/data-logger)
 **Personas:** Ember (field research), Fern (sensor monitoring)
 **Description:** Generic CSV/JSON data logging module that apps can use to record timestamped sensor readings to SD card.
 
 ### Priority 8: Driver Hot-Reload
-**Status:** DONE (unmerged, branch: feat/driver-hot-reload)
+**Status:** DONE (merged to main, branch: feat/driver-hot-reload)
 **Personas:** Fern (development workflow)
 **Description:** Ability to unload and reload .drv.elf files without rebooting. Requires driver lifecycle management in driver_manager.
 
@@ -50,24 +50,24 @@
 **Description:** Integrate MeshCore mesh protocol for LoRa networking. Custom ThistleOS UI on top of MeshCore protocol. Do NOT reinvent mesh routing — use existing MeshCore.
 
 ### Priority 10: Notification Manager
-**Status:** DONE (unmerged, branch: feat/notification-manager)
+**Status:** DONE (merged to main, branch: feat/notification-manager)
 **Personas:** ALL
 **Description:** System-wide notification queue. Apps post notifications, WM displays them. Priority levels, expiry, dismissal. Cross-app coordination.
 
 ### Priority 11: Contact Manager
-**Status:** DONE (unmerged, branch: feat/contact-manager)
+**Status:** DONE (merged to main, branch: feat/contact-manager)
 **Personas:** Cairn (team roster), Thorn (source contacts), Ember (collaborators)
 **Description:** Address book for messenger. Name, callsign, device ID, public key. Import/export vCard. Integrates with messenger and SOS beacon.
 
 ## Iteration 7 — 2026-03-27 (new items from persona review)
 
 ### Priority 12: Message Burn Timer
-**Status:** DONE (unmerged, branch: feat/burn-timer)
+**Status:** DONE (merged to main, branch: feat/burn-timer)
 **Personas:** Thorn (source protection), Cairn (sensitive casualty info)
 **Description:** Auto-delete messages after a configurable time interval. Per-conversation setting. Timer starts at message receive/send time. Countdown visible in UI. Integrates with messenger.
 
 ### Priority 14: End-to-End Message Encryption
-**Status:** DONE (unmerged, branch: feat/msg-crypto)
+**Status:** DONE (merged to main, branch: feat/msg-crypto)
 **Personas:** Thorn (source protection — critical), Cairn (sensitive casualty info)
 **Description:** Encrypt/decrypt messages using per-contact shared secrets. PBKDF2 key derivation from passphrase, AES-256-CTR encryption, HMAC-SHA256 authentication. Integrates with contact manager (stores per-contact key material) and messenger transport.
 
@@ -87,7 +87,7 @@
 **Description:** UART serial terminal for connecting to external devices via GPIO pins. Configurable baud rate, data bits, parity, stop bits. Buffer incoming data, send typed commands.
 
 ### Priority 13: LoRa Store-and-Forward Message Queue
-**Status:** DONE (unmerged, branch: feat/lora-msg-queue)
+**Status:** DONE (merged to main, branch: feat/lora-msg-queue)
 **Personas:** Cairn (multi-hop SAR), Ember (field station mesh)
 **Description:** Queue outbound LoRa messages when no recipients in range. Auto-send when relay node comes in range. Persistent queue on SD card survives reboots. Retry with exponential backoff.
 

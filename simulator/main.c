@@ -42,6 +42,7 @@ void sim_lvgl_unlock(void) { pthread_mutex_unlock(&s_lvgl_mutex); }
 #include "flashlight/flashlight_app.h"
 #include "weather/weather_app.h"
 #include "terminal/terminal_app.h"
+#include "ghostterm/ghostterm_app.h"
 #include "vault/vault_app.h"
 
 static bool s_headless = false;
@@ -134,6 +135,7 @@ int main(int argc, char **argv)
     vault_app_register();
     appstore_app_register();
     terminal_app_register();
+    ghostterm_app_register();
     assistant_app_register();
     weather_app_register();
 
