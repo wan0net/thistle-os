@@ -94,10 +94,8 @@
         <option value="tdisplay">T-Display-S3 (320x170)</option>
         <option value="heltec-v3">Heltec V3 (128x64)</option>
         <option value="cardputer">Cardputer (240x135)</option>
-        <option value="cyd-s022">CYD S022 (240x320)</option>
-        <option value="cyd-s028">CYD S028 (320x240)</option>
         <option value="t3-s3">T3-S3 (128x64)</option>
-        <option value="c3-mini">C3-Mini (128x64)</option>
+        <option value="rak3312">RAK3312 (128x64)</option>
       </select>
       <span id="device-status" class="loading">Loading...</span>
     </div>
@@ -283,14 +281,16 @@ document.getElementById('device-select').addEventListener('change', function() {
 var Module = {
   canvas: document.getElementById('canvas'),
   preRun: [function() {
-    /* Set device before main() runs */
-    var devs = ['tdeck','tdeck-pro','tdeck-plus','tdisplay','heltec-v3',
-                'cardputer','cyd-s022','cyd-s028','t3-s3','c3-mini'];
-    var dev = new URLSearchParams(window.location.search).get('device') || 'tdeck';
-    var idx = devs.indexOf(dev);
-    if (idx >= 0 && Module._wasm_set_device) {
-      Module._wasm_set_device(idx);
-    }
+    /* Set device before main() — use addOnPreMain so exports are available */
+    addOnPreMain(function() {
+      var devs = ['tdeck','tdeck-pro','tdeck-plus','tdisplay',
+                  'heltec-v3','cardputer','t3-s3','rak3312'];
+      var dev = new URLSearchParams(window.location.search).get('device') || 'tdeck';
+      var idx = devs.indexOf(dev);
+      if (idx >= 0) {
+        Module._wasm_set_device(idx);
+      }
+    });
   }],
   onRuntimeInitialized: function() {
     document.getElementById('device-status').textContent = 'ThistleOS running';
