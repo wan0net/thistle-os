@@ -5,8 +5,14 @@
 //! [`dispatch_input`] function that performs hit-testing against the widget
 //! tree and invokes the appropriate widget callbacks.
 
+use core::sync::atomic::{AtomicI32, Ordering};
+
 use crate::tree::UiTree;
 use crate::widget::{Widget, WidgetId};
+
+/// Last Y coordinate of an active touch, used to compute scroll deltas.
+/// A value of -1 means no active touch.
+static LAST_TOUCH_Y: AtomicI32 = AtomicI32::new(-1);
 
 // ---------------------------------------------------------------------------
 // Events
@@ -53,10 +59,7 @@ pub fn dispatch_input(tree: &mut UiTree, event: &InputEvent) -> bool {
     match *event {
         InputEvent::TouchDown { x, y } => dispatch_touch_down(tree, x, y),
         InputEvent::TouchUp { x, y } => dispatch_touch_up(tree, x, y),
-        InputEvent::TouchMove { .. } => {
-            // Move events could be used for scrolling in the future.
-            false
-        }
+        InputEvent::TouchMove { x, y } => dispatch_touch_move(tree, x, y),
         InputEvent::KeyDown { code } => dispatch_key(tree, code),
         InputEvent::KeyUp { .. } => false, // key-up not handled yet
         InputEvent::CharInput { ch } => dispatch_char(tree, ch),
@@ -78,10 +81,16 @@ fn dispatch_touch_down(tree: &mut UiTree, x: i32, y: i32) -> bool {
         tree.set_focus(Some(hit));
     }
 
+    // Record initial touch position for scroll tracking.
+    LAST_TOUCH_Y.store(y, Ordering::Relaxed);
+
     true
 }
 
 fn dispatch_touch_up(tree: &mut UiTree, x: i32, y: i32) -> bool {
+    // Clear scroll tracking state.
+    LAST_TOUCH_Y.store(-1, Ordering::Relaxed);
+
     let Some(hit) = tree.find_at_point(x, y) else {
         return false;
     };
@@ -99,6 +108,64 @@ fn dispatch_touch_up(tree: &mut UiTree, x: i32, y: i32) -> bool {
         return true;
     }
 
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Scroll handling — TouchMove drives scrollable containers
+// ---------------------------------------------------------------------------
+
+fn dispatch_touch_move(tree: &mut UiTree, x: i32, y: i32) -> bool {
+    let last_y = LAST_TOUCH_Y.swap(y, Ordering::Relaxed);
+    if last_y < 0 {
+        return false;
+    }
+    let delta_y = last_y - y; // positive = scroll down (content moves up)
+    if delta_y == 0 {
+        return false;
+    }
+
+    // Find the widget at the touch point and scroll the nearest scrollable ancestor.
+    if let Some(hit) = tree.find_at_point(x, y) {
+        return apply_scroll(tree, hit, delta_y);
+    }
+    false
+}
+
+fn apply_scroll(tree: &mut UiTree, target: WidgetId, delta: i32) -> bool {
+    // Walk up the tree from target to find the first scrollable container.
+    let mut current = Some(target);
+    while let Some(id) = current {
+        if let Some(Widget::Container(c)) = tree.get(id) {
+            let container_h = c.common.size.h as i32;
+            let container_y = c.common.pos.y;
+
+            // Calculate content height from children.
+            let content_h = tree
+                .children(id)
+                .iter()
+                .filter_map(|&child_id| {
+                    tree.get(child_id).map(|w| {
+                        let c = w.common();
+                        (c.pos.y - container_y) + c.size.h as i32
+                    })
+                })
+                .max()
+                .unwrap_or(0);
+
+            if content_h > container_h {
+                // This container has overflowing content — scroll it.
+                let max_scroll = (content_h - container_h).max(0);
+                if let Some(Widget::Container(c)) = tree.get_mut(id) {
+                    let new_offset = c.scroll_offset + delta;
+                    c.scroll_offset = new_offset.clamp(0, max_scroll);
+                    tree.mark_dirty(id);
+                    return true;
+                }
+            }
+        }
+        current = tree.parent(id);
+    }
     false
 }
 
