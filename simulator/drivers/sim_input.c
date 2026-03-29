@@ -1,4 +1,5 @@
 #include "sim_input.h"
+#include "sim_display.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -48,6 +49,9 @@ static uint16_t sdl_key_to_keycode(SDL_Keycode key)
 
 static esp_err_t sim_input_poll(void)
 {
+    extern bool sim_is_headless(void);
+    if (sim_is_headless()) return ESP_OK;
+
     if (!s_initialized) return ESP_OK;
 
     SDL_Event e;
@@ -88,8 +92,9 @@ static esp_err_t sim_input_poll(void)
 
             int x, y;
             SDL_GetMouseState(&x, &y);
-            x /= 2;  /* Scale down from window to display coords */
-            y /= 2;
+            int scale = sim_display_get_scale();
+            x /= scale;
+            y /= scale;
 
             hal_input_event_type_t type;
             if (e.type == SDL_MOUSEBUTTONDOWN)     type = HAL_INPUT_EVENT_TOUCH_DOWN;

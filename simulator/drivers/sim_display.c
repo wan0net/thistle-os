@@ -16,6 +16,7 @@ static SDL_Texture  *s_texture  = NULL;
 static uint16_t     *s_fb       = NULL;  /* RGB565 framebuffer (LVGL output) */
 static uint32_t     *s_fb32     = NULL;  /* RGBA8888 for SDL texture (Emscripten) */
 static bool          s_initialized = false;
+static int           s_scale       = 2;
 
 /* Scale factor: small displays get a bigger scale so the window is usable */
 static int calc_scale(int w, int h)
@@ -45,6 +46,7 @@ static esp_err_t sim_display_init(const void *config)
     if (s_initialized) return ESP_OK;
 
     int scale = calc_scale(s_width, s_height);
+    s_scale = scale;
 
     /* Allocate framebuffers dynamically based on runtime resolution */
     s_fb   = calloc((size_t)(s_width * s_height), sizeof(uint16_t));
@@ -55,6 +57,14 @@ static esp_err_t sim_display_init(const void *config)
         free(s_fb32);
         s_fb = s_fb32 = NULL;
         return ESP_ERR_NO_MEM;
+    }
+
+    extern bool sim_is_headless(void);
+    if (sim_is_headless()) {
+        /* Headless: framebuffer only, no SDL window */
+        s_initialized = true;
+        printf("Simulator display initialized (%dx%d, headless, RGB565)\n", s_width, s_height);
+        return ESP_OK;
     }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -136,10 +146,13 @@ static esp_err_t sim_display_init(const void *config)
 
 static void sim_display_deinit(void)
 {
-    if (s_texture)  SDL_DestroyTexture(s_texture);
-    if (s_renderer) SDL_DestroyRenderer(s_renderer);
-    if (s_window)   SDL_DestroyWindow(s_window);
-    SDL_Quit();
+    extern bool sim_is_headless(void);
+    if (!sim_is_headless()) {
+        if (s_texture)  SDL_DestroyTexture(s_texture);
+        if (s_renderer) SDL_DestroyRenderer(s_renderer);
+        if (s_window)   SDL_DestroyWindow(s_window);
+        SDL_Quit();
+    }
     s_texture     = NULL;
     s_renderer    = NULL;
     s_window      = NULL;
@@ -163,6 +176,11 @@ static esp_err_t sim_display_flush(const hal_area_t *area, const uint8_t *data)
             size_t src_idx = (size_t)(y - area->y1) * w + (x - area->x1);
             s_fb[(size_t)y * (size_t)s_width + x] = pixels[src_idx];
         }
+    }
+
+    extern bool sim_is_headless(void);
+    if (sim_is_headless()) {
+        return ESP_OK;  /* Framebuffer updated, skip SDL render */
     }
 
     /* Update SDL texture and render */
@@ -193,6 +211,11 @@ static uint16_t sim_display_get_height(void) { return (uint16_t)s_height; }
 static esp_err_t sim_display_brightness(uint8_t pct) { (void)pct; return ESP_OK; }
 static esp_err_t sim_display_sleep(bool enter) { (void)enter; return ESP_OK; }
 static esp_err_t sim_display_refresh_mode(hal_display_refresh_mode_t mode) { (void)mode; return ESP_OK; }
+
+int sim_display_get_scale(void)
+{
+    return s_scale;
+}
 
 /* Mutable driver struct so width/height can be patched at init time */
 static hal_display_driver_t sim_display_driver = {

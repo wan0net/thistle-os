@@ -1,0 +1,11 @@
+# HAL completeness check — all interfaces must register
++display driver registered
++input driver registered
++storage driver registered
++power driver registered
++RTC driver registered
++IMU driver registered
++audio driver registered
+# Radio and GPS only on devices that have them
+-PANIC
+-assert failed

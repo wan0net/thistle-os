@@ -56,6 +56,130 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
+// ---------------------------------------------------------------------------
+// Simulator: dlopen-based driver loading (replaces esp_elf)
+// ---------------------------------------------------------------------------
+
+#[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
+mod sim_loader {
+    use std::os::raw::{c_char, c_void, c_int};
+    use std::ffi::CStr;
+
+    extern "C" {
+        fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
+        fn driver_loader_get_config() -> *const c_char;
+    }
+
+    const ESP_LOG_INFO: i32 = 3;
+    const ESP_LOG_ERROR: i32 = 1;
+    const ESP_LOG_WARN: i32 = 2;
+    static TAG: &[u8] = b"drv_loader\0";
+
+    /// Convert a .drv.elf path to a .drv.dylib (macOS) or .drv.so (Linux) path.
+    pub fn elf_path_to_host_lib(elf_path: &str) -> Option<String> {
+        if let Some(base) = elf_path.strip_suffix(".drv.elf") {
+            #[cfg(target_os = "macos")]
+            return Some(format!("{}.drv.dylib", base));
+            #[cfg(not(target_os = "macos"))]
+            return Some(format!("{}.drv.so", base));
+        }
+        if let Some(base) = elf_path.strip_suffix(".app.elf") {
+            #[cfg(target_os = "macos")]
+            return Some(format!("{}.app.dylib", base));
+            #[cfg(not(target_os = "macos"))]
+            return Some(format!("{}.app.so", base));
+        }
+        None
+    }
+
+    /// Load a driver shared library via dlopen and call its driver_init().
+    ///
+    /// Returns ESP_OK on success, error code on failure.
+    pub unsafe fn load_driver_dylib(path: &str) -> i32 {
+        let lib_path = match elf_path_to_host_lib(path) {
+            Some(p) => p,
+            None => {
+                esp_log_write(
+                    ESP_LOG_ERROR, TAG.as_ptr(),
+                    b"Cannot convert to host lib: %s\0".as_ptr(),
+                    path.as_ptr(),
+                );
+                return -1; // ESP_FAIL
+            }
+        };
+
+        // Check if the host library exists
+        if !std::path::Path::new(&lib_path).exists() {
+            esp_log_write(
+                ESP_LOG_WARN, TAG.as_ptr(),
+                b"No host library found (skipping): %s\0".as_ptr(),
+                format!("{}\0", lib_path).as_ptr(),
+            );
+            return 0x105; // ESP_ERR_NOT_FOUND — non-fatal, driver just not available
+        }
+
+        let c_lib_path = format!("{}\0", lib_path);
+
+        // dlopen the shared library
+        let handle = libc::dlopen(
+            c_lib_path.as_ptr() as *const i8,
+            libc::RTLD_NOW | libc::RTLD_LOCAL,
+        );
+
+        if handle.is_null() {
+            let err = libc::dlerror();
+            let err_str = if err.is_null() {
+                "unknown error"
+            } else {
+                CStr::from_ptr(err).to_str().unwrap_or("unknown error")
+            };
+            esp_log_write(
+                ESP_LOG_ERROR, TAG.as_ptr(),
+                b"dlopen failed: %s\0".as_ptr(),
+                format!("{}\0", err_str).as_ptr(),
+            );
+            return -1;
+        }
+
+        esp_log_write(
+            ESP_LOG_INFO, TAG.as_ptr(),
+            b"Loaded host library: %s\0".as_ptr(),
+            c_lib_path.as_ptr(),
+        );
+
+        // Look up driver_init symbol
+        let init_sym = libc::dlsym(handle, b"driver_init\0".as_ptr() as *const i8);
+        if init_sym.is_null() {
+            esp_log_write(
+                ESP_LOG_ERROR, TAG.as_ptr(),
+                b"driver_init not found in %s\0".as_ptr(),
+                c_lib_path.as_ptr(),
+            );
+            libc::dlclose(handle);
+            return -1;
+        }
+
+        // Call driver_init(config_json)
+        let driver_init: unsafe extern "C" fn(*const c_char) -> c_int =
+            std::mem::transmute(init_sym);
+
+        let config = driver_loader_get_config();
+        let ret = driver_init(config);
+
+        esp_log_write(
+            ESP_LOG_INFO, TAG.as_ptr(),
+            b"driver_init() returned %d for %s\0".as_ptr(),
+            ret as c_int,
+            c_lib_path.as_ptr(),
+        );
+
+        // Don't dlclose — driver code is still running
+        // Leak the handle intentionally (driver stays loaded)
+
+        if ret == 0 { 0 } else { -1 }
+    }
+}
+
 // MALLOC_CAP_SPIRAM = BIT(9) = 0x200
 const MALLOC_CAP_SPIRAM: u32 = 1 << 9;
 
@@ -217,6 +341,24 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
             MAX_LOADED_DRVS as c_int,
         );
         return ESP_ERR_NO_MEM;
+    }
+
+    // Simulator: use dlopen instead of esp_elf
+    #[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
+    {
+        let ret = sim_loader::load_driver_dylib(path_str);
+        if ret == ESP_OK {
+            if let Ok(mut state) = STATE.lock() {
+                let drv = &mut state.drivers[count];
+                let path_bytes = CStr::from_ptr(path).to_bytes_with_nul();
+                let copy_len = path_bytes.len().min(drv.path.len() - 1);
+                drv.path[..copy_len].copy_from_slice(&path_bytes[..copy_len]);
+                drv.path[copy_len] = 0;
+                drv.loaded = true;
+                state.count += 1;
+            }
+        }
+        return ret;
     }
 
     // 1. Verify signature
@@ -398,7 +540,17 @@ pub unsafe extern "C" fn driver_loader_scan_and_load() -> c_int {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        if !name_str.ends_with(".drv.elf") {
+        #[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
+        let valid_ext = {
+            #[cfg(target_os = "macos")]
+            { name_str.ends_with(".drv.dylib") || name_str.ends_with(".drv.elf") }
+            #[cfg(not(target_os = "macos"))]
+            { name_str.ends_with(".drv.so") || name_str.ends_with(".drv.elf") }
+        };
+        #[cfg(not(all(not(target_os = "espidf"), feature = "sim-bus")))]
+        let valid_ext = name_str.ends_with(".drv.elf");
+
+        if !valid_ext {
             continue;
         }
 

@@ -1,0 +1,5 @@
+{
+  "power": { "voltage_mv": 4100, "percent": 95, "state": "charging" },
+  "gps": { "latitude": 51.5074, "longitude": -0.1278, "altitude_m": 11.0, "satellites": 8, "fix_valid": true },
+  "imu": { "accel": [0.1, -0.2, 9.78], "gyro": [0.5, -0.3, 0.1] }
+}

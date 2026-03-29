@@ -26,16 +26,9 @@ typedef struct {
     int scl_speed_hz;
 } i2c_device_config_t;
 
-static inline esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg, i2c_master_bus_handle_t *handle) {
-    (void)cfg; *handle = (void*)1; return 0;
-}
-static inline esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus, const i2c_device_config_t *cfg, i2c_master_dev_handle_t *dev) {
-    (void)bus; (void)cfg; *dev = (void*)1; return 0;
-}
-static inline esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev) { (void)dev; return 0; }
-static inline esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev, const uint8_t *data, size_t len, int timeout) {
-    (void)dev; (void)data; (void)len; (void)timeout; return 0;
-}
-static inline esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev, const uint8_t *tx, size_t tx_len, uint8_t *rx, size_t rx_len, int timeout) {
-    (void)dev; (void)tx; (void)tx_len; (void)rx; (void)rx_len; (void)timeout; return 0;
-}
+/* Implemented in sim_i2c_bus.c — routes to virtual device models */
+esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg, i2c_master_bus_handle_t *handle);
+esp_err_t i2c_master_bus_add_device(i2c_master_bus_handle_t bus, const i2c_device_config_t *cfg, i2c_master_dev_handle_t *dev);
+esp_err_t i2c_master_bus_rm_device(i2c_master_dev_handle_t dev);
+esp_err_t i2c_master_transmit(i2c_master_dev_handle_t dev, const uint8_t *data, size_t len, int timeout);
+esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t dev, const uint8_t *tx, size_t tx_len, uint8_t *rx, size_t rx_len, int timeout);

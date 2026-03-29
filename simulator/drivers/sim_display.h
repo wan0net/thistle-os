@@ -12,3 +12,6 @@ void sim_display_set_resolution(int width, int height);
 
 /* Set the window title to include the device name */
 void sim_display_set_title(const char *device_name);
+
+/* Get the current display scale factor (2, 3, or 4) */
+int sim_display_get_scale(void);

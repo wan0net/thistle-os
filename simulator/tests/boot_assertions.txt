@@ -1,0 +1,17 @@
+# ThistleOS Simulator Boot Assertions
+# +pattern = must appear in output
+# -pattern = must NOT appear in output
+
+# Kernel boot sequence
++kernel_init: 0
++display_server_init: 0
++display_server_register_wm: 0
++Launcher launched
++ThistleOS Simulator ready
+
+# Crash indicators
+-PANIC
+-stack overflow
+-abort()
+-Guru Meditation
+-assert failed

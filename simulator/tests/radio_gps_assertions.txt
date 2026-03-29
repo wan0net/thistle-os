@@ -1,0 +1,5 @@
++radio driver registered
++GPS driver registered
++registered device at 0x34
++Launcher launched
+-PANIC

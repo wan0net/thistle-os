@@ -32,3 +32,116 @@ jobs:
           echo ""
           echo "Total test cases (approximate):"
           grep -r "TEST_CASE" components/test_thistle/ | wc -l
+
+  simulator-boot:
+    name: Simulator Boot Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
+
+      - name: Cache Rust toolchain and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.rustup
+            components/kernel_rs/target
+          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+
+      - name: Install Rust
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build simulator
+        working-directory: simulator
+        run: |
+          mkdir -p build && cd build
+          cmake .. && make -j$(nproc)
+
+      - name: Run boot test
+        working-directory: simulator
+        run: |
+          ./build/thistle_sim --headless --timeout 5000 \
+            --assert tests/boot_assertions.txt \
+            --device tdeck
+
+  simulator-integration:
+    name: Simulator Integration Tests
+    runs-on: ubuntu-latest
+    needs: simulator-boot  # Only run if basic boot passes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
+
+      - name: Cache Rust toolchain and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.rustup
+            components/kernel_rs/target
+          key: rust-sim-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+
+      - name: Install Rust
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build simulator
+        working-directory: simulator
+        run: |
+          mkdir -p build && cd build
+          cmake .. && make -j$(nproc)
+
+      - name: Run integration tests
+        working-directory: simulator
+        run: bash tests/run_integration_tests.sh
+
+  rust-kernel-tests:
+    name: Rust Kernel Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Rust toolchain and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.rustup
+            components/kernel_rs/target
+          key: rust-kernel-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
+
+      - name: Install Rust
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Run kernel tests
+        working-directory: components/kernel_rs
+        run: cargo test --target x86_64-unknown-linux-gnu -- --test-threads=1

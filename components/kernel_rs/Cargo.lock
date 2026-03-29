@@ -550,6 +550,7 @@ dependencies = [
  "embuild",
  "getrandom",
  "hmac",
+ "libc",
  "pbkdf2",
  "sha2",
  "thistle-tk",

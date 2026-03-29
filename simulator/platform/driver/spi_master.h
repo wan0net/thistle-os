@@ -25,13 +25,8 @@ typedef struct {
     size_t rxlength;
 } spi_transaction_t;
 
-static inline esp_err_t spi_bus_initialize(spi_host_device_t host, const spi_bus_config_t *cfg, int dma) {
-    (void)host; (void)cfg; (void)dma; return 0;
-}
-static inline esp_err_t spi_bus_add_device(spi_host_device_t host, const spi_device_interface_config_t *cfg, spi_device_handle_t *handle) {
-    (void)host; (void)cfg; *handle = (void*)1; return 0;
-}
-static inline esp_err_t spi_bus_remove_device(spi_device_handle_t handle) { (void)handle; return 0; }
-static inline esp_err_t spi_device_polling_transmit(spi_device_handle_t handle, spi_transaction_t *t) {
-    (void)handle; (void)t; return 0;
-}
+/* Implemented in sim_spi_bus.c */
+esp_err_t spi_bus_initialize(spi_host_device_t host, const spi_bus_config_t *cfg, int dma);
+esp_err_t spi_bus_add_device(spi_host_device_t host, const spi_device_interface_config_t *cfg, spi_device_handle_t *handle);
+esp_err_t spi_bus_remove_device(spi_device_handle_t handle);
+esp_err_t spi_device_polling_transmit(spi_device_handle_t handle, spi_transaction_t *t);

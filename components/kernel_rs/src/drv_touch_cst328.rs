@@ -107,9 +107,26 @@ extern "C" {
     fn vTaskDelay(ticks: u32);
 }
 
-// ── Stub implementations (simulator / host tests) ────────────────────────────
+// ── Extern "C" bindings for simulator with sim-bus feature ───────────────────
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
+extern "C" {
+    fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
+    fn i2c_master_transmit_receive(handle: *mut c_void, write_data: *const u8, write_size: usize, read_data: *mut u8, read_size: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+    fn gpio_config(cfg: *const GpioConfig) -> i32;
+    fn gpio_set_level(pin: i32, level: u32) -> i32;
+    fn gpio_isr_handler_add(pin: i32, handler: unsafe extern "C" fn(*mut c_void), arg: *mut c_void) -> i32;
+    fn gpio_isr_handler_remove(pin: i32) -> i32;
+    fn gpio_install_isr_service(flags: i32) -> i32;
+    fn esp_timer_get_time() -> i64;
+    fn vTaskDelay(ticks: u32);
+}
+
+// ── Stub implementations (host tests without sim-bus) ────────────────────────
+
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn i2c_master_bus_add_device(
     _bus: *mut c_void,
     _cfg: *const I2cDeviceConfig,
@@ -120,12 +137,12 @@ unsafe fn i2c_master_bus_add_device(
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 {
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn i2c_master_transmit_receive(
     _handle: *mut c_void,
     _write_data: *const u8,
@@ -139,7 +156,7 @@ unsafe fn i2c_master_transmit_receive(
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn i2c_master_transmit(
     _handle: *mut c_void,
     _data: *const u8,
@@ -149,17 +166,17 @@ unsafe fn i2c_master_transmit(
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 {
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 {
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn gpio_isr_handler_add(
     _pin: i32,
     _handler: unsafe extern "C" fn(*mut c_void),
@@ -168,22 +185,22 @@ unsafe fn gpio_isr_handler_add(
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn gpio_isr_handler_remove(_pin: i32) -> i32 {
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn gpio_install_isr_service(_flags: i32) -> i32 {
     ESP_OK
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn esp_timer_get_time() -> i64 {
     0
 }
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 unsafe fn vTaskDelay(_ticks: u32) {}
 
 // ── FreeRTOS pdMS_TO_TICKS equivalent ────────────────────────────────────────

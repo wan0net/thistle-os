@@ -73,12 +73,27 @@ set(SIM_SRCS
     platform/platform_stubs.c
     platform/sim_vfs.c
     platform/sim_http.c
+    platform/sim_i2c_bus.c
+    platform/sim_spi_bus.c
+    devices/dev_pcf8563.c
+    devices/dev_qmi8658c.c
+    devices/dev_tca8418.c
+    devices/dev_cst328.c
+    devices/dev_ltr553.c
     drivers/sim_display.c
     drivers/sim_input.c
     drivers/sim_storage.c
     drivers/sim_network.c
+    drivers/sim_power.c
+    drivers/sim_gps.c
+    drivers/sim_imu.c
+    drivers/sim_rtc.c
+    drivers/sim_audio.c
+    drivers/sim_radio.c
+    drivers/sim_scenario.c
     # sim_wifi.c and sim_ble.c removed — Rust kernel provides wifi_manager + ble_manager
     board_simulator.c
+    sim_assert.c
 )
 
 add_executable(thistle_sim ${SIM_SRCS} ${THISTLE_SRCS} ${LVGL_SRCS})
@@ -89,6 +104,7 @@ target_include_directories(thistle_sim PRIVATE
     # Simulator stubs FIRST (shadow ESP-IDF headers)
     ${CMAKE_CURRENT_SOURCE_DIR}/platform
     ${CMAKE_CURRENT_SOURCE_DIR}/drivers
+    ${CMAKE_CURRENT_SOURCE_DIR}/devices
     ${CMAKE_CURRENT_SOURCE_DIR}
     # LVGL
     ${LVGL_DIR}
@@ -139,7 +155,7 @@ set(RUST_HOST_LIB "${KERNEL_RS_DIR}/target/${RUST_HOST_TARGET}/release/libthistl
 add_custom_command(
     OUTPUT ${RUST_HOST_LIB}
     COMMAND ${CMAKE_COMMAND} -E env "PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}"
-        cargo build --release --target ${RUST_HOST_TARGET}
+        cargo build --release --target ${RUST_HOST_TARGET} --features sim-bus
     WORKING_DIRECTORY ${KERNEL_RS_DIR}
     COMMENT "Building Rust kernel for simulator (${RUST_HOST_TARGET})"
     VERBATIM
@@ -152,7 +168,14 @@ target_include_directories(thistle_sim PRIVATE
 )
 
 target_link_directories(thistle_sim PRIVATE ${SDL2_LIBRARY_DIRS})
-target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} ${RUST_HOST_LIB} pthread m curl)
+target_link_libraries(thistle_sim PRIVATE ${SDL2_LIBRARIES} ${RUST_HOST_LIB} pthread m curl dl)
+
+# Export symbols so dlopen'd modules can resolve syscall functions
+if(NOT APPLE)
+    target_link_options(thistle_sim PRIVATE -rdynamic)
+else()
+    target_link_options(thistle_sim PRIVATE -Wl,-export_dynamic)
+endif()
 
 # Suppress warnings from LVGL and external code
 target_compile_options(thistle_sim PRIVATE
@@ -162,3 +185,42 @@ target_compile_options(thistle_sim PRIVATE
     -Wno-unused-function
     -Wno-unused-variable
 )
+
+# --- Simulator unit tests ---
+add_executable(thistle_sim_tests
+    tests/test_sim_main.c
+    tests/test_sim_assert.c
+    tests/test_i2c_bus.c
+    sim_assert.c
+    platform/sim_i2c_bus.c
+    platform/sim_spi_bus.c
+    platform/platform_stubs.c
+    devices/dev_pcf8563.c
+    devices/dev_qmi8658c.c
+    devices/dev_tca8418.c
+    devices/dev_cst328.c
+    devices/dev_ltr553.c
+)
+
+target_include_directories(thistle_sim_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers
+    ${CMAKE_CURRENT_SOURCE_DIR}/devices
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${THISTLE_DIR}/components/thistle_hal/include
+)
+
+target_compile_definitions(thistle_sim_tests PRIVATE
+    SIMULATOR_BUILD=1
+)
+
+target_compile_options(thistle_sim_tests PRIVATE
+    -Wno-unused-parameter
+    -Wno-sign-compare
+    -Wno-missing-field-initializers
+    -Wno-unused-function
+    -Wno-unused-variable
+)
+
+target_link_libraries(thistle_sim_tests PRIVATE pthread m)

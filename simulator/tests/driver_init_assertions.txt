@@ -1,0 +1,10 @@
+# Virtual I2C device model registration
++registered device at 0x51
++registered device at 0x6A
+# Driver manager completes
++All drivers started
+# Kernel boot succeeds
++kernel_init: 0
+-PANIC
+-assert failed
+-stack overflow

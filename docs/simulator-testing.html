@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulator &amp; Testing — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/apps.html">Apps</a>
+      <a href="/thistle-os/docs/kernel-modules.html">Modules</a>
+      <a href="/thistle-os/simulator/">Simulator</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </div>
+</nav>
+<div class="site-wrapper">
+
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+
+        <div class="nav-label">Development</div>
+        <a href="app-development.html">Building Apps</a>
+        <a href="driver-development.html">Building Drivers</a>
+
+        <div class="nav-label">Testing</div>
+        <a href="simulator-testing.html" class="active">Simulator &amp; Testing</a>
+
+        <div class="nav-label">Reference</div>
+        <a href="devices.html">Devices</a>
+        <a href="drivers.html">Drivers</a>
+        <a href="apps.html">Apps</a>
+        <a href="window-managers.html">Window Managers</a>
+        <a href="kernel-modules.html">Kernel Modules</a>
+
+        <div class="nav-label">System</div>
+        <a href="app-store.html">App Store</a>
+        <a href="security.html">Security &amp; Signing</a>
+        <a href="recovery.html">Recovery OS</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Simulator &amp; Testing</div>
+      <h1>Simulator &amp; Testing</h1>
+      <p class="lead">A desktop simulator built on SDL2 that runs the real ThistleOS kernel, display server, and apps in a host process. Virtual I2C devices, a scenario engine, and a headless assertion framework enable fully automated testing of 10 board configurations without hardware.</p>
+      <a href="https://github.com/wan0net/thistle-os/blob/main/docs/simulator-testing.html" class="edit-link">&#9998; Edit on GitHub</a>
+    </div>
+
+    <!-- 1. Overview -->
+    <h2>Overview</h2>
+    <p>The ThistleOS simulator compiles the same kernel, display server, window manager, and app code that runs on real ESP32 hardware into a native x86/ARM desktop binary. SDL2 provides the display window and keyboard/mouse input; libcurl provides HTTP networking. Everything else — HAL registration, driver vtables, IPC, permissions, the ELF syscall table — is the real production code.</p>
+
+    <p>What the simulator replaces with stubs:</p>
+    <ul>
+      <li><strong>Hardware buses</strong> — Virtual I2C and SPI buses backed by in-memory device models instead of real peripherals.</li>
+      <li><strong>WiFi/BLE</strong> — Fake scan results and connection state. HTTP requests go through libcurl on the host.</li>
+      <li><strong>Flash/NVS</strong> — A host filesystem directory (<code>simulator/sdcard/</code>) mounted as the virtual SD card via <code>sim_vfs</code>.</li>
+      <li><strong>FreeRTOS</strong> — pthreads and POSIX timers replace FreeRTOS tasks and timers.</li>
+    </ul>
+
+    <p>What the simulator does <strong>not</strong> test: real-time interrupt latency, actual power consumption, hardware-specific driver quirks, flash wear leveling, and radio RF characteristics. For those, use real hardware.</p>
+
+    <!-- 2. Quick Start -->
+    <h2>Quick Start</h2>
+    <p>Prerequisites: SDL2, CMake, a C compiler, Rust (for the kernel crate), and libcurl.</p>
+
+    <pre><code><span class="tok-comment"># Install dependencies (Ubuntu/Debian)</span>
+sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
+
+<span class="tok-comment"># Install dependencies (macOS)</span>
+brew install sdl2 cmake pkg-config curl
+
+<span class="tok-comment"># Build</span>
+cd simulator
+mkdir -p build &amp;&amp; cd build
+cmake .. &amp;&amp; make -j$(nproc)
+
+<span class="tok-comment"># Run with default device (T-Deck, 320x240)</span>
+./thistle_sim
+
+<span class="tok-comment"># Run as T-Deck Pro (e-paper)</span>
+./thistle_sim --device tdeck-pro
+
+<span class="tok-comment"># Run headless boot test</span>
+./thistle_sim --headless --timeout 5000 \
+  --assert ../tests/boot_assertions.txt \
+  --device tdeck</code></pre>
+
+    <!-- 3. CLI Reference -->
+    <h2>CLI Reference</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Flag</th><th>Argument</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>--device</code></td><td>NAME</td><td>Simulate a specific board. See <a href="#supported-devices">Supported Devices</a> for the full list. Default: <code>tdeck</code>.</td></tr>
+          <tr><td><code>--headless</code></td><td>&mdash;</td><td>Run without an SDL window. The framebuffer is allocated but never presented. Required for CI.</td></tr>
+          <tr><td><code>--timeout</code></td><td>MS</td><td>Exit after MS milliseconds. Used with <code>--headless</code> to bound test runtime. Typical value: 5000.</td></tr>
+          <tr><td><code>--assert</code></td><td>FILE</td><td>On exit, evaluate assertions from FILE against captured log output. Exit code 0 = all pass, 1 = failure.</td></tr>
+          <tr><td><code>--scenario</code></td><td>FILE</td><td>Load a JSON scenario file that injects sensor data, GPS coordinates, battery state, and IMU readings into the virtual hardware.</td></tr>
+          <tr><td><code>-h</code>, <code>--help</code></td><td>&mdash;</td><td>Print usage and the list of supported device names.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 4. Headless Testing -->
+    <h2>Headless Testing</h2>
+    <p>Headless mode (<code>--headless</code>) is the foundation of automated testing. The simulator boots the full kernel, registers all HAL drivers, launches the window manager and launcher app, then exits after the timeout. Combined with <code>--assert</code>, it verifies that the boot sequence produces the expected log output.</p>
+
+    <h3>Assertion file format</h3>
+    <p>An assertion file is a plain text file. Each non-empty, non-comment line is a pattern:</p>
+    <ul>
+      <li><code>+pattern</code> — The pattern <strong>must appear</strong> somewhere in the captured log output.</li>
+      <li><code>-pattern</code> — The pattern <strong>must not appear</strong> anywhere in the log output.</li>
+      <li>Lines starting with <code>#</code> are comments.</li>
+    </ul>
+
+    <p>Example (<code>tests/boot_assertions.txt</code>):</p>
+    <pre><code><span class="tok-comment"># ThistleOS Simulator Boot Assertions</span>
+<span class="tok-comment"># +pattern = must appear in output</span>
+<span class="tok-comment"># -pattern = must NOT appear in output</span>
+
+<span class="tok-comment"># Kernel boot sequence</span>
++kernel_init: 0
++display_server_init: 0
++display_server_register_wm: 0
++Launcher launched
++ThistleOS Simulator ready
+
+<span class="tok-comment"># Crash indicators</span>
+-PANIC
+-stack overflow
+-abort()
+-Guru Meditation
+-assert failed</code></pre>
+
+    <p>If any <code>+</code> pattern is missing or any <code>-</code> pattern is found, the simulator exits with code 1 and prints which assertions failed.</p>
+
+    <!-- 5. Scenario Engine -->
+    <h2>Scenario Engine</h2>
+    <p>The <code>--scenario</code> flag loads a JSON file that injects state into the virtual hardware layer before and during the boot sequence. This lets you test how the kernel and apps respond to specific sensor readings, GPS fixes, and battery conditions.</p>
+
+    <h3>JSON format</h3>
+    <pre><code>{
+  <span class="tok-string">"power"</span>: {
+    <span class="tok-string">"voltage_mv"</span>: 4100,
+    <span class="tok-string">"percent"</span>: 95,
+    <span class="tok-string">"state"</span>: <span class="tok-string">"charging"</span>
+  },
+  <span class="tok-string">"gps"</span>: {
+    <span class="tok-string">"latitude"</span>: 51.5074,
+    <span class="tok-string">"longitude"</span>: -0.1278,
+    <span class="tok-string">"altitude_m"</span>: 11.0,
+    <span class="tok-string">"satellites"</span>: 8,
+    <span class="tok-string">"fix_valid"</span>: <span class="tok-keyword">true</span>
+  },
+  <span class="tok-string">"imu"</span>: {
+    <span class="tok-string">"accel"</span>: [0.1, -0.2, 9.78],
+    <span class="tok-string">"gyro"</span>: [0.5, -0.3, 0.1]
+  }
+}</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Section</th><th>Fields</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>power</code></td><td><code>voltage_mv</code>, <code>percent</code>, <code>state</code></td><td>Sets the virtual battery voltage, percentage, and charging state (charging, discharging, full).</td></tr>
+          <tr><td><code>gps</code></td><td><code>latitude</code>, <code>longitude</code>, <code>altitude_m</code>, <code>satellites</code>, <code>fix_valid</code></td><td>Injects a GPS fix into the virtual GPS driver. Apps calling <code>hal_gps_get_position()</code> receive these values.</td></tr>
+          <tr><td><code>imu</code></td><td><code>accel</code> [x,y,z], <code>gyro</code> [x,y,z]</td><td>Sets accelerometer and gyroscope readings on the virtual QMI8658C device model.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 6. Virtual I2C Bus -->
+    <h2>Virtual I2C Bus</h2>
+    <p>The simulator provides a virtual I2C bus (<code>sim_i2c_bus.c</code>) that replaces the ESP-IDF <code>i2c_master</code> driver. When a kernel driver or HAL call performs an I2C read or write, the virtual bus routes the transaction to the appropriate device model based on the 7-bit I2C address.</p>
+
+    <p>Device models are registered during <code>board_init()</code> based on the selected device's capabilities. Each model implements a register map that mimics the real hardware closely enough for the kernel drivers to function correctly. Register reads return realistic default values; register writes update internal state that subsequent reads reflect.</p>
+
+    <p>The virtual SPI bus (<code>sim_spi_bus.c</code>) follows the same pattern for SPI-attached peripherals like displays and LoRa radios.</p>
+
+    <!-- 7. Device Models -->
+    <h2>Device Models</h2>
+    <p>Five virtual I2C device models are implemented, covering the peripherals found across the supported boards:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Model</th><th>Source</th><th>I2C Address</th><th>Real Hardware</th><th>Key Registers</th></tr></thead>
+        <tbody>
+          <tr><td><code>dev_pcf8563</code></td><td><code>devices/dev_pcf8563.c</code></td><td><code>0x51</code></td><td>PCF8563 RTC</td><td>Time, date, alarm, timer, CLKOUT control</td></tr>
+          <tr><td><code>dev_qmi8658c</code></td><td><code>devices/dev_qmi8658c.c</code></td><td><code>0x6A</code></td><td>QMI8658C 6-axis IMU</td><td>WHO_AM_I, accelerometer XYZ, gyroscope XYZ, config</td></tr>
+          <tr><td><code>dev_tca8418</code></td><td><code>devices/dev_tca8418.c</code></td><td><code>0x34</code></td><td>TCA8418 keyboard controller</td><td>Key event FIFO, GPIO config, interrupt status</td></tr>
+          <tr><td><code>dev_cst328</code></td><td><code>devices/dev_cst328.c</code></td><td><code>0x1A</code></td><td>CST328 touch controller</td><td>Touch point X/Y, finger count, gesture ID</td></tr>
+          <tr><td><code>dev_ltr553</code></td><td><code>devices/dev_ltr553.c</code></td><td><code>0x23</code></td><td>LTR-553ALS light/proximity</td><td>ALS data (lux), PS data (proximity), config</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Input injection functions allow tests and the SDL event handler to feed keystrokes and touch events into the virtual devices:</p>
+    <pre><code><span class="tok-comment">// Inject a key press into the virtual TCA8418</span>
+<span class="tok-fn">dev_tca8418_inject_key</span>(0x1E, <span class="tok-keyword">true</span>);   <span class="tok-comment">// key down</span>
+<span class="tok-fn">dev_tca8418_inject_key</span>(0x1E, <span class="tok-keyword">false</span>);  <span class="tok-comment">// key up</span>
+
+<span class="tok-comment">// Inject a touch event into the virtual CST328</span>
+<span class="tok-fn">dev_cst328_inject_touch</span>(160, 120, <span class="tok-keyword">true</span>);   <span class="tok-comment">// finger down at (160,120)</span>
+<span class="tok-fn">dev_cst328_inject_touch</span>(160, 120, <span class="tok-keyword">false</span>);  <span class="tok-comment">// finger up</span>
+
+<span class="tok-comment">// Set sensor values on the virtual QMI8658C</span>
+<span class="tok-fn">dev_qmi8658c_set_accel</span>(0.0f, 0.0f, 9.81f);
+<span class="tok-fn">dev_qmi8658c_set_gyro</span>(0.0f, 0.0f, 0.0f);
+
+<span class="tok-comment">// Set light sensor readings</span>
+<span class="tok-fn">dev_ltr553_set_lux</span>(500);
+<span class="tok-fn">dev_ltr553_set_proximity</span>(100);</code></pre>
+
+    <!-- 8. Writing Tests -->
+    <h2>Writing Tests</h2>
+
+    <h3>Adding an assertion file</h3>
+    <p>Create a new <code>.txt</code> file in <code>simulator/tests/</code> with <code>+</code> and <code>-</code> patterns. Run it manually first:</p>
+    <pre><code>./build/thistle_sim --headless --timeout 5000 \
+  --assert tests/my_assertions.txt \
+  --device tdeck</code></pre>
+
+    <h3>Adding an integration test</h3>
+    <p>Edit <code>simulator/tests/run_integration_tests.sh</code> and add a <code>run_test</code> call. The function signature is:</p>
+    <pre><code>run_test "test_name" "device" "assert_file" "[extra_args]"</code></pre>
+
+    <p>Example — testing that the Heltec V3 (128x64 OLED, LoRa, no keyboard) boots and registers its radio driver:</p>
+    <pre><code>run_test "radio/heltec-v3" "heltec-v3" "$TESTS_DIR/radio_assertions.txt"</code></pre>
+
+    <h3>Using scenarios in tests</h3>
+    <p>Create a JSON scenario file and pass it with <code>--scenario</code>:</p>
+    <pre><code>run_test "battery/low" "tdeck" "$TESTS_DIR/low_battery_assertions.txt" \
+  "--scenario $TESTS_DIR/low_battery_scenario.json"</code></pre>
+
+    <h3>Rust kernel unit tests</h3>
+    <p>The Rust kernel crate (<code>components/kernel_rs/</code>) contains 1,231 unit tests covering all 57 kernel modules. These run on the host (not on ESP32) with:</p>
+    <pre><code><span class="tok-comment"># macOS</span>
+cargo test --target aarch64-apple-darwin -- --test-threads=1
+
+<span class="tok-comment"># Linux (CI)</span>
+cargo test --target x86_64-unknown-linux-gnu -- --test-threads=1</code></pre>
+    <p>The <code>--test-threads=1</code> flag is required because many kernel modules use global state (HAL registry, app manager, event bus) that is not safe to access from parallel test threads.</p>
+
+    <!-- 9. CI Integration -->
+    <h2>CI Integration</h2>
+    <p>GitHub Actions runs four test jobs on every push and pull request to <code>main</code>:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Job</th><th>What it does</th><th>Depends on</th></tr></thead>
+        <tbody>
+          <tr><td><code>unit-tests</code></td><td>Verifies C test code compiles and counts test cases.</td><td>&mdash;</td></tr>
+          <tr><td><code>simulator-boot</code></td><td>Builds the simulator and runs a single headless boot test on the T-Deck device model.</td><td>&mdash;</td></tr>
+          <tr><td><code>simulator-integration</code></td><td>Runs the full integration test suite: boot tests across all 10 devices, HAL completeness checks, driver init verification, radio/GPS tests, scenario engine tests, and minimal device tests.</td><td><code>simulator-boot</code></td></tr>
+          <tr><td><code>rust-kernel-tests</code></td><td>Runs all 1,231 Rust kernel unit tests on x86_64 Linux.</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The <code>simulator-integration</code> job depends on <code>simulator-boot</code> — if the basic boot test fails, the full suite is skipped to save CI minutes.</p>
+
+    <h3>Interpreting failures</h3>
+    <ul>
+      <li><strong>Boot test failure</strong> — A fundamental regression. The kernel cannot complete its init sequence. Check the log output for PANIC, assert failures, or missing driver registrations.</li>
+      <li><strong>HAL completeness failure</strong> — A driver failed to register its vtable. Likely a change in driver init code or HAL registration.</li>
+      <li><strong>Driver init failure</strong> — A virtual I2C device model did not register at the expected address. Check that <code>board_init()</code> calls the correct <code>dev_*_register()</code> functions for the device.</li>
+      <li><strong>Rust kernel test failure</strong> — A unit test in <code>components/kernel_rs/</code> failed. The test name and assertion message identify the broken module.</li>
+    </ul>
+
+    <!-- 10. Adding Device Models -->
+    <h2>Adding Device Models</h2>
+    <p>To add a new virtual I2C device model:</p>
+
+    <ol>
+      <li><strong>Create the source file</strong> — Add <code>simulator/devices/dev_yourchip.c</code>. Implement a register read/write handler that the virtual I2C bus calls.</li>
+      <li><strong>Declare the registration function</strong> — Add <code>void dev_yourchip_register(int bus_index, uint16_t addr);</code> to <code>simulator/devices/sim_devices.h</code>.</li>
+      <li><strong>Register in board_init</strong> — In <code>simulator/board_simulator.c</code>, call <code>dev_yourchip_register()</code> for devices that include the chip.</li>
+      <li><strong>Add sensor injection (optional)</strong> — If the device produces sensor data, add functions like <code>dev_yourchip_set_value()</code> and declare them in <code>sim_devices.h</code>.</li>
+      <li><strong>Write assertions</strong> — Create an assertion file that verifies the device registers at the expected address and the corresponding kernel driver initializes.</li>
+    </ol>
+
+    <p>The device model only needs to implement the registers that the kernel driver actually reads and writes. Consult the real driver source in <code>components/drv_*/</code> to determine which registers matter.</p>
+
+    <div class="callout tip">
+      <div class="callout-title">Tip</div>
+      Start by returning the correct WHO_AM_I or device ID register value. Most drivers check this first and abort if it does not match.
+    </div>
+
+    <!-- 11. Supported Devices -->
+    <h2 id="supported-devices">Supported Devices</h2>
+    <p>The simulator can emulate all 10 supported ThistleOS boards. Each device model configures the display resolution, available peripherals, and which virtual I2C devices are registered.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Device</th><th>Board Name</th><th>Resolution</th><th>Keyboard</th><th>Touch</th><th>Radio</th><th>GPS</th><th>E-Paper</th></tr></thead>
+        <tbody>
+          <tr><td><code>tdeck-pro</code></td><td>T-Deck Pro</td><td>320 x 240</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+          <tr><td><code>tdeck</code></td><td>T-Deck</td><td>320 x 240</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+          <tr><td><code>tdeck-plus</code></td><td>T-Deck Plus</td><td>320 x 240</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+          <tr><td><code>tdisplay</code></td><td>T-Display-S3</td><td>320 x 170</td><td>No</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td><code>heltec-v3</code></td><td>Heltec V3</td><td>128 x 64</td><td>No</td><td>No</td><td>Yes</td><td>No</td><td>No</td></tr>
+          <tr><td><code>cardputer</code></td><td>Cardputer</td><td>240 x 135</td><td>Yes</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td><code>cyd-s022</code></td><td>CYD S022</td><td>240 x 320</td><td>No</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td><code>cyd-s028</code></td><td>CYD S028</td><td>320 x 240</td><td>No</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
+          <tr><td><code>t3-s3</code></td><td>T3-S3</td><td>128 x 64</td><td>No</td><td>No</td><td>Yes</td><td>No</td><td>No</td></tr>
+          <tr><td><code>c3-mini</code></td><td>C3-Mini</td><td>128 x 64</td><td>No</td><td>No</td><td>No</td><td>No</td><td>No</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Devices with radio and GPS capabilities (T-Deck Pro, T-Deck, T-Deck Plus) register virtual LoRa radio and GPS drivers. The T-Deck Pro additionally uses the e-paper display path with simulated partial/full refresh modes. Minimal devices like the C3-Mini register only a display and storage driver, making them useful for testing the kernel's graceful handling of missing peripherals.</p>
+
+    <div class="page-footer">
+      <span>ThistleOS v0.1.0 &mdash; BSD 3-Clause</span>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -148,7 +148,44 @@ mod esp_ffi {
 
 // ── Stub impls for host tests / simulator ────────────────────────────────────
 
-#[cfg(not(target_os = "espidf"))]
+#[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
+mod esp_ffi {
+    use std::os::raw::c_void;
+
+    #[repr(C)]
+    pub struct I2cDeviceConfig {
+        pub dev_addr_length: u32,
+        pub device_address: u16,
+        pub scl_speed_hz: u32,
+        pub scl_wait_us: u32,
+        pub flags: u32,
+    }
+
+    extern "C" {
+        pub fn i2c_master_bus_add_device(
+            bus: *mut c_void,
+            cfg: *const I2cDeviceConfig,
+            handle: *mut *mut c_void,
+        ) -> i32;
+        pub fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
+        pub fn i2c_master_transmit_receive(
+            handle: *mut c_void,
+            write_data: *const u8,
+            write_size: usize,
+            read_data: *mut u8,
+            read_size: usize,
+            timeout_ms: i32,
+        ) -> i32;
+        pub fn i2c_master_transmit(
+            handle: *mut c_void,
+            data: *const u8,
+            len: usize,
+            timeout_ms: i32,
+        ) -> i32;
+    }
+}
+
+#[cfg(all(not(target_os = "espidf"), not(feature = "sim-bus")))]
 mod esp_ffi {
     use std::os::raw::c_void;
 

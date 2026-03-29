@@ -1,0 +1,7 @@
+# Scenario engine loaded
++Scenario loaded
+# Kernel boot succeeds
++kernel_init: 0
++Launcher launched
+-PANIC
+-assert failed

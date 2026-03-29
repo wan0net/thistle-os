@@ -5,6 +5,16 @@
 #include "sim_display.h"
 #include "sim_input.h"
 #include "sim_storage.h"
+#include "sim_power.h"
+#include "sim_gps.h"
+#include "sim_imu.h"
+#include "sim_rtc.h"
+#include "sim_audio.h"
+#include "sim_radio.h"
+#include "sim_scenario.h"
+#include "sim_i2c_bus.h"
+#include "sim_spi_bus.h"
+#include "sim_devices.h"
 
 /* Forward declaration — defined in sim_network.c */
 esp_err_t sim_network_register(void);
@@ -69,6 +79,45 @@ esp_err_t board_init(void)
      * by kernel_init() before driver_manager_init(), so the manager is
      * already initialized when board_init() runs. */
     sim_network_register();
+
+    /* Register fake HAL drivers so apps never see NULL vtables */
+    hal_power_register(sim_power_get(), NULL);
+    hal_rtc_register(sim_rtc_get());
+    hal_imu_register(sim_imu_get(), NULL);
+    hal_audio_register(sim_audio_get(), NULL);
+    if (dev->has_radio) hal_radio_register(sim_radio_get(), NULL);
+    if (dev->has_gps)   hal_gps_register(sim_gps_get(), NULL);
+
+    /* Initialize virtual buses and register device models */
+    sim_i2c_bus_init();
+    sim_spi_bus_init();
+    hal_bus_register_i2c(0, sim_i2c_bus_get(0));
+    hal_bus_register_spi(2, sim_spi_bus_get(0));
+
+    /* Register I2C device models based on device capabilities */
+    dev_pcf8563_register(0, 0x51);     /* RTC — all devices */
+    if (dev->has_keyboard) dev_tca8418_register(0, 0x34);
+    if (dev->has_touch)    dev_cst328_register(0, 0x1A);
+    dev_qmi8658c_register(0, 0x6A);    /* IMU — all devices with accel */
+    dev_ltr553_register(0, 0x23);      /* Light sensor */
+
+    /* Apply scenario state to fake drivers */
+    {
+        uint16_t mv; uint8_t pct; int pstate;
+        sim_scenario_get_power(&mv, &pct, &pstate);
+        sim_power_set(mv, pct, (hal_power_state_t)pstate);
+    }
+    if (dev->has_gps) {
+        double lat, lon; float alt; uint8_t sats; bool fix;
+        sim_scenario_get_gps(&lat, &lon, &alt, &sats, &fix);
+        sim_gps_set_position(lat, lon, alt, sats, fix);
+    }
+    {
+        float accel[3], gyro[3];
+        sim_scenario_get_imu(accel, gyro);
+        sim_imu_set_accel(accel[0], accel[1], accel[2]);
+        sim_imu_set_gyro(gyro[0], gyro[1], gyro[2]);
+    }
 
     return ESP_OK;
 }

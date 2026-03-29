@@ -69,9 +69,14 @@ typedef struct {
     uint64_t pin_bit_mask;
 } gpio_config_t;
 
-static inline esp_err_t gpio_config(const gpio_config_t *cfg) { (void)cfg; return 0; }
-static inline esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level) { (void)pin; (void)level; return 0; }
-static inline int gpio_get_level(gpio_num_t pin) { (void)pin; return 0; }
-static inline esp_err_t gpio_install_isr_service(int flags) { (void)flags; return 0; }
-static inline esp_err_t gpio_isr_handler_add(gpio_num_t pin, void(*fn)(void*), void *arg) { (void)pin; (void)fn; (void)arg; return 0; }
-static inline esp_err_t gpio_isr_handler_remove(gpio_num_t pin) { (void)pin; return 0; }
+/* Implemented in platform_stubs.c */
+esp_err_t gpio_config(const gpio_config_t *cfg);
+esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level);
+int gpio_get_level(gpio_num_t pin);
+esp_err_t gpio_install_isr_service(int flags);
+esp_err_t gpio_isr_handler_add(gpio_num_t pin, void(*fn)(void*), void *arg);
+esp_err_t gpio_isr_handler_remove(gpio_num_t pin);
+esp_err_t gpio_set_direction(gpio_num_t pin, gpio_mode_t mode);
+esp_err_t gpio_set_pull_mode(gpio_num_t pin, int mode);
+esp_err_t gpio_set_intr_type(gpio_num_t pin, gpio_intr_type_t type);
+esp_err_t gpio_intr_enable(gpio_num_t pin);
