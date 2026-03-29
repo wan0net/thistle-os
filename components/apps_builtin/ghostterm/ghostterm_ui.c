@@ -31,11 +31,8 @@
 #include <stdbool.h>
 
 #include "driver/uart.h"
-
-/* FreeRTOS task API (provided by platform_stubs.c in simulator) */
-extern int xTaskCreate(void *fn, const char *n, unsigned int s,
-                       void *p, unsigned int pr, void **h);
-extern void vTaskDelete(void *t);
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "ghostterm_ui";
 
