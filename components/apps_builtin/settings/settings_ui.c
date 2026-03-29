@@ -607,9 +607,9 @@ static void wifi_network_clicked_cb(lv_event_t *e)
     wifi_update_status_label();
 }
 
-/* Scan results buffer — persists for the lifetime of the WiFi screen. */
-static wifi_scan_result_t s_scan_results[WIFI_SCAN_MAX_RESULTS];
-static uint8_t            s_scan_count = 0;
+/* Scan results buffer — heap-allocated on demand to save DRAM. */
+static wifi_scan_result_t *s_scan_results = NULL;
+static uint8_t             s_scan_count = 0;
 
 static void wifi_scan_clicked_cb(lv_event_t *e)
 {
@@ -626,6 +626,13 @@ static void wifi_scan_clicked_cb(lv_event_t *e)
     }
 
     s_scan_count = 0;
+    if (!s_scan_results) {
+        s_scan_results = malloc(sizeof(wifi_scan_result_t) * WIFI_SCAN_MAX_RESULTS);
+        if (!s_scan_results) {
+            ESP_LOGE(TAG, "WiFi: scan alloc failed");
+            return;
+        }
+    }
     esp_err_t err = wifi_manager_scan(s_scan_results, WIFI_SCAN_MAX_RESULTS, &s_scan_count);
 
     if (err == ESP_ERR_NOT_SUPPORTED) {
@@ -967,7 +974,7 @@ typedef struct {
     char name[32]; /* theme filename, e.g. "dark.json" */
 } appearance_theme_payload_t;
 
-static appearance_theme_payload_t s_theme_payloads[APPEARANCE_MAX_THEMES + 1]; /* +1 for Default */
+static appearance_theme_payload_t *s_theme_payloads = NULL; /* heap-allocated to save DRAM */
 
 static void theme_selected_cb(lv_event_t *e)
 {
@@ -1099,6 +1106,13 @@ static void open_appearance_screen(void)
      * Default name is "Default"; SD themes are stored as e.g. "dark.json". */
     const char *current_name = theme_get_current_name();
     bool default_active = (strcmp(current_name, "Default") == 0);
+
+    /* Allocate theme payloads on first use */
+    if (!s_theme_payloads) {
+        s_theme_payloads = malloc(sizeof(appearance_theme_payload_t) * (APPEARANCE_MAX_THEMES + 1));
+        if (!s_theme_payloads) return;
+        memset(s_theme_payloads, 0, sizeof(appearance_theme_payload_t) * (APPEARANCE_MAX_THEMES + 1));
+    }
 
     /* Store "__default__" in the first payload slot */
     strncpy(s_theme_payloads[0].name, "__default__", sizeof(s_theme_payloads[0].name) - 1);
