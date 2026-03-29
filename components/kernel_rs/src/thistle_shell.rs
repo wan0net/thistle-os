@@ -139,12 +139,12 @@ mod test_stubs {
     #[no_mangle] pub extern "C" fn esp_get_free_heap_size() -> u32 { 65536 }
     #[no_mangle] pub extern "C" fn heap_caps_get_free_size(_caps: u32) -> usize { 0 }
     #[no_mangle] pub extern "C" fn esp_restart() {}
-    #[no_mangle] pub extern "C" fn app_manager_get_count() -> i32 { 3 }
+    /* app_manager_get_count is now in app_manager.rs — no test stub needed */
     #[no_mangle] pub extern "C" fn wifi_manager_scan_start() -> i32 { 0 }
     #[no_mangle] pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
     #[no_mangle] pub extern "C" fn hal_storage_get_total_bytes() -> u64 { 10 * 1024 * 1024 }
     #[no_mangle] pub extern "C" fn hal_storage_get_free_bytes() -> u64 { 5 * 1024 * 1024 }
-    #[no_mangle] pub extern "C" fn driver_loader_get_count() -> i32 { 0 }
+    /* driver_loader_get_count is in driver_loader.rs — no test stub needed */
     // Transitive dependency: kernel_uptime_ms (kernel_boot.rs) calls esp_timer_get_time
     #[no_mangle] pub extern "C" fn esp_timer_get_time() -> i64 { 0 }
 }
