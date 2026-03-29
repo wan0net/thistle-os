@@ -26,7 +26,7 @@ const ESP_ERR_NOT_FOUND: i32 = 0x105;
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_BURN_ENTRIES: usize = 256;
+const MAX_BURN_ENTRIES: usize = 64;
 const MAX_CONVERSATIONS: usize = 4;
 const MAX_MESSAGE_INDEX: u8 = 49;
 const MAX_EXPIRED_QUEUE: usize = 64;
@@ -83,7 +83,7 @@ pub struct CBurnStats {
 // ---------------------------------------------------------------------------
 
 struct BurnTimerState {
-    entries: [Option<BurnEntry>; MAX_BURN_ENTRIES],
+    entries: Option<Box<[Option<BurnEntry>; MAX_BURN_ENTRIES]>>,
     entry_count: usize,
     policies: [ConversationBurnPolicy; MAX_CONVERSATIONS],
     expired_queue: [Option<CBurnExpired>; MAX_EXPIRED_QUEUE],
@@ -96,7 +96,7 @@ struct BurnTimerState {
 impl BurnTimerState {
     const fn new() -> Self {
         Self {
-            entries: [None; MAX_BURN_ENTRIES],
+            entries: None,
             entry_count: 0,
             policies: [ConversationBurnPolicy::new(); MAX_CONVERSATIONS],
             expired_queue: [None; MAX_EXPIRED_QUEUE],
@@ -107,12 +107,19 @@ impl BurnTimerState {
         }
     }
 
+    fn ensure_entries(&mut self) -> &mut [Option<BurnEntry>; MAX_BURN_ENTRIES] {
+        if self.entries.is_none() {
+            self.entries = Some(Box::new([None; MAX_BURN_ENTRIES]));
+        }
+        self.entries.as_mut().unwrap()
+    }
+
     fn reset(&mut self) {
         *self = Self::new();
     }
 
     fn init(&mut self) -> i32 {
-        self.entries = [None; MAX_BURN_ENTRIES];
+        self.entries = None;
         self.entry_count = 0;
         self.policies = [ConversationBurnPolicy::new(); MAX_CONVERSATIONS];
         self.expired_queue = [None; MAX_EXPIRED_QUEUE];
@@ -133,7 +140,11 @@ impl BurnTimerState {
 
     /// Find existing entry index for (conv_id, msg_idx).
     fn find_entry(&self, conv_id: u8, msg_idx: u8) -> Option<usize> {
-        for (i, slot) in self.entries.iter().enumerate() {
+        let entries = match self.entries.as_ref() {
+            Some(e) => e.as_ref(),
+            None => return None,
+        };
+        for (i, slot) in entries.iter().enumerate() {
             if let Some(entry) = slot {
                 if entry.active
                     && entry.conversation_id == conv_id
@@ -148,7 +159,11 @@ impl BurnTimerState {
 
     /// Find the first free slot index.
     fn find_free_slot(&self) -> Option<usize> {
-        for (i, slot) in self.entries.iter().enumerate() {
+        let entries = match self.entries.as_ref() {
+            Some(e) => e.as_ref(),
+            None => return Some(0), // no entries allocated yet; slot 0 is free
+        };
+        for (i, slot) in entries.iter().enumerate() {
             if slot.is_none() || !slot.unwrap().active {
                 return Some(i);
             }
@@ -166,7 +181,7 @@ impl BurnTimerState {
 
         // Cancel any existing timer on this slot (circular buffer reuse).
         if let Some(idx) = self.find_entry(conv_id, msg_idx) {
-            self.entries[idx] = None;
+            self.ensure_entries()[idx] = None;
             self.entry_count = self.entry_count.saturating_sub(1);
         }
 
@@ -175,10 +190,11 @@ impl BurnTimerState {
             None => return ESP_ERR_NO_MEM,
         };
 
-        self.entries[slot] = Some(BurnEntry {
+        let tick = self.tick_count;
+        self.ensure_entries()[slot] = Some(BurnEntry {
             conversation_id: conv_id,
             message_index: msg_idx,
-            created_at: self.tick_count,
+            created_at: tick,
             burn_after_ms,
             active: true,
         });
@@ -196,7 +212,7 @@ impl BurnTimerState {
 
         match self.find_entry(conv_id, msg_idx) {
             Some(idx) => {
-                self.entries[idx] = None;
+                self.ensure_entries()[idx] = None;
                 self.entry_count = self.entry_count.saturating_sub(1);
                 ESP_OK
             }
@@ -212,11 +228,13 @@ impl BurnTimerState {
             return ESP_ERR_INVALID_ARG;
         }
 
-        for slot in self.entries.iter_mut() {
-            if let Some(entry) = slot {
-                if entry.active && entry.conversation_id == conv_id {
-                    *slot = None;
-                    self.entry_count = self.entry_count.saturating_sub(1);
+        if let Some(entries) = self.entries.as_mut() {
+            for slot in entries.iter_mut() {
+                if let Some(entry) = slot {
+                    if entry.active && entry.conversation_id == conv_id {
+                        *slot = None;
+                        self.entry_count = self.entry_count.saturating_sub(1);
+                    }
                 }
             }
         }
@@ -257,26 +275,28 @@ impl BurnTimerState {
         self.tick_count = now_ms;
         let mut newly_expired: i32 = 0;
 
-        for slot in self.entries.iter_mut() {
-            if let Some(entry) = slot {
-                if entry.active && now_ms >= entry.created_at + entry.burn_after_ms {
-                    // Mark as expired and queue.
-                    entry.active = false;
+        if let Some(entries) = self.entries.as_mut() {
+            for slot in entries.iter_mut() {
+                if let Some(entry) = slot {
+                    if entry.active && now_ms >= entry.created_at + entry.burn_after_ms {
+                        // Mark as expired and queue.
+                        entry.active = false;
 
-                    if self.expired_count < MAX_EXPIRED_QUEUE {
-                        self.expired_queue[self.expired_count] = Some(CBurnExpired {
-                            conversation_id: entry.conversation_id,
-                            message_index: entry.message_index,
-                        });
-                        self.expired_count += 1;
+                        if self.expired_count < MAX_EXPIRED_QUEUE {
+                            self.expired_queue[self.expired_count] = Some(CBurnExpired {
+                                conversation_id: entry.conversation_id,
+                                message_index: entry.message_index,
+                            });
+                            self.expired_count += 1;
+                        }
+
+                        self.total_burned += 1;
+                        self.entry_count = self.entry_count.saturating_sub(1);
+                        newly_expired += 1;
+
+                        // Clear the slot.
+                        *slot = None;
                     }
-
-                    self.total_burned += 1;
-                    self.entry_count = self.entry_count.saturating_sub(1);
-                    newly_expired += 1;
-
-                    // Clear the slot.
-                    *slot = None;
                 }
             }
         }
@@ -327,7 +347,8 @@ impl BurnTimerState {
 
         match self.find_entry(conv_id, msg_idx) {
             Some(idx) => {
-                let entry = self.entries[idx].unwrap();
+                let entries = self.entries.as_ref().unwrap();
+                let entry = entries[idx].unwrap();
                 let deadline = entry.created_at + entry.burn_after_ms;
                 if self.tick_count >= deadline {
                     0
@@ -350,7 +371,7 @@ impl BurnTimerState {
         if !self.initialized {
             return ESP_ERR_INVALID_STATE;
         }
-        self.entries = [None; MAX_BURN_ENTRIES];
+        self.entries = None;
         self.entry_count = 0;
         self.policies = [ConversationBurnPolicy::new(); MAX_CONVERSATIONS];
         self.expired_queue = [None; MAX_EXPIRED_QUEUE];
@@ -596,7 +617,7 @@ mod tests {
     fn test_set_at_capacity_fails() {
         reset();
         init();
-        // Fill all 256 slots across conversations 0-3.
+        // Fill all 64 slots across conversations 0-3.
         let mut count = 0;
         for conv in 0..4u8 {
             for msg in 0..50u8 {
@@ -607,11 +628,14 @@ mod tests {
                 count += 1;
             }
         }
-        // We've filled 200 slots. Fill more with conv 0 slots 0-49 replaced...
-        // Actually let's just fill remaining with a trick: set 256 total.
-        // We have 200 slots used (4 * 50). Fill 56 more isn't possible with
-        // valid indices. Let's just check that we can fill up to max.
-        assert_eq!(rs_burn_timer_active_count(), 200);
+        // We've filled 64 slots (limited by MAX_BURN_ENTRIES).
+        assert_eq!(rs_burn_timer_active_count(), MAX_BURN_ENTRIES as i32);
+
+        // Next set should fail with NO_MEM since all slots are full.
+        // Find a valid (conv, msg) that isn't already set.
+        // conv=3, msg=14 would be slot index 64 if we had room (3*50 + 14 = 164 > 64).
+        // Actually the 64 slots are: conv0 msg0-49 (50) + conv1 msg0-13 (14) = 64.
+        assert_eq!(rs_burn_timer_set(1, 14, 60000), ESP_ERR_NO_MEM);
     }
 
     #[test]
@@ -1056,14 +1080,19 @@ mod tests {
     fn test_max_entries_fillable() {
         reset();
         init();
-        // Fill all 200 valid slots (4 convos * 50 msgs).
+        // Fill all 64 slots (limited by MAX_BURN_ENTRIES, not by conv*msg space).
+        let mut count = 0;
         for conv in 0..4u8 {
             for msg in 0..50u8 {
+                if count >= MAX_BURN_ENTRIES {
+                    break;
+                }
                 let rc = rs_burn_timer_set(conv, msg, 60000);
                 assert_eq!(rc, ESP_OK, "failed at conv={}, msg={}", conv, msg);
+                count += 1;
             }
         }
-        assert_eq!(rs_burn_timer_active_count(), 200);
+        assert_eq!(rs_burn_timer_active_count(), MAX_BURN_ENTRIES as i32);
     }
 
     #[test]

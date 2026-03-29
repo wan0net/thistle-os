@@ -223,7 +223,7 @@ impl LoadedDriver {
 unsafe impl Send for LoadedDriver {}
 
 struct DriverLoaderState {
-    drivers: [LoadedDriver; MAX_LOADED_DRVS],
+    drivers: Option<Box<[LoadedDriver; MAX_LOADED_DRVS]>>,
     count: usize,
     current_config: *const c_char,
 }
@@ -231,15 +231,22 @@ struct DriverLoaderState {
 impl DriverLoaderState {
     const fn new() -> Self {
         DriverLoaderState {
-            drivers: [
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
-            ],
+            drivers: None,
             count: 0,
             current_config: EMPTY_CONFIG.as_ptr() as *const c_char,
         }
+    }
+
+    fn ensure_drivers(&mut self) -> &mut [LoadedDriver; MAX_LOADED_DRVS] {
+        if self.drivers.is_none() {
+            self.drivers = Some(Box::new([
+                LoadedDriver::empty(), LoadedDriver::empty(),
+                LoadedDriver::empty(), LoadedDriver::empty(),
+                LoadedDriver::empty(), LoadedDriver::empty(),
+                LoadedDriver::empty(), LoadedDriver::empty(),
+            ]));
+        }
+        self.drivers.as_mut().unwrap()
     }
 }
 
@@ -279,7 +286,8 @@ unsafe extern "C" fn driver_symbol_resolver(sym_name: *const c_char) -> usize {
 #[no_mangle]
 pub extern "C" fn driver_loader_init() -> i32 {
     if let Ok(mut state) = STATE.lock() {
-        for d in state.drivers.iter_mut() {
+        let drivers = state.ensure_drivers();
+        for d in drivers.iter_mut() {
             *d = LoadedDriver::empty();
         }
         state.count = 0;
@@ -349,7 +357,7 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         let ret = sim_loader::load_driver_dylib(path_str);
         if ret == ESP_OK {
             if let Ok(mut state) = STATE.lock() {
-                let drv = &mut state.drivers[count];
+                let drv = &mut state.ensure_drivers()[count];
                 let path_bytes = CStr::from_ptr(path).to_bytes_with_nul();
                 let copy_len = path_bytes.len().min(drv.path.len() - 1);
                 drv.path[..copy_len].copy_from_slice(&path_bytes[..copy_len]);
@@ -449,7 +457,7 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
             Ok(s) => s,
             Err(_) => { free(buf); return ESP_FAIL; }
         };
-        let drv = &mut state.drivers[slot_idx];
+        let drv = &mut state.ensure_drivers()[slot_idx];
         let elf_ptr = drv.elf_storage.as_mut_ptr() as *mut c_void;
 
         let r = esp_elf_init(elf_ptr);
@@ -626,7 +634,8 @@ mod tests {
 
     fn reset_state() {
         if let Ok(mut s) = STATE.lock() {
-            for d in s.drivers.iter_mut() {
+            let drivers = s.ensure_drivers();
+            for d in drivers.iter_mut() {
                 *d = LoadedDriver::empty();
             }
             s.count = 0;
@@ -673,7 +682,7 @@ mod tests {
         reset_state();
         {
             let mut s = STATE.lock().unwrap();
-            s.drivers[0].loaded = true;
+            s.ensure_drivers()[0].loaded = true;
             s.count = 1;
         }
         assert_eq!(

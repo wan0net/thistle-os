@@ -26,7 +26,7 @@ const ESP_FAIL: i32 = -1;
 // Constants
 // ---------------------------------------------------------------------------
 
-const INBOX_SIZE: usize = 32;
+const INBOX_SIZE: usize = 16;
 const MESH_NAME_MAX: usize = 32;
 
 // ---------------------------------------------------------------------------
@@ -140,37 +140,49 @@ struct MeshManagerState {
     node_name: [u8; MESH_NAME_MAX],
     node_name_len: usize,
     node_type: u8,
-    // Message inbox (ring buffer of recent received messages)
-    inbox: [CMeshMessage; INBOX_SIZE],
+    /// Message inbox (ring buffer of recent received messages).
+    /// Lazily heap-allocated on first use — `None` when idle (8 bytes DRAM).
+    /// When allocated, ~4.3 KB goes to heap (exceeds SPIRAM_MALLOC_ALWAYSINTERNAL
+    /// on boards with PSRAM, so it lands there automatically).
+    inbox: Option<Box<[CMeshMessage; INBOX_SIZE]>>,
     inbox_count: usize,
     inbox_head: usize,
 }
 
 impl MeshManagerState {
     const fn new() -> Self {
-        // const-compatible default initialisation
+        // const-compatible default initialisation — inbox starts as None (8 bytes)
         Self {
             initialized: false,
             node_name: [0u8; MESH_NAME_MAX],
             node_name_len: 0,
             node_type: 0,
-            inbox: [CMeshMessage {
+            inbox: None,
+            inbox_count: 0,
+            inbox_head: 0,
+        }
+    }
+
+    /// Ensure the inbox array is heap-allocated, returning a mutable ref.
+    fn ensure_inbox(&mut self) -> &mut [CMeshMessage; INBOX_SIZE] {
+        if self.inbox.is_none() {
+            self.inbox = Some(Box::new([CMeshMessage {
                 sender_key: [0u8; 32],
                 sender_name: [0u8; 32],
                 sender_name_len: 0,
                 timestamp: 0,
                 text: [0u8; 200],
                 text_len: 0,
-            }; INBOX_SIZE],
-            inbox_count: 0,
-            inbox_head: 0,
+            }; INBOX_SIZE]));
         }
+        self.inbox.as_mut().unwrap()
     }
 
     /// Push a message into the ring buffer. Overwrites oldest on overflow.
+    /// Allocates the inbox on first use.
     fn inbox_push(&mut self, msg: CMeshMessage) {
         let write_idx = (self.inbox_head + self.inbox_count) % INBOX_SIZE;
-        self.inbox[write_idx] = msg;
+        self.ensure_inbox()[write_idx] = msg;
         if self.inbox_count < INBOX_SIZE {
             self.inbox_count += 1;
         } else {
@@ -184,11 +196,12 @@ impl MeshManagerState {
         if index >= self.inbox_count {
             return None;
         }
+        let inbox = self.inbox.as_ref()?;
         let real_idx = (self.inbox_head + index) % INBOX_SIZE;
-        Some(&self.inbox[real_idx])
+        Some(&inbox[real_idx])
     }
 
-    /// Clear the inbox.
+    /// Clear the inbox. Does not free the allocation (avoids re-alloc on next push).
     fn inbox_clear(&mut self) {
         self.inbox_count = 0;
         self.inbox_head = 0;

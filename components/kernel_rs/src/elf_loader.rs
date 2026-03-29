@@ -137,23 +137,30 @@ impl ElfAppHandle {
 // ---------------------------------------------------------------------------
 
 struct ElfLoaderState {
-    apps: [ElfAppHandle; MAX_LOADED_APPS],
+    apps: Option<Box<[ElfAppHandle; MAX_LOADED_APPS]>>,
 }
 
 impl ElfLoaderState {
     const fn new() -> Self {
         ElfLoaderState {
-            apps: [
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-            ],
+            apps: None,
         }
+    }
+
+    fn ensure_apps(&mut self) -> &mut [ElfAppHandle; MAX_LOADED_APPS] {
+        if self.apps.is_none() {
+            self.apps = Some(Box::new([
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(), ElfAppHandle::empty(),
+            ]));
+        }
+        self.apps.as_mut().unwrap()
     }
 }
 
@@ -228,7 +235,8 @@ unsafe extern "C" fn elf_app_task(arg: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn elf_loader_init() -> i32 {
     if let Ok(mut state) = STATE.lock() {
-        for (i, app) in state.apps.iter_mut().enumerate() {
+        let apps = state.ensure_apps();
+        for (i, app) in apps.iter_mut().enumerate() {
             *app = ElfAppHandle::empty();
             app.slot = i;
         }
@@ -267,11 +275,12 @@ pub unsafe extern "C" fn elf_app_load(
 
     // 1. Find a free slot
     let slot_idx = {
-        let state = match STATE.lock() {
+        let mut state = match STATE.lock() {
             Ok(s) => s,
             Err(_) => return ESP_FAIL,
         };
-        match state.apps.iter().position(|a| !a.loaded) {
+        let apps = state.ensure_apps();
+        match apps.iter().position(|a| !a.loaded) {
             Some(i) => i,
             None => {
                 esp_log_write(
@@ -382,7 +391,7 @@ pub unsafe extern "C" fn elf_app_load(
         Err(_) => { free(buf); return ESP_FAIL; }
     };
 
-    let app = &mut state.apps[slot_idx];
+    let app = &mut state.ensure_apps()[slot_idx];
     let elf_ptr = app.elf_storage.as_mut_ptr() as *mut c_void;
 
     let ret = esp_elf_init(elf_ptr);
@@ -520,8 +529,9 @@ pub unsafe extern "C" fn elf_app_unload(handle: *mut ElfAppHandle) -> i32 {
     // Clear the slot
     let slot = app.slot;
     if let Ok(mut state) = STATE.lock() {
-        state.apps[slot] = ElfAppHandle::empty();
-        state.apps[slot].slot = slot;
+        let apps = state.ensure_apps();
+        apps[slot] = ElfAppHandle::empty();
+        apps[slot].slot = slot;
     }
 
     ESP_OK
@@ -588,16 +598,23 @@ impl ElfAppRegistration {
 // SAFETY: Only accessed under REG_MUTEX.
 unsafe impl Send for ElfAppRegistration {}
 
-static REG_MUTEX: Mutex<[ElfAppRegistration; MAX_LOADED_APPS]> = Mutex::new([
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-    ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-]);
+static REG_MUTEX: Mutex<Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>> = Mutex::new(None);
+
+fn ensure_regs(guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>) -> &mut [ElfAppRegistration; MAX_LOADED_APPS] {
+    if guard.is_none() {
+        *guard = Some(Box::new([
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+        ]));
+    }
+    guard.as_mut().unwrap()
+}
 
 /// Static string storage for manifest id/name fields.
 /// Each registration slot gets its own id and name buffer that lives forever.
@@ -618,16 +635,23 @@ impl RegStrings {
 // SAFETY: Only accessed under REG_STR_MUTEX.
 unsafe impl Send for RegStrings {}
 
-static REG_STR_MUTEX: Mutex<[RegStrings; MAX_LOADED_APPS]> = Mutex::new([
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-    RegStrings::empty(), RegStrings::empty(),
-]);
+static REG_STR_MUTEX: Mutex<Option<Box<[RegStrings; MAX_LOADED_APPS]>>> = Mutex::new(None);
+
+fn ensure_reg_strings(guard: &mut Option<Box<[RegStrings; MAX_LOADED_APPS]>>) -> &mut [RegStrings; MAX_LOADED_APPS] {
+    if guard.is_none() {
+        *guard = Some(Box::new([
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(), RegStrings::empty(),
+        ]));
+    }
+    guard.as_mut().unwrap()
+}
 
 /// Per-slot on_create callbacks. We generate one per slot so the app manager
 /// can invoke it without arguments and we know which ELF handle to start.
@@ -636,7 +660,12 @@ macro_rules! make_on_create {
         unsafe extern "C" fn $fn_name() -> i32 {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => regs[$slot].handle,
+                    Ok(regs) => {
+                        match regs.as_ref() {
+                            Some(r) => r[$slot].handle,
+                            None => return ESP_ERR_INVALID_STATE,
+                        }
+                    }
                     Err(_) => return ESP_FAIL,
                 }
             };
@@ -671,7 +700,12 @@ macro_rules! make_on_destroy {
         unsafe extern "C" fn $fn_name() {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => regs[$slot].handle,
+                    Ok(regs) => {
+                        match regs.as_ref() {
+                            Some(r) => r[$slot].handle,
+                            None => return,
+                        }
+                    }
                     Err(_) => return,
                 }
             };
@@ -809,11 +843,12 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
 
             // 3. Find a free registration slot
             let reg_slot = {
-                let regs = match REG_MUTEX.lock() {
+                let mut regs = match REG_MUTEX.lock() {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                match regs.iter().position(|r| !r.used) {
+                let r = ensure_regs(&mut regs);
+                match r.iter().position(|r| !r.used) {
                     Some(i) => i,
                     None => {
                         esp_log_write(
@@ -833,7 +868,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
-                let s = &mut strings[reg_slot];
+                let s = &mut ensure_reg_strings(&mut strings)[reg_slot];
                 let copy_id = id_len.min(s.id.len() - 1);
                 s.id[..copy_id].copy_from_slice(&c_manifest.id[..copy_id]);
                 s.id[copy_id] = 0;
@@ -845,13 +880,14 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             // 5. Build registration entry with static pointers
             //    We must get pointers into the static string storage.
             let (id_ptr, name_ptr) = {
-                let strings = match REG_STR_MUTEX.lock() {
+                let mut strings = match REG_STR_MUTEX.lock() {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
+                let strs = ensure_reg_strings(&mut strings);
                 (
-                    strings[reg_slot].id.as_ptr() as *const c_char,
-                    strings[reg_slot].name.as_ptr() as *const c_char,
+                    strs[reg_slot].id.as_ptr() as *const c_char,
+                    strs[reg_slot].name.as_ptr() as *const c_char,
                 )
             };
 
@@ -860,7 +896,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                let reg = &mut regs[reg_slot];
+                let reg = &mut ensure_regs(&mut regs)[reg_slot];
 
                 reg.manifest = CAppManifest {
                     id:               id_ptr,
@@ -883,11 +919,11 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
 
             // 6. Register with the app manager
             let entry_ptr = {
-                let regs = match REG_MUTEX.lock() {
+                let mut regs = match REG_MUTEX.lock() {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                &regs[reg_slot].entry as *const CAppEntry
+                &ensure_regs(&mut regs)[reg_slot].entry as *const CAppEntry
             };
 
             let reg_ret = crate::app_manager::register(entry_ptr);
@@ -901,7 +937,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                 );
                 // Roll back the slot
                 if let Ok(mut regs) = REG_MUTEX.lock() {
-                    regs[reg_slot] = ElfAppRegistration::empty();
+                    ensure_regs(&mut regs)[reg_slot] = ElfAppRegistration::empty();
                 }
                 continue;
             }
