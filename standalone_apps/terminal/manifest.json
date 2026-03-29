@@ -1,13 +1,13 @@
 {
     "type": "app",
-    "id": "com.thistle.ghostterm",
-    "name": "GhostTerm",
+    "id": "com.thistle.terminal",
+    "name": "Terminal",
     "version": "0.1.0",
     "author": "ThistleOS",
     "description": "Terminal emulator powered by libghostty-vt",
     "min_os": "0.1.0",
     "arch": "esp32s3",
-    "entry": "ghostterm.app.elf",
+    "entry": "terminal.app.elf",
     "permissions": ["system", "storage", "network"],
     "background": false,
     "min_memory_kb": 64

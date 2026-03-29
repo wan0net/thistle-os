@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // ThistleOS Kernel — thistle_shell module
 //
-// Command interpreter for GhostTerm. Provides filesystem, system, and network
+// Command interpreter for Terminal. Provides filesystem, system, and network
 // commands via a single FFI entry point. Each command is a function that takes
 // parsed args and a print callback.
 
@@ -471,7 +471,7 @@ fn cmd_launch(args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
     }
 }
 
-/// Returns -2 as a sentinel for GhostTerm to clear the terminal.
+/// Returns -2 as a sentinel for Terminal to clear the screen.
 fn cmd_clear(_args: &[&str], _print: PrintFn, _ctx: *mut c_void) -> i32 {
     -2
 }
@@ -607,7 +607,7 @@ static COMMANDS: &[ShellCmd] = &[
 // FFI entry point
 // ---------------------------------------------------------------------------
 
-/// Execute a shell command line. Called from GhostTerm (C).
+/// Execute a shell command line. Called from Terminal (C).
 /// `input` — null-terminated command string
 /// `output_cb` — called for each line of output
 /// `user_data` — passed through to output_cb

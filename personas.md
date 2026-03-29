@@ -93,9 +93,9 @@
 **Why ThistleOS:**
 - WiFi Scanner app gives quick visibility into nearby networks, channel utilisation, and signal strength during site surveys.
 - The LoRa radio with RadioLib lets them experiment with custom protocols, range testing, and signal analysis.
-- GhostTerm provides a serial terminal for connecting to routers, switches, and embedded devices via the UART pins.
+- The Terminal app provides a serial terminal for connecting to routers, switches, and embedded devices via the UART pins.
 - The open app ecosystem means they write custom tools as `.app.elf` files -- a BLE beacon scanner, a deauth detector, a packet counter -- and swap them in and out on an SD card.
 - The physical keyboard and compact form factor make it usable one-handed while standing in a server room, poking at a rack.
 - They run a CYD as a dedicated dashboard showing real-time RF spectrum and network stats, driven by IPC messages from their T-Deck.
 
-**Typical session:** At a client site, boots the T-Deck and runs WiFi Scanner to map the wireless environment. Switches to a custom BLE scanner app to identify IoT devices. Opens GhostTerm to console into a switch. Later at a CTF, uses LoRa to coordinate with teammates across a venue, sends encrypted flags and hints that can't be sniffed over WiFi.
+**Typical session:** At a client site, boots the T-Deck and runs WiFi Scanner to map the wireless environment. Switches to a custom BLE scanner app to identify IoT devices. Opens Terminal to console into a switch. Later at a CTF, uses LoRa to coordinate with teammates across a venue, sends encrypted flags and hints that can't be sniffed over WiFi.

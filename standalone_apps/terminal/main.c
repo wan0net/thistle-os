@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// GhostTerm — ThistleOS terminal emulator powered by libghostty-vt
+// Terminal — ThistleOS terminal emulator powered by libghostty-vt
 //
 // Uses libghostty-vt for VT100/xterm escape sequence parsing and terminal
 // state management. Renders via the ThistleOS widget API (any WM).
@@ -12,7 +12,7 @@
 #include <ghostty/vt.h>
 #include <string.h>
 
-#define TAG "ghostterm"
+#define TAG "terminal"
 
 // Terminal dimensions (characters)
 #define TERM_COLS  40
@@ -58,7 +58,7 @@ static void shell_execute(const char *cmd)
     } else if (strcmp(cmd, "clear") == 0) {
         ghostty_terminal_vt_write(s_terminal, (const uint8_t *)"\033[2J\033[H", 7);
     } else if (cmd[0] != '\0') {
-        snprintf(output, sizeof(output), "ghostterm: %s: command not found\r\n", cmd);
+        snprintf(output, sizeof(output), "terminal: %s: command not found\r\n", cmd);
         ghostty_terminal_vt_write(s_terminal, (const uint8_t *)output, strlen(output));
     }
 
@@ -155,9 +155,9 @@ static void on_key_event(thistle_widget_t widget, int event, void *ud)
 
 // ── App lifecycle ───────────────────────────────────────────────────
 
-static int ghostterm_on_create(void)
+static int terminal_on_create(void)
 {
-    thistle_log(TAG, "Creating GhostTerm");
+    thistle_log(TAG, "Creating Terminal");
 
     // Initialize libghostty terminal
     GhosttyTerminalOptions opts;
@@ -215,34 +215,34 @@ static int ghostterm_on_create(void)
     thistle_ui_on_event(s_input_line, THISTLE_EVENT_VALUE_CHANGED, on_key_event, 0);
 
     // Write initial prompt
-    const char *banner = "ThistleOS GhostTerm v0.1.0\r\npowered by libghostty-vt\r\n\r\n";
+    const char *banner = "ThistleOS Terminal v0.1.0\r\npowered by libghostty-vt\r\n\r\n";
     ghostty_terminal_vt_write(s_terminal, (const uint8_t *)banner, strlen(banner));
     shell_execute("");
 
     s_initialized = 1;
     render_terminal();
 
-    thistle_log(TAG, "GhostTerm ready (%dx%d)", TERM_COLS, TERM_ROWS);
+    thistle_log(TAG, "Terminal ready (%dx%d)", TERM_COLS, TERM_ROWS);
     return 0;
 }
 
-static void ghostterm_on_start(void)
+static void terminal_on_start(void)
 {
     thistle_log(TAG, "on_start");
 }
 
-static void ghostterm_on_pause(void)
+static void terminal_on_pause(void)
 {
     thistle_log(TAG, "on_pause");
 }
 
-static void ghostterm_on_resume(void)
+static void terminal_on_resume(void)
 {
     thistle_log(TAG, "on_resume");
     render_terminal();
 }
 
-static void ghostterm_on_destroy(void)
+static void terminal_on_destroy(void)
 {
     thistle_log(TAG, "on_destroy");
     if (s_initialized) {
@@ -252,16 +252,16 @@ static void ghostterm_on_destroy(void)
     }
 }
 
-static const thistle_app_t ghostterm_app = {
-    .id               = "com.thistle.ghostterm",
-    .name             = "GhostTerm",
+static const thistle_app_t terminal_app = {
+    .id               = "com.thistle.terminal",
+    .name             = "Terminal",
     .version          = "0.1.0",
     .allow_background = false,
-    .on_create        = ghostterm_on_create,
-    .on_start         = ghostterm_on_start,
-    .on_pause         = ghostterm_on_pause,
-    .on_resume        = ghostterm_on_resume,
-    .on_destroy       = ghostterm_on_destroy,
+    .on_create        = terminal_on_create,
+    .on_start         = terminal_on_start,
+    .on_pause         = terminal_on_pause,
+    .on_resume        = terminal_on_resume,
+    .on_destroy       = terminal_on_destroy,
 };
 
-THISTLE_APP(ghostterm_app);
+THISTLE_APP(terminal_app);

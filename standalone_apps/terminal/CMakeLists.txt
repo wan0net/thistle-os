@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
-project(ghostterm C)
+project(terminal C)
 
 set(THISTLE_APP_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../app_sdk")
 include(${THISTLE_APP_SDK}/CMakeLists.txt)
 
-thistle_app(ghostterm SRCS main.c)
+thistle_app(terminal SRCS main.c)
 
 # libghostty-vt headers
-target_include_directories(ghostterm PRIVATE
+target_include_directories(terminal PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/ghostty/include
 )
 
@@ -15,7 +15,7 @@ target_include_directories(ghostterm PRIVATE
 # For now, link against a pre-built .a if available
 set(GHOSTTY_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../../external/ghostty/zig-out/lib/libghostty-vt.a")
 if(EXISTS ${GHOSTTY_LIB})
-    target_link_libraries(ghostterm PRIVATE ${GHOSTTY_LIB})
+    target_link_libraries(terminal PRIVATE ${GHOSTTY_LIB})
 else()
-    message(WARNING "libghostty-vt.a not found — GhostTerm will not link until built")
+    message(WARNING "libghostty-vt.a not found — Terminal will not link until built")
 endif()

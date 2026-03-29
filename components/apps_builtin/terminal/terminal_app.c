@@ -35,6 +35,7 @@ static void terminal_on_start(void)
 static void terminal_on_pause(void)
 {
     ESP_LOGI(TAG, "on_pause");
+    terminal_uart_stop();
     terminal_ui_hide();
 }
 
@@ -42,13 +43,14 @@ static void terminal_on_resume(void)
 {
     ESP_LOGI(TAG, "on_resume");
     statusbar_set_title("Terminal");
+    terminal_uart_start();
     terminal_ui_show();
 }
 
 static void terminal_on_destroy(void)
 {
     ESP_LOGI(TAG, "on_destroy");
-    /* UI objects are cleaned up by LVGL when the app area parent is destroyed */
+    terminal_uart_stop();
 }
 
 /* ------------------------------------------------------------------ */

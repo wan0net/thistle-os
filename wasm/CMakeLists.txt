@@ -60,8 +60,6 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/terminal/terminal_ui.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_app.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_ui.c
-    ${THISTLE_DIR}/components/apps_builtin/ghostterm/ghostterm_app.c
-    ${THISTLE_DIR}/components/apps_builtin/ghostterm/ghostterm_ui.c
 )
 
 # WASM-specific sources

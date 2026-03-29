@@ -27,8 +27,6 @@ idf_component_register(
         "weather/weather_ui.c"
         "terminal/terminal_app.c"
         "terminal/terminal_ui.c"
-        "ghostterm/ghostterm_app.c"
-        "ghostterm/ghostterm_ui.c"
         "vault/vault_app.c"
         "vault/vault_ui.c"
     INCLUDE_DIRS "."

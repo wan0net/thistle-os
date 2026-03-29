@@ -81,7 +81,7 @@
 **Personas:** Ember (SD card data management), ALL (universal utility)
 **Description:** Browse SD card contents, view file sizes/dates, copy/delete files, create directories. Kernel module for file operations with FFI for UI apps.
 
-### Priority 17: Serial Terminal (GhostTerm)
+### Priority 17: Serial Terminal
 **Status:** PENDING
 **Personas:** Spark (network device console), Fern (hardware debugging)
 **Description:** UART serial terminal for connecting to external devices via GPIO pins. Configurable baud rate, data bits, parity, stop bits. Buffer incoming data, send typed commands.

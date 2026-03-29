@@ -3,8 +3,8 @@
 ## Backlog
 
 ### High Priority
-- [ ] Toybox integration (BSD shell for GhostTerm)
-- [ ] GhostTerm: wire libghostty-vt for real terminal emulation
+- [ ] Toybox integration (BSD shell for Terminal)
+- [ ] Terminal: wire libghostty-vt for real terminal emulation
 - [ ] BLE: implement real NimBLE advertising/GATT (not stubs)
 - [ ] WiFi: wire ESP-IDF event handler to Rust wifi_manager
 - [ ] Deploy WASM simulator to GitHub Pages
@@ -60,11 +60,11 @@
 - [x] Display server with swappable WM vtable
 - [x] Boot-from-JSON (board.json → bus init → driver loading)
 - [x] Driver SDK (C + Rust), standalone .drv.elf binaries
-- [x] App SDK, standalone .app.elf binaries (hello, flashlight, ghostterm)
+- [x] App SDK, standalone .app.elf binaries (hello, flashlight, terminal)
 - [x] Desktop simulator (SDL2, all 14 apps)
 - [x] WASM browser simulator (Emscripten, interactive)
 - [x] CI: 4 jobs (firmware, Rust tests, Semgrep, Trivy)
 - [x] Recovery OS (Rust, compiles and flashes clean)
-- [x] GhostTerm scaffolded (libghostty-vt built)
+- [x] Terminal scaffolded (libghostty-vt built)
 - [x] Vault uses kernel crypto on all platforms
 - [x] T-Deck Pro hardware bringup — device booting and running
