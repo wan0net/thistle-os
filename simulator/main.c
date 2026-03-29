@@ -161,9 +161,8 @@ int main(int argc, char **argv)
     /* Main loop — drive LVGL tick + timer handler + SDL event pump */
     uint32_t last_tick = 0;
     uint32_t start_ms = 0;
-    bool splash_dismissed = false;
     while (1) {
-        /* Update LVGL tick (esp_timer periodic is a no-op in sim) */
+        /* Update LVGL tick */
         struct timeval tv;
         gettimeofday(&tv, NULL);
         uint32_t now_ms = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
@@ -173,25 +172,6 @@ int main(int argc, char **argv)
         if (elapsed > 0) {
             lv_tick_inc(elapsed);
             last_tick = now_ms;
-        }
-
-        /* Auto-dismiss splash after 2 seconds (esp_timer_start_once is a no-op) */
-        if (!s_headless && !splash_dismissed && (now_ms - start_ms) > 2000) {
-            /* Find and delete the splash overlay (topmost child of active screen) */
-            lv_obj_t *scr = lv_display_get_screen_active(NULL);
-            if (scr) {
-                uint32_t cnt = lv_obj_get_child_count(scr);
-                if (cnt > 0) {
-                    lv_obj_t *top = lv_obj_get_child(scr, cnt - 1);
-                    /* Splash is a full-screen white overlay — delete it */
-                    if (top && lv_obj_get_width(top) >= 300) {
-                        lv_obj_delete(top);
-                        printf("Splash screen dismissed\n");
-                        fflush(stdout);
-                    }
-                }
-            }
-            splash_dismissed = true;
         }
 
         /* Pump SDL events → HAL input events */

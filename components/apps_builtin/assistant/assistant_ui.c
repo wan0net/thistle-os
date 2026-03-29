@@ -46,11 +46,11 @@ static const char *TAG = "assistant_ui";
 #define CONV_FILE_PATH      THISTLE_SDCARD "/data/assistant/last_conversation.txt"
 #define CONFIG_FILE_PATH    THISTLE_SDCARD "/config/assistant.json"
 
-#define APP_AREA_W  240
-#define APP_AREA_H  296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H     30
 #define INPUT_BAR_H  40
-#define MSG_LIST_H  (APP_AREA_H - HEADER_H - INPUT_BAR_H)  /* 146px */
+static int s_msg_list_h = 226; /* s_app_h - HEADER_H - INPUT_BAR_H */
 
 /* ------------------------------------------------------------------ */
 /* Data types                                                           */
@@ -624,6 +624,13 @@ esp_err_t assistant_ui_create(lv_obj_t *parent)
 
     memset(&s_ai, 0, sizeof(s_ai));
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_msg_list_h = s_app_h - HEADER_H - INPUT_BAR_H;
+
     const theme_colors_t *colors = theme_get_colors();
 
     /* ----------------------------------------------------------------
@@ -646,7 +653,7 @@ esp_err_t assistant_ui_create(lv_obj_t *parent)
      * Contains: "Assistant" title on left, connection status on right
      * ---------------------------------------------------------------- */
     lv_obj_t *header = lv_obj_create(s_ai.root);
-    lv_obj_set_size(header, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(header, s_app_w, HEADER_H);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, colors->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(header, LV_OPA_COVER, LV_PART_MAIN);
@@ -684,7 +691,7 @@ esp_err_t assistant_ui_create(lv_obj_t *parent)
      * Header=30px, input_bar=40px → list height = 216-30-40 = 146px
      * ---------------------------------------------------------------- */
     s_ai.msg_list = lv_obj_create(s_ai.root);
-    lv_obj_set_size(s_ai.msg_list, APP_AREA_W, MSG_LIST_H);
+    lv_obj_set_size(s_ai.msg_list, s_app_w, s_msg_list_h);
     lv_obj_set_pos(s_ai.msg_list, 0, HEADER_H);
     lv_obj_set_style_bg_color(s_ai.msg_list, colors->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_ai.msg_list, LV_OPA_COVER, LV_PART_MAIN);
@@ -705,7 +712,7 @@ esp_err_t assistant_ui_create(lv_obj_t *parent)
      * [Ask anything...          ] [>]
      * ---------------------------------------------------------------- */
     lv_obj_t *input_bar = lv_obj_create(s_ai.root);
-    lv_obj_set_size(input_bar, APP_AREA_W, INPUT_BAR_H);
+    lv_obj_set_size(input_bar, s_app_w, INPUT_BAR_H);
     lv_obj_align(input_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(input_bar, colors->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(input_bar, LV_OPA_COVER, LV_PART_MAIN);

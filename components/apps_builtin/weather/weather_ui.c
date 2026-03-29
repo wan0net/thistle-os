@@ -50,8 +50,8 @@ static const char *TAG = "weather_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W  240
-#define APP_AREA_H  296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H     30
 #define UPDATE_PERIOD_MS  (30 * 1000)
 
@@ -178,7 +178,7 @@ static lv_obj_t *make_row_label(lv_obj_t *parent, const theme_colors_t *clr,
 static void make_divider(lv_obj_t *parent, const theme_colors_t *clr)
 {
     lv_obj_t *div = lv_obj_create(parent);
-    lv_obj_set_size(div, APP_AREA_W - 16, 1);
+    lv_obj_set_size(div, s_app_w - 16, 1);
     lv_obj_set_style_bg_color(div, clr->text_secondary, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(div, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(div, 0, LV_PART_MAIN);
@@ -202,6 +202,12 @@ esp_err_t weather_ui_create(lv_obj_t *parent)
 
     memset(&s_wx, 0, sizeof(s_wx));
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+
     const theme_colors_t *clr = theme_get_colors();
 
     /* Root container */
@@ -217,7 +223,7 @@ esp_err_t weather_ui_create(lv_obj_t *parent)
 
     /* Header */
     lv_obj_t *hdr = lv_obj_create(s_wx.root);
-    lv_obj_set_size(hdr, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(hdr, s_app_w, HEADER_H);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_style_bg_color(hdr, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, LV_PART_MAIN);
@@ -241,7 +247,7 @@ esp_err_t weather_ui_create(lv_obj_t *parent)
     /* Scrollable content area */
     lv_obj_t *content = lv_obj_create(s_wx.root);
     lv_obj_set_pos(content, 0, HEADER_H);
-    lv_obj_set_size(content, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(content, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_style_bg_color(content, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
@@ -269,7 +275,7 @@ esp_err_t weather_ui_create(lv_obj_t *parent)
 
     /* Refresh button */
     lv_obj_t *btn_row = lv_obj_create(content);
-    lv_obj_set_size(btn_row, APP_AREA_W, 36);
+    lv_obj_set_size(btn_row, s_app_w, 36);
     lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);

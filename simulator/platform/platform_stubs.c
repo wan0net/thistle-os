@@ -18,8 +18,18 @@
 #include <stddef.h>
 #include <stdarg.h>
 
-/* ── esp_timer ─────────────────────────────────────────────────────── */
-struct esp_timer { int dummy; };
+/* ── esp_timer (real implementation using pthreads) ────────────────── */
+#include <pthread.h>
+#include <unistd.h>
+
+struct esp_timer {
+    esp_timer_cb_t callback;
+    void *arg;
+    pthread_t thread;
+    uint64_t timeout_us;
+    bool active;
+    bool one_shot;
+};
 
 int64_t esp_timer_get_time(void) {
     struct timeval tv;
@@ -27,15 +37,60 @@ int64_t esp_timer_get_time(void) {
     return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
 }
 
+static void *timer_thread_fn(void *arg) {
+    struct esp_timer *t = (struct esp_timer *)arg;
+    do {
+        usleep((useconds_t)t->timeout_us);
+        if (t->active && t->callback) {
+            t->callback(t->arg);
+        }
+    } while (t->active && !t->one_shot);
+    return NULL;
+}
+
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *handle) {
-    (void)args;
-    *handle = (esp_timer_handle_t)calloc(1, sizeof(struct esp_timer));
+    struct esp_timer *t = (struct esp_timer *)calloc(1, sizeof(struct esp_timer));
+    if (!t) return ESP_ERR_NO_MEM;
+    t->callback = args->callback;
+    t->arg = args->arg;
+    t->active = false;
+    *handle = t;
     return ESP_OK;
 }
-esp_err_t esp_timer_start_periodic(esp_timer_handle_t h, uint64_t p) { (void)h;(void)p; return ESP_OK; }
-esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t t) { (void)h;(void)t; return ESP_OK; }
-esp_err_t esp_timer_delete(esp_timer_handle_t h) { free(h); return ESP_OK; }
-esp_err_t esp_timer_stop(esp_timer_handle_t h) { (void)h; return ESP_OK; }
+
+esp_err_t esp_timer_start_periodic(esp_timer_handle_t h, uint64_t period_us) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->timeout_us = period_us;
+    h->one_shot = false;
+    h->active = true;
+    pthread_create(&h->thread, NULL, timer_thread_fn, h);
+    pthread_detach(h->thread);
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t timeout_us) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->timeout_us = timeout_us;
+    h->one_shot = true;
+    h->active = true;
+    pthread_create(&h->thread, NULL, timer_thread_fn, h);
+    pthread_detach(h->thread);
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_stop(esp_timer_handle_t h) {
+    if (h) h->active = false;
+    return ESP_OK;
+}
+
+esp_err_t esp_timer_delete(esp_timer_handle_t h) {
+    if (h) {
+        h->active = false;
+        usleep(1000); /* Brief delay for thread to exit */
+        free(h);
+    }
+    return ESP_OK;
+}
 
 /* ── Heap ──────────────────────────────────────────────────────────── */
 size_t heap_caps_get_free_size(unsigned int caps) { (void)caps; return 4 * 1024 * 1024; }

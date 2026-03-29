@@ -28,16 +28,16 @@ static const char *TAG = "reader_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      240
-#define APP_AREA_H      296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define TITLE_BAR_H      30
 #define FOOTER_H         24
 #define TEXT_MARGIN_H     8   /* top/bottom margin inside text area */
 #define TEXT_MARGIN_W     8   /* left/right margin */
 
 /* Pagination geometry (static estimate for monospaced 14px font) */
-#define TEXT_W          (APP_AREA_W - TEXT_MARGIN_W * 2)        /* 304 px */
-#define TEXT_H          (APP_AREA_H - FOOTER_H - TEXT_MARGIN_H) /* 184 px */
+static int s_text_w = 224; /* s_app_w - TEXT_MARGIN_W * 2 */
+static int s_text_h = 264; /* s_app_h - FOOTER_H - TEXT_MARGIN_H */
 #define CHARS_PER_LINE   38   /* ~304 / 8 px per glyph */
 #define LINES_PER_PAGE   10   /* ~184 / 18 px per line  */
 #define CHARS_PER_PAGE  (CHARS_PER_LINE * LINES_PER_PAGE)       /* 380   */
@@ -288,7 +288,7 @@ static void create_reader_screen(void)
     const theme_colors_t *clr = theme_get_colors();
 
     s_reader.reader_screen = lv_obj_create(s_reader.root);
-    lv_obj_set_size(s_reader.reader_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_reader.reader_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_reader.reader_screen, 0, 0);
     lv_obj_set_style_bg_color(s_reader.reader_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_reader.reader_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -302,7 +302,7 @@ static void create_reader_screen(void)
      * ---------------------------------------------------------------- */
     lv_obj_t *text_area = lv_obj_create(s_reader.reader_screen);
     lv_obj_set_pos(text_area, 0, 0);
-    lv_obj_set_size(text_area, APP_AREA_W, APP_AREA_H - FOOTER_H);
+    lv_obj_set_size(text_area, s_app_w, s_app_h - FOOTER_H);
     lv_obj_set_style_bg_color(text_area, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(text_area, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(text_area, 0, LV_PART_MAIN);
@@ -326,8 +326,8 @@ static void create_reader_screen(void)
      * Footer bar (24 px)
      * ---------------------------------------------------------------- */
     lv_obj_t *footer_bar = lv_obj_create(s_reader.reader_screen);
-    lv_obj_set_pos(footer_bar, 0, APP_AREA_H - FOOTER_H);
-    lv_obj_set_size(footer_bar, APP_AREA_W, FOOTER_H);
+    lv_obj_set_pos(footer_bar, 0, s_app_h - FOOTER_H);
+    lv_obj_set_size(footer_bar, s_app_w, FOOTER_H);
     lv_obj_set_style_bg_color(footer_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(footer_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_side(footer_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
@@ -548,6 +548,14 @@ esp_err_t reader_ui_create(lv_obj_t *parent)
         parent = lv_scr_act();
     }
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_text_w = s_app_w - TEXT_MARGIN_W * 2;
+    s_text_h = s_app_h - FOOTER_H - TEXT_MARGIN_H;
+
     /* Zero out state */
     memset(&s_reader, 0, sizeof(s_reader));
 
@@ -567,7 +575,7 @@ esp_err_t reader_ui_create(lv_obj_t *parent)
      * Library screen
      * ---------------------------------------------------------------- */
     s_reader.library_screen = lv_obj_create(s_reader.root);
-    lv_obj_set_size(s_reader.library_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_reader.library_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_reader.library_screen, 0, 0);
     lv_obj_set_style_bg_color(s_reader.library_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_reader.library_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -583,7 +591,7 @@ esp_err_t reader_ui_create(lv_obj_t *parent)
     /* Title bar */
     lv_obj_t *title_bar = lv_obj_create(s_reader.library_screen);
     lv_obj_set_pos(title_bar, 0, 0);
-    lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
+    lv_obj_set_size(title_bar, s_app_w, TITLE_BAR_H);
     lv_obj_set_style_bg_color(title_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(title_bar, 0, LV_PART_MAIN);
@@ -606,7 +614,7 @@ esp_err_t reader_ui_create(lv_obj_t *parent)
     /* Scrollable book list */
     s_reader.lib_list = lv_obj_create(s_reader.library_screen);
     lv_obj_set_pos(s_reader.lib_list, 0, TITLE_BAR_H);
-    lv_obj_set_size(s_reader.lib_list, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    lv_obj_set_size(s_reader.lib_list, s_app_w, s_app_h - TITLE_BAR_H);
     lv_obj_set_style_bg_color(s_reader.lib_list, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_reader.lib_list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_reader.lib_list, 0, LV_PART_MAIN);

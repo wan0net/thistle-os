@@ -42,8 +42,8 @@ static const char *TAG = "vault_ui";
 /* Constants                                                            */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   240
-#define APP_AREA_H   296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H      30
 #define ITEM_H        32
 #define FIELD_MAX     64
@@ -952,6 +952,12 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
 
     if (!parent) parent = lv_scr_act();
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+
     memset(&s_vault, 0, sizeof(s_vault));
     s_vault.selected_idx = -1;
 
@@ -973,7 +979,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
      * LOCK SCREEN
      * ================================================================ */
     s_vault.lock_screen = lv_obj_create(s_vault.root);
-    lv_obj_set_size(s_vault.lock_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_vault.lock_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_vault.lock_screen, 0, 0);
     lv_obj_set_style_bg_color(s_vault.lock_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_vault.lock_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -1039,7 +1045,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
      * LIST SCREEN
      * ================================================================ */
     s_vault.list_screen = lv_obj_create(s_vault.root);
-    lv_obj_set_size(s_vault.list_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_vault.list_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_vault.list_screen, 0, 0);
     lv_obj_set_style_bg_color(s_vault.list_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_vault.list_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -1052,7 +1058,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
 
     /* List header */
     lv_obj_t *list_hdr = lv_obj_create(s_vault.list_screen);
-    lv_obj_set_size(list_hdr, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(list_hdr, s_app_w, HEADER_H);
     lv_obj_set_pos(list_hdr, 0, 0);
     lv_obj_set_style_bg_color(list_hdr, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(list_hdr, LV_OPA_COVER, LV_PART_MAIN);
@@ -1094,7 +1100,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
     /* Scrollable entry list */
     s_vault.list_container = lv_obj_create(s_vault.list_screen);
     lv_obj_set_pos(s_vault.list_container, 0, HEADER_H);
-    lv_obj_set_size(s_vault.list_container, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(s_vault.list_container, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_style_bg_color(s_vault.list_container, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_vault.list_container, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_vault.list_container, 0, LV_PART_MAIN);
@@ -1115,7 +1121,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
      * DETAIL / EDIT SCREEN
      * ================================================================ */
     s_vault.detail_screen = lv_obj_create(s_vault.root);
-    lv_obj_set_size(s_vault.detail_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_vault.detail_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_vault.detail_screen, 0, 0);
     lv_obj_set_style_bg_color(s_vault.detail_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_vault.detail_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -1130,7 +1136,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
 
     /* Detail header */
     lv_obj_t *det_hdr = lv_obj_create(s_vault.detail_screen);
-    lv_obj_set_size(det_hdr, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(det_hdr, s_app_w, HEADER_H);
     lv_obj_set_pos(det_hdr, 0, 0);
     lv_obj_set_style_bg_color(det_hdr, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(det_hdr, LV_OPA_COVER, LV_PART_MAIN);
@@ -1168,7 +1174,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
     /* Form body — vertical flex container */
     lv_obj_t *form = lv_obj_create(s_vault.detail_screen);
     lv_obj_set_pos(form, 0, HEADER_H);
-    lv_obj_set_size(form, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(form, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_style_bg_opa(form, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(form, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_left(form, 6, LV_PART_MAIN);

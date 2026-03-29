@@ -19,11 +19,11 @@ static const char *TAG = "filemgr_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      240
-#define APP_AREA_H      296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define TITLE_BAR_H      30
 #define STORAGE_BAR_H    24
-#define LIST_H          (APP_AREA_H - TITLE_BAR_H - STORAGE_BAR_H)
+static int s_list_h = 242; /* s_app_h - TITLE_BAR_H - STORAGE_BAR_H */
 #define ITEM_H           30
 #define ITEM_PAD_LEFT     8
 #define ITEM_PAD_RIGHT    6
@@ -477,6 +477,13 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
         parent = lv_scr_act();
     }
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_list_h = s_app_h - TITLE_BAR_H - STORAGE_BAR_H;
+
     /* Root container — fills the entire app area, transparent bg */
     s_fm.root = lv_obj_create(parent);
     lv_obj_set_size(s_fm.root, LV_PCT(100), LV_PCT(100));
@@ -494,7 +501,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
      * ---------------------------------------------------------------- */
     lv_obj_t *title_bar = lv_obj_create(s_fm.root);
     lv_obj_set_pos(title_bar, 0, 0);
-    lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
+    lv_obj_set_size(title_bar, s_app_w, TITLE_BAR_H);
     lv_obj_set_style_bg_color(title_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(title_bar, 0, LV_PART_MAIN);
@@ -526,7 +533,7 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
      * ---------------------------------------------------------------- */
     s_fm.list_container = lv_obj_create(s_fm.root);
     lv_obj_set_pos(s_fm.list_container, 0, TITLE_BAR_H);
-    lv_obj_set_size(s_fm.list_container, APP_AREA_W, LIST_H);
+    lv_obj_set_size(s_fm.list_container, s_app_w, s_list_h);
     lv_obj_set_style_bg_color(s_fm.list_container, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_fm.list_container, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_fm.list_container, 0, LV_PART_MAIN);
@@ -550,8 +557,8 @@ esp_err_t filemgr_ui_create(lv_obj_t *parent)
      * Storage info bar (24px) at the bottom
      * ---------------------------------------------------------------- */
     lv_obj_t *storage_bar = lv_obj_create(s_fm.root);
-    lv_obj_set_pos(storage_bar, 0, TITLE_BAR_H + LIST_H);
-    lv_obj_set_size(storage_bar, APP_AREA_W, STORAGE_BAR_H);
+    lv_obj_set_pos(storage_bar, 0, TITLE_BAR_H + s_list_h);
+    lv_obj_set_size(storage_bar, s_app_w, STORAGE_BAR_H);
     lv_obj_set_style_bg_color(storage_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(storage_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(storage_bar, 0, LV_PART_MAIN);

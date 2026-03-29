@@ -38,12 +38,12 @@ static const char *TAG = "wifiscanner_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      240
-#define APP_AREA_H      296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H         30
 #define ITEM_H           28
 #define CHANNEL_BAR_H    20
-#define LIST_H          (APP_AREA_H - HEADER_H - CHANNEL_BAR_H)
+static int s_list_h = 246; /* s_app_h - HEADER_H - CHANNEL_BAR_H */
 
 /* ------------------------------------------------------------------ */
 /* Data types                                                           */
@@ -473,7 +473,7 @@ static void switch_to_detail(int idx)
 static lv_obj_t *make_header(lv_obj_t *parent, const theme_colors_t *clr)
 {
     lv_obj_t *hdr = lv_obj_create(parent);
-    lv_obj_set_size(hdr, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(hdr, s_app_w, HEADER_H);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_style_bg_color(hdr, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, LV_PART_MAIN);
@@ -539,6 +539,13 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
         parent = lv_scr_act();
     }
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_list_h = s_app_h - HEADER_H - CHANNEL_BAR_H;
+
     memset(&s_scanner, 0, sizeof(s_scanner));
     s_scanner.selected_idx = -1;
 
@@ -560,7 +567,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
      * LIST SCREEN
      * ================================================================ */
     s_scanner.list_screen = lv_obj_create(s_scanner.root);
-    lv_obj_set_size(s_scanner.list_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_scanner.list_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_scanner.list_screen, 0, 0);
     lv_obj_set_style_bg_color(s_scanner.list_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_scanner.list_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -595,7 +602,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
     /* Scrollable network list */
     s_scanner.network_list = lv_obj_create(s_scanner.list_screen);
     lv_obj_set_pos(s_scanner.network_list, 0, HEADER_H);
-    lv_obj_set_size(s_scanner.network_list, APP_AREA_W, LIST_H);
+    lv_obj_set_size(s_scanner.network_list, s_app_w, s_list_h);
     lv_obj_set_style_bg_color(s_scanner.network_list, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_scanner.network_list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_scanner.network_list, 0, LV_PART_MAIN);
@@ -613,8 +620,8 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
 
     /* Channel utilisation bar */
     s_scanner.channel_bar = lv_label_create(s_scanner.list_screen);
-    lv_obj_set_pos(s_scanner.channel_bar, 0, HEADER_H + LIST_H);
-    lv_obj_set_size(s_scanner.channel_bar, APP_AREA_W, CHANNEL_BAR_H);
+    lv_obj_set_pos(s_scanner.channel_bar, 0, HEADER_H + s_list_h);
+    lv_obj_set_size(s_scanner.channel_bar, s_app_w, CHANNEL_BAR_H);
     lv_obj_set_style_text_font(s_scanner.channel_bar, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_scanner.channel_bar, clr->text_secondary, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_scanner.channel_bar, clr->surface, LV_PART_MAIN);
@@ -628,7 +635,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
      * DETAIL SCREEN
      * ================================================================ */
     s_scanner.detail_screen = lv_obj_create(s_scanner.root);
-    lv_obj_set_size(s_scanner.detail_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_scanner.detail_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_scanner.detail_screen, 0, 0);
     lv_obj_set_style_bg_color(s_scanner.detail_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_scanner.detail_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -655,7 +662,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
     /* Detail info container (scrollable in case content overflows) */
     lv_obj_t *det_content = lv_obj_create(s_scanner.detail_screen);
     lv_obj_set_pos(det_content, 0, HEADER_H);
-    lv_obj_set_size(det_content, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(det_content, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_style_bg_color(det_content, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(det_content, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(det_content, 0, LV_PART_MAIN);
@@ -674,7 +681,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
 
     /* Divider */
     lv_obj_t *divider = lv_obj_create(det_content);
-    lv_obj_set_size(divider, APP_AREA_W - 16, 1);
+    lv_obj_set_size(divider, s_app_w - 16, 1);
     lv_obj_set_style_bg_color(divider, clr->text_secondary, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(divider, 0, LV_PART_MAIN);
@@ -687,7 +694,7 @@ esp_err_t wifiscanner_ui_create(lv_obj_t *parent)
 
     /* Connect button row */
     lv_obj_t *btn_row = lv_obj_create(det_content);
-    lv_obj_set_size(btn_row, APP_AREA_W, 34);
+    lv_obj_set_size(btn_row, s_app_w, 34);
     lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);

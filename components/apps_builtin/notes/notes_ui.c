@@ -29,8 +29,8 @@ static const char *TAG = "notes_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   240
-#define APP_AREA_H   296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H      30
 #define ITEM_H        30
 #define NOTES_PATH   THISTLE_SDCARD "/notes"
@@ -470,6 +470,12 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
 
     memset(&s_notes, 0, sizeof(s_notes));
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+
     ensure_notes_dir();
 
     const theme_colors_t *clr = theme_get_colors();
@@ -490,7 +496,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
      * FILE LIST SCREEN
      * ================================================================ */
     s_notes.list_screen = lv_obj_create(s_notes.root);
-    lv_obj_set_size(s_notes.list_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_notes.list_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_notes.list_screen, 0, 0);
     lv_obj_set_style_bg_color(s_notes.list_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_notes.list_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -503,7 +509,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
 
     /* List header bar */
     lv_obj_t *list_header = lv_obj_create(s_notes.list_screen);
-    lv_obj_set_size(list_header, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(list_header, s_app_w, HEADER_H);
     lv_obj_set_pos(list_header, 0, 0);
     lv_obj_set_style_bg_color(list_header, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(list_header, LV_OPA_COVER, LV_PART_MAIN);
@@ -546,7 +552,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
     /* Scrollable note list */
     s_notes.list_container = lv_obj_create(s_notes.list_screen);
     lv_obj_set_pos(s_notes.list_container, 0, HEADER_H);
-    lv_obj_set_size(s_notes.list_container, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(s_notes.list_container, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_style_bg_color(s_notes.list_container, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_notes.list_container, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_notes.list_container, 0, LV_PART_MAIN);
@@ -569,7 +575,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
      * EDITOR SCREEN
      * ================================================================ */
     s_notes.editor_screen = lv_obj_create(s_notes.root);
-    lv_obj_set_size(s_notes.editor_screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(s_notes.editor_screen, s_app_w, s_app_h);
     lv_obj_set_pos(s_notes.editor_screen, 0, 0);
     lv_obj_set_style_bg_color(s_notes.editor_screen, clr->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_notes.editor_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -581,7 +587,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
 
     /* Editor header bar */
     lv_obj_t *editor_header = lv_obj_create(s_notes.editor_screen);
-    lv_obj_set_size(editor_header, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(editor_header, s_app_w, HEADER_H);
     lv_obj_set_pos(editor_header, 0, 0);
     lv_obj_set_style_bg_color(editor_header, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(editor_header, LV_OPA_COVER, LV_PART_MAIN);
@@ -643,7 +649,7 @@ esp_err_t notes_ui_create(lv_obj_t *parent)
 
     /* Textarea — full area below header */
     s_notes.textarea = lv_textarea_create(s_notes.editor_screen);
-    lv_obj_set_size(s_notes.textarea, APP_AREA_W, APP_AREA_H - HEADER_H);
+    lv_obj_set_size(s_notes.textarea, s_app_w, s_app_h - HEADER_H);
     lv_obj_set_pos(s_notes.textarea, 0, HEADER_H);
     lv_textarea_set_one_line(s_notes.textarea, false);  /* multiline */
     lv_textarea_set_placeholder_text(s_notes.textarea, "Start typing...");

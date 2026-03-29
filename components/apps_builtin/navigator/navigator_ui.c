@@ -32,8 +32,8 @@ static const char *TAG = "navigator_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   240
-#define APP_AREA_H   296
+static int s_app_w = 240;
+static int s_app_h = 296;
 
 /* Section heights */
 #define SECTION_H     28   /* each data row */
@@ -396,7 +396,7 @@ static lv_obj_t *create_data_row(lv_obj_t *parent, int y_pos,
     const theme_colors_t *colors = theme_get_colors();
 
     lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_size(row, APP_AREA_W, ROW_H);
+    lv_obj_set_size(row, s_app_w, ROW_H);
     lv_obj_set_pos(row, 0, y_pos);
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
@@ -430,7 +430,7 @@ static void create_divider(lv_obj_t *parent, int y_pos)
     const theme_colors_t *colors = theme_get_colors();
 
     lv_obj_t *div = lv_obj_create(parent);
-    lv_obj_set_size(div, APP_AREA_W, 1);
+    lv_obj_set_size(div, s_app_w, 1);
     lv_obj_set_pos(div, 0, y_pos);
     lv_obj_set_style_bg_color(div, colors->text_secondary, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(div, LV_OPA_COVER, LV_PART_MAIN);
@@ -449,6 +449,12 @@ esp_err_t navigator_ui_create(lv_obj_t *parent)
     if (parent == NULL) {
         parent = lv_scr_act();
     }
+
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
 
     /* Check GPS availability once at create time */
     const hal_registry_t *reg = hal_get_registry();
@@ -503,7 +509,7 @@ esp_err_t navigator_ui_create(lv_obj_t *parent)
      * ---------------------------------------------------------------- */
     {
         lv_obj_t *row = lv_obj_create(s_ui.root);
-        lv_obj_set_size(row, APP_AREA_W, ROW_H);
+        lv_obj_set_size(row, s_app_w, ROW_H);
         lv_obj_set_pos(row, 0, y);
         lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
@@ -549,7 +555,7 @@ esp_err_t navigator_ui_create(lv_obj_t *parent)
      * ---------------------------------------------------------------- */
     {
         lv_obj_t *ctrl = lv_obj_create(s_ui.root);
-        lv_obj_set_size(ctrl, APP_AREA_W, CTRL_H);
+        lv_obj_set_size(ctrl, s_app_w, CTRL_H);
         lv_obj_set_pos(ctrl, 0, y);
         lv_obj_set_style_bg_color(ctrl, colors->surface, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN);
@@ -607,7 +613,7 @@ esp_err_t navigator_ui_create(lv_obj_t *parent)
      * ---------------------------------------------------------------- */
     {
         lv_obj_t *beacon_row = lv_obj_create(s_ui.root);
-        lv_obj_set_size(beacon_row, APP_AREA_W, BEACON_H);
+        lv_obj_set_size(beacon_row, s_app_w, BEACON_H);
         lv_obj_set_pos(beacon_row, 0, y);
         lv_obj_set_style_bg_color(beacon_row, colors->surface, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(beacon_row, LV_OPA_COVER, LV_PART_MAIN);

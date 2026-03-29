@@ -43,15 +43,15 @@ static const char *TAG = "appstore_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W      240
-#define APP_AREA_H      296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define TITLE_BAR_H      30
 #define ITEM_H           40   /* taller rows — name + description */
 #define ITEM_H_INST      30
 #define ITEM_PAD_LEFT     8
 #define ITEM_PAD_RIGHT    6
 #define STATUS_BAR_H     20
-#define CONTENT_H       (APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H)
+static int s_content_h = 246; /* s_app_h - TITLE_BAR_H - STATUS_BAR_H */
 
 /* ------------------------------------------------------------------ */
 /* Data types                                                           */
@@ -663,14 +663,14 @@ static void show_detail(int idx)
 
     lv_obj_t *screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(screen, 0, 0);
-    lv_obj_set_size(screen, APP_AREA_W, APP_AREA_H);
+    lv_obj_set_size(screen, s_app_w, s_app_h);
     style_panel(screen);
     s_store.detail_screen = screen;
 
     /* Title bar — "< Back" */
     lv_obj_t *title_bar = lv_obj_create(screen);
     lv_obj_set_pos(title_bar, 0, 0);
-    lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
+    lv_obj_set_size(title_bar, s_app_w, TITLE_BAR_H);
     style_title_bar(title_bar);
     lv_obj_add_flag(title_bar, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(title_bar, tc->primary, LV_STATE_PRESSED);
@@ -687,7 +687,7 @@ static void show_detail(int idx)
     /* Scrollable content */
     lv_obj_t *content = lv_obj_create(screen);
     lv_obj_set_pos(content, 0, TITLE_BAR_H);
-    lv_obj_set_size(content, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    lv_obj_set_size(content, s_app_w, s_app_h - TITLE_BAR_H);
     lv_obj_set_style_bg_color(content, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(content, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
@@ -845,7 +845,7 @@ static void build_catalog_list(void)
         lv_obj_set_style_text_color(empty_lbl, tc->text, LV_PART_MAIN);
         lv_obj_set_style_pad_all(empty_lbl, 8, LV_PART_MAIN);
         lv_label_set_long_mode(empty_lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(empty_lbl, APP_AREA_W - 16);
+        lv_obj_set_width(empty_lbl, s_app_w - 16);
         return;
     }
 
@@ -929,7 +929,7 @@ static void build_firmware_list(void)
         lv_obj_set_style_text_color(empty_lbl, tc->text, LV_PART_MAIN);
         lv_obj_set_style_pad_all(empty_lbl, 8, LV_PART_MAIN);
         lv_label_set_long_mode(empty_lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(empty_lbl, APP_AREA_W - 16);
+        lv_obj_set_width(empty_lbl, s_app_w - 16);
 
         /* Current version info */
         char ver_line[64];
@@ -1128,7 +1128,7 @@ static void build_installed_list(void)
         lv_obj_set_style_text_color(empty_lbl, tc->text, LV_PART_MAIN);
         lv_obj_set_style_pad_all(empty_lbl, 8, LV_PART_MAIN);
         lv_label_set_long_mode(empty_lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(empty_lbl, APP_AREA_W - 16);
+        lv_obj_set_width(empty_lbl, s_app_w - 16);
         return;
     }
 
@@ -1161,7 +1161,7 @@ static void build_installed_list(void)
         lv_obj_set_style_text_color(name_lbl, tc->text, LV_PART_MAIN);
         lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
         lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(name_lbl, APP_AREA_W - ITEM_PAD_LEFT - ITEM_PAD_RIGHT - 70);
+        lv_obj_set_width(name_lbl, s_app_w - ITEM_PAD_LEFT - ITEM_PAD_RIGHT - 70);
 
         lv_obj_t *rem_btn = create_action_button(row, "Remove", 65);
         lv_obj_align(rem_btn, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1243,7 +1243,7 @@ static lv_obj_t *build_list_area(lv_obj_t *parent, int list_h)
 
     lv_obj_t *list = lv_obj_create(parent);
     lv_obj_set_pos(list, 0, 0);
-    lv_obj_set_size(list, APP_AREA_W, list_h);
+    lv_obj_set_size(list, s_app_w, list_h);
     lv_obj_set_style_bg_color(list, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
@@ -1262,7 +1262,7 @@ static lv_obj_t *build_status_bar(lv_obj_t *parent, int y, const char *init_text
 
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_set_pos(bar, 0, y);
-    lv_obj_set_size(bar, APP_AREA_W, STATUS_BAR_H);
+    lv_obj_set_size(bar, s_app_w, STATUS_BAR_H);
     lv_obj_set_style_bg_color(bar, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
@@ -1298,6 +1298,13 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
     s_store.selected_idx = -1;
     s_store.current_tab  = TAB_CATALOG;
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_content_h = s_app_h - TITLE_BAR_H - STATUS_BAR_H;
+
     const theme_colors_t *tc = theme_get_colors();
 
     /* Root */
@@ -1311,7 +1318,7 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
      * --------------------------------------------------------------- */
     lv_obj_t *title_bar = lv_obj_create(s_store.root);
     lv_obj_set_pos(title_bar, 0, 0);
-    lv_obj_set_size(title_bar, APP_AREA_W, TITLE_BAR_H);
+    lv_obj_set_size(title_bar, s_app_w, TITLE_BAR_H);
     style_title_bar(title_bar);
 
     lv_obj_t *title_lbl = lv_label_create(title_bar);
@@ -1341,13 +1348,13 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
      * List + refresh button row + status bar
      * --------------------------------------------------------------- */
     int btn_row_h    = 28;
-    int cat_list_h   = APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
+    int cat_list_h   = s_app_h - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
     int cat_btn_y    = cat_list_h;
     int cat_status_y = cat_list_h + btn_row_h;
 
     lv_obj_t *cat_screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(cat_screen, 0, TITLE_BAR_H);
-    lv_obj_set_size(cat_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    lv_obj_set_size(cat_screen, s_app_w, s_app_h - TITLE_BAR_H);
     style_panel(cat_screen);
     s_store.catalog_screen = cat_screen;
 
@@ -1356,7 +1363,7 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
     /* Button row: "Refresh Cache" + "Refresh from Server" */
     lv_obj_t *cat_btn_area = lv_obj_create(cat_screen);
     lv_obj_set_pos(cat_btn_area, 0, cat_btn_y);
-    lv_obj_set_size(cat_btn_area, APP_AREA_W, btn_row_h);
+    lv_obj_set_size(cat_btn_area, s_app_w, btn_row_h);
     lv_obj_set_style_bg_color(cat_btn_area, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(cat_btn_area, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(cat_btn_area, 0, LV_PART_MAIN);
@@ -1377,13 +1384,13 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
     /* ---------------------------------------------------------------
      * Firmware screen (hidden by default)
      * --------------------------------------------------------------- */
-    int fw_list_h   = APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
+    int fw_list_h   = s_app_h - TITLE_BAR_H - STATUS_BAR_H - btn_row_h;
     int fw_btn_y    = fw_list_h;
     int fw_status_y = fw_list_h + btn_row_h;
 
     lv_obj_t *fw_screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(fw_screen, 0, TITLE_BAR_H);
-    lv_obj_set_size(fw_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    lv_obj_set_size(fw_screen, s_app_w, s_app_h - TITLE_BAR_H);
     style_panel(fw_screen);
     lv_obj_add_flag(fw_screen, LV_OBJ_FLAG_HIDDEN);
     s_store.firmware_screen = fw_screen;
@@ -1392,7 +1399,7 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
 
     lv_obj_t *fw_btn_area = lv_obj_create(fw_screen);
     lv_obj_set_pos(fw_btn_area, 0, fw_btn_y);
-    lv_obj_set_size(fw_btn_area, APP_AREA_W, btn_row_h);
+    lv_obj_set_size(fw_btn_area, s_app_w, btn_row_h);
     lv_obj_set_style_bg_color(fw_btn_area, tc->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(fw_btn_area, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(fw_btn_area, 0, LV_PART_MAIN);
@@ -1411,16 +1418,16 @@ esp_err_t appstore_ui_create(lv_obj_t *parent)
      * --------------------------------------------------------------- */
     lv_obj_t *inst_screen = lv_obj_create(s_store.root);
     lv_obj_set_pos(inst_screen, 0, TITLE_BAR_H);
-    lv_obj_set_size(inst_screen, APP_AREA_W, APP_AREA_H - TITLE_BAR_H);
+    lv_obj_set_size(inst_screen, s_app_w, s_app_h - TITLE_BAR_H);
     style_panel(inst_screen);
     lv_obj_add_flag(inst_screen, LV_OBJ_FLAG_HIDDEN);
     s_store.installed_screen = inst_screen;
 
     s_store.installed_list = build_list_area(inst_screen,
-                                              APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H);
+                                              s_app_h - TITLE_BAR_H - STATUS_BAR_H);
 
     s_store.installed_status_label =
-        build_status_bar(inst_screen, APP_AREA_H - TITLE_BAR_H - STATUS_BAR_H, "Installed apps");
+        build_status_bar(inst_screen, s_app_h - TITLE_BAR_H - STATUS_BAR_H, "Installed apps");
 
     /* ---------------------------------------------------------------
      * Initial data load from local cache

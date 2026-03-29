@@ -43,11 +43,11 @@ static const char *TAG = "terminal_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W   240
-#define APP_AREA_H   296
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define HEADER_H      30
 #define INPUT_BAR_H   28
-#define OUTPUT_H     (APP_AREA_H - HEADER_H - INPUT_BAR_H)
+static int s_output_h = 238; /* s_app_h - HEADER_H - INPUT_BAR_H */
 
 /* Max characters in the output textarea before we trim */
 #define OUTPUT_MAX_CHARS  2048
@@ -293,6 +293,13 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
 
     memset(&s_term, 0, sizeof(s_term));
 
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
+    s_output_h = s_app_h - HEADER_H - INPUT_BAR_H;
+
     const theme_colors_t *clr = theme_get_colors();
 
     /* Root container */
@@ -308,7 +315,7 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
 
     /* Header */
     lv_obj_t *hdr = lv_obj_create(s_term.root);
-    lv_obj_set_size(hdr, APP_AREA_W, HEADER_H);
+    lv_obj_set_size(hdr, s_app_w, HEADER_H);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_style_bg_color(hdr, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, LV_PART_MAIN);
@@ -332,7 +339,7 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
     /* Output textarea (read-only, auto-scroll, monospace via montserrat_14) */
     s_term.output_ta = lv_textarea_create(s_term.root);
     lv_obj_set_pos(s_term.output_ta, 0, HEADER_H);
-    lv_obj_set_size(s_term.output_ta, APP_AREA_W, OUTPUT_H);
+    lv_obj_set_size(s_term.output_ta, s_app_w, s_output_h);
     lv_textarea_set_one_line(s_term.output_ta, false);
     lv_textarea_set_cursor_click_pos(s_term.output_ta, false);
     lv_obj_clear_flag(s_term.output_ta, LV_OBJ_FLAG_CLICKABLE);
@@ -355,8 +362,8 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
 
     /* Input bar */
     lv_obj_t *input_bar = lv_obj_create(s_term.root);
-    lv_obj_set_pos(input_bar, 0, HEADER_H + OUTPUT_H);
-    lv_obj_set_size(input_bar, APP_AREA_W, INPUT_BAR_H);
+    lv_obj_set_pos(input_bar, 0, HEADER_H + s_output_h);
+    lv_obj_set_size(input_bar, s_app_w, INPUT_BAR_H);
     lv_obj_set_style_bg_color(input_bar, clr->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(input_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_side(input_bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);

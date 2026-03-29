@@ -15,9 +15,9 @@ static const char *TAG = "launcher_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-/* App-area dimensions (240x296 portrait after the 24px status bar) */
-#define APP_AREA_W      240
-#define APP_AREA_H      296
+/* App-area dimensions — set from parent in launcher_ui_create() */
+static int s_app_w = 240;
+static int s_app_h = 296;
 #define DOCK_H           50
 #define APPS_BTN_H       30
 #define ICON_SIZE        38
@@ -228,7 +228,7 @@ static void open_app_drawer(void)
     if (!s_app_drawer) {
         /* Full-screen overlay on top of the home screen */
         s_app_drawer = lv_obj_create(s_root);
-        lv_obj_set_size(s_app_drawer, APP_AREA_W, APP_AREA_H);
+        lv_obj_set_size(s_app_drawer, s_app_w, s_app_h);
         lv_obj_set_pos(s_app_drawer, 0, 0);
         lv_obj_set_style_bg_color(s_app_drawer, colors->bg, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(s_app_drawer, LV_OPA_COVER, LV_PART_MAIN);
@@ -239,7 +239,7 @@ static void open_app_drawer(void)
 
         /* --- Header bar --- */
         lv_obj_t *header = lv_obj_create(s_app_drawer);
-        lv_obj_set_size(header, APP_AREA_W, 30);
+        lv_obj_set_size(header, s_app_w, 30);
         lv_obj_set_pos(header, 0, 0);
         lv_obj_set_style_bg_color(header, colors->surface, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(header, LV_OPA_COVER, LV_PART_MAIN);
@@ -278,7 +278,7 @@ static void open_app_drawer(void)
         /* --- Scrollable grid area --- */
         lv_obj_t *grid_scroll = lv_obj_create(s_app_drawer);
         lv_obj_set_pos(grid_scroll, 0, 30);
-        lv_obj_set_size(grid_scroll, APP_AREA_W, APP_AREA_H - 30);
+        lv_obj_set_size(grid_scroll, s_app_w, s_app_h - 30);
         lv_obj_set_style_bg_opa(grid_scroll, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(grid_scroll, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_all(grid_scroll, 6, LV_PART_MAIN);
@@ -350,6 +350,13 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
         parent = lv_scr_act();
     }
 
+    /* Read actual dimensions from parent */
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;  /* fallback */
+    if (s_app_h == 0) s_app_h = 296;
+
     const theme_colors_t *colors = theme_get_colors();
 
     /* Root container — fills the entire app area */
@@ -364,13 +371,13 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
 
     /* ------------------------------------------------------------------
      * Wallpaper area — sits above the Apps button and dock.
-     * Height: APP_AREA_H minus dock minus apps-button row.
+     * Height: s_app_h minus dock minus apps-button row.
      * ------------------------------------------------------------------ */
-    int wallpaper_h = APP_AREA_H - APPS_BTN_H - DOCK_H;
+    int wallpaper_h = s_app_h - APPS_BTN_H - DOCK_H;
 
     lv_obj_t *wallpaper = lv_obj_create(s_root);
     lv_obj_set_pos(wallpaper, 0, 0);
-    lv_obj_set_size(wallpaper, APP_AREA_W, wallpaper_h);
+    lv_obj_set_size(wallpaper, s_app_w, wallpaper_h);
     lv_obj_set_style_bg_color(wallpaper, colors->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(wallpaper, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(wallpaper, 0, LV_PART_MAIN);
@@ -407,7 +414,7 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
      * ------------------------------------------------------------------ */
     lv_obj_t *apps_row = lv_obj_create(s_root);
     lv_obj_set_pos(apps_row, 0, wallpaper_h);
-    lv_obj_set_size(apps_row, APP_AREA_W, APPS_BTN_H);
+    lv_obj_set_size(apps_row, s_app_w, APPS_BTN_H);
     lv_obj_set_style_bg_color(apps_row, colors->bg, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(apps_row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(apps_row, 0, LV_PART_MAIN);
@@ -444,8 +451,8 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
      * Favorites dock — bottom DOCK_H px, 1px top border
      * ------------------------------------------------------------------ */
     lv_obj_t *dock = lv_obj_create(s_root);
-    lv_obj_set_pos(dock, 0, APP_AREA_H - DOCK_H);
-    lv_obj_set_size(dock, APP_AREA_W, DOCK_H);
+    lv_obj_set_pos(dock, 0, s_app_h - DOCK_H);
+    lv_obj_set_size(dock, s_app_w, DOCK_H);
     lv_obj_set_style_bg_color(dock, colors->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dock, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_side(dock, LV_BORDER_SIDE_TOP, LV_PART_MAIN);

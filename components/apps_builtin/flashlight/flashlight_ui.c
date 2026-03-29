@@ -37,8 +37,8 @@ static const char *TAG = "flashlight_ui";
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
 
-#define APP_AREA_W  240
-#define APP_AREA_H  296
+static int s_app_w = 240;
+static int s_app_h = 296;
 
 /* ------------------------------------------------------------------ */
 /* SOS Morse pattern                                                    */
@@ -266,6 +266,12 @@ esp_err_t flashlight_ui_create(lv_obj_t *parent)
     }
 
     memset(&s_fl, 0, sizeof(s_fl));
+
+    lv_obj_update_layout(parent);
+    s_app_w = lv_obj_get_width(parent);
+    s_app_h = lv_obj_get_height(parent);
+    if (s_app_w == 0) s_app_w = 240;
+    if (s_app_h == 0) s_app_h = 296;
 
     const theme_colors_t *clr = theme_get_colors();
 

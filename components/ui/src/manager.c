@@ -16,9 +16,10 @@
 
 static const char *TAG = "ui_mgr";
 
-/* Read dimensions from HAL at runtime instead of hardcoding */
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
+/* Max display dimensions — used to size static draw buffers.
+ * Actual dimensions read from HAL at runtime in ui_manager_init(). */
+#define MAX_DISPLAY_WIDTH   480
+#define MAX_DISPLAY_HEIGHT  480
 #define STATUSBAR_H     24
 #define LVGL_TASK_PERIOD_MS 10
 
@@ -33,14 +34,18 @@ static int64_t s_last_flush_time = 0;
  * Set during ui_manager_init() based on the WM variant. */
 static bool s_use_deferred_refresh = false;
 
+/* Runtime display dimensions — set from HAL in ui_manager_init() */
+static uint16_t s_display_w = 240;
+static uint16_t s_display_h = 320;
+
 /* Draw buffer — placed in PSRAM to save ~76KB of internal DRAM.
- * Double-buffer: allocate two halves so LVGL can render while we flush. */
+ * Sized for max supported resolution; actual usage is s_display_w * s_display_h. */
 #ifdef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
-static EXT_RAM_BSS_ATTR uint8_t s_draw_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT];
-static EXT_RAM_BSS_ATTR uint8_t s_draw_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static EXT_RAM_BSS_ATTR uint8_t s_draw_buf1[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT];
+static EXT_RAM_BSS_ATTR uint8_t s_draw_buf2[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT];
 #else
-static uint8_t s_draw_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT / 2];
-static uint8_t s_draw_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT / 2];
+static uint8_t s_draw_buf1[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT / 2];
+static uint8_t s_draw_buf2[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT / 2];
 #endif
 
 static lv_display_t   *s_display  = NULL;
@@ -277,11 +282,19 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     ESP_LOGI(TAG, "initializing UI manager (deferred_refresh=%d)", use_deferred_refresh);
     s_use_deferred_refresh = use_deferred_refresh;
 
+    /* Read actual display dimensions from HAL */
+    const hal_registry_t *reg = hal_get_registry();
+    if (reg && reg->display) {
+        s_display_w = reg->display->width;
+        s_display_h = reg->display->height;
+    }
+    ESP_LOGI(TAG, "display: %dx%d", s_display_w, s_display_h);
+
     /* 1. Initialize LVGL */
     lv_init();
 
-    /* 2. Create LVGL display */
-    s_display = lv_display_create(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    /* 2. Create LVGL display with actual dimensions */
+    s_display = lv_display_create(s_display_w, s_display_h);
     if (s_display == NULL) {
         ESP_LOGE(TAG, "lv_display_create failed");
         return ESP_FAIL;
@@ -344,12 +357,12 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
 
     /* 7. Build screen layout (LVGL task starts AFTER layout is complete) */
     s_screen = lv_display_get_screen_active(s_display);
-    lv_obj_set_size(s_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    lv_obj_set_size(s_screen, s_display_w, s_display_h);
 
     /* Status bar container — top 24 px */
     s_statusbar_cont = lv_obj_create(s_screen);
     lv_obj_set_pos(s_statusbar_cont, 0, 0);
-    lv_obj_set_size(s_statusbar_cont, DISPLAY_WIDTH, STATUSBAR_H);
+    lv_obj_set_size(s_statusbar_cont, s_display_w, STATUSBAR_H);
     lv_obj_set_style_pad_all(s_statusbar_cont, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_statusbar_cont, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_statusbar_cont, 0, LV_PART_MAIN);
@@ -357,7 +370,7 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     /* App content area — below status bar */
     s_app_area = lv_obj_create(s_screen);
     lv_obj_set_pos(s_app_area, 0, STATUSBAR_H);
-    lv_obj_set_size(s_app_area, DISPLAY_WIDTH, DISPLAY_HEIGHT - STATUSBAR_H);
+    lv_obj_set_size(s_app_area, s_display_w, s_display_h - STATUSBAR_H);
     lv_obj_set_style_pad_all(s_app_area, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_app_area, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_app_area, 0, LV_PART_MAIN);
@@ -386,13 +399,13 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     }
 
     /* 10. Initialize e-paper refresh tracker */
-    err = epaper_refresh_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    err = epaper_refresh_init(s_display_w, s_display_h);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "epaper_refresh_init failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    ESP_LOGI(TAG, "UI manager ready (%dx%d)", DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    ESP_LOGI(TAG, "UI manager ready (%dx%d)", s_display_w, s_display_h);
 
     /* NOTE: Splash screen is now the responsibility of the LCD WM variant.
      * LVGL render task is NOT started here — call ui_manager_start()
@@ -448,7 +461,7 @@ void ui_manager_show_splash(uint32_t duration_ms)
     /* Full-screen overlay on top of everything */
     lv_obj_t *splash = lv_obj_create(s_screen);
     lv_obj_set_pos(splash, 0, 0);
-    lv_obj_set_size(splash, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    lv_obj_set_size(splash, s_display_w, s_display_h);
     lv_obj_set_style_bg_color(splash, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(splash, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(splash, 0, LV_PART_MAIN);
