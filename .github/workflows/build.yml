@@ -87,7 +87,7 @@ jobs:
           echo "Firmware size OK: $SIZE / $MAX_SIZE bytes"
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: thistle-os-firmware
           path: build/thistle_os.bin
@@ -206,7 +206,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Semgrep artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: semgrep-results
@@ -248,7 +248,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Trivy artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: trivy-results
