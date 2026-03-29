@@ -157,6 +157,13 @@ int drv_a7682e_start_ppp(void) { return -1; }
 int drv_a7682e_stop_ppp(void) { return 0; }
 int drv_a7682e_ppp_connected(void) { return 0; }
 
+/* ── Simulator compat stubs ─────────��──────────────────────────────── */
+#include <stdbool.h>
+bool sim_is_headless(void) { return false; }
+void sim_assert_check_line(const char *line) { (void)line; }
+int wifi_manager_scan_start(void) { return -1; }
+int wifi_manager_scan_get_count(void) { return 0; }
+
 /* ── Crypto driver stub ───────────────────────────────────────────── */
 void *drv_crypto_mbedtls_get(void) { return NULL; }
 
