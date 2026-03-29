@@ -36,6 +36,17 @@
 
 static const char *TAG = "ghostterm_ui";
 
+/* Shell modes */
+typedef enum {
+    GHOST_MODE_LOCAL,   /* Local shell — commands go to thistle_shell */
+    GHOST_MODE_UART,    /* UART serial — commands go to hardware UART */
+} ghost_mode_t;
+
+/* Rust shell module FFI */
+extern int thistle_shell_exec(const char *input,
+                              void (*output_cb)(const char *line, void *ctx),
+                              void *user_data);
+
 /* ------------------------------------------------------------------ */
 /* Layout constants                                                     */
 /* ------------------------------------------------------------------ */
@@ -54,14 +65,15 @@ static const char *TAG = "ghostterm_ui";
 /* ------------------------------------------------------------------ */
 
 static struct {
-    lv_obj_t  *root;
-    lv_obj_t  *output_ta;   /* read-only monospace textarea */
-    lv_obj_t  *input_ta;    /* one-line input */
-    lv_obj_t  *baud_label;  /* baud rate display in header */
-    int        uart_num;
-    int        baud_rate;
-    bool       local_echo;
-    bool       uart_running;
+    lv_obj_t    *root;
+    lv_obj_t    *output_ta;     /* read-only monospace textarea */
+    lv_obj_t    *input_ta;      /* one-line input */
+    lv_obj_t    *mode_label;    /* mode display in header */
+    ghost_mode_t mode;
+    int          uart_num;
+    int          baud_rate;
+    bool         local_echo;
+    bool         uart_running;
     TaskHandle_t rx_task_handle;
 } s_ghost;
 
@@ -97,6 +109,13 @@ static void ghost_print_line(const char *line)
     if (!s_ghost.output_ta) return;
     ghost_print_raw(line);
     ghost_print_raw("\n");
+}
+
+/* Callback for thistle_shell_exec — prints each line to the output textarea */
+static void shell_output_cb(const char *line, void *ctx)
+{
+    (void)ctx;
+    ghost_print_line(line);
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,16 +191,24 @@ static void ghostterm_rx_task_stop(void)
 /* Built-in slash commands                                              */
 /* ------------------------------------------------------------------ */
 
-static void update_baud_label(void)
+static void update_mode_label(void)
 {
-    if (!s_ghost.baud_label) return;
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%d 8N1", s_ghost.baud_rate);
-    lv_label_set_text(s_ghost.baud_label, buf);
+    if (!s_ghost.mode_label) return;
+    char buf[32];
+    if (s_ghost.mode == GHOST_MODE_LOCAL) {
+        snprintf(buf, sizeof(buf), "Local");
+    } else {
+        snprintf(buf, sizeof(buf), "UART %d", s_ghost.baud_rate);
+    }
+    lv_label_set_text(s_ghost.mode_label, buf);
 }
 
 static void cmd_baud(const char *arg)
 {
+    if (s_ghost.mode != GHOST_MODE_UART) {
+        ghost_print_line("[GhostTerm] /baud only available in UART mode");
+        return;
+    }
     int rate = atoi(arg);
     if (rate != 9600 && rate != 19200 && rate != 38400 &&
         rate != 57600 && rate != 115200) {
@@ -192,7 +219,7 @@ static void cmd_baud(const char *arg)
     ghostterm_rx_task_stop();
     ghostterm_uart_reinit();
     ghostterm_rx_task_start();
-    update_baud_label();
+    update_mode_label();
     char buf[48];
     snprintf(buf, sizeof(buf), "[GhostTerm] Baud rate set to %d", rate);
     ghost_print_line(buf);
@@ -208,6 +235,8 @@ static void cmd_clear(void)
 static void cmd_help(void)
 {
     ghost_print_line("[GhostTerm] Commands:");
+    ghost_print_line("  /mode local   - switch to local shell");
+    ghost_print_line("  /mode uart    - switch to UART serial");
     ghost_print_line("  /baud <rate>  - set baud (9600/19200/38400/57600/115200)");
     ghost_print_line("  /clear        - clear output");
     ghost_print_line("  /echo on|off  - toggle local echo");
@@ -246,6 +275,26 @@ static void dispatch_slash_command(const char *raw)
         snprintf(buf, sizeof(buf), "[GhostTerm] Local echo: %s",
                  s_ghost.local_echo ? "ON" : "OFF");
         ghost_print_line(buf);
+    } else if (strcmp(raw, "mode local") == 0 || strcmp(raw, "mode shell") == 0) {
+        if (s_ghost.mode != GHOST_MODE_LOCAL) {
+            ghostterm_rx_task_stop();
+            s_ghost.mode = GHOST_MODE_LOCAL;
+            update_mode_label();
+            ghost_print_line("[GhostTerm] Switched to Local shell mode");
+        }
+    } else if (strncmp(raw, "mode uart", 9) == 0) {
+        if (s_ghost.mode != GHOST_MODE_UART) {
+            s_ghost.mode = GHOST_MODE_UART;
+            ghostterm_uart_init();
+            ghostterm_rx_task_start();
+            update_mode_label();
+            ghost_print_line("[GhostTerm] Switched to UART mode");
+        }
+    } else if (strcmp(raw, "mode") == 0) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "[GhostTerm] Mode: %s",
+                 s_ghost.mode == GHOST_MODE_LOCAL ? "Local" : "UART");
+        ghost_print_line(buf);
     } else {
         ghost_print_line("[GhostTerm] Unknown command. Type /help");
     }
@@ -273,8 +322,18 @@ static void input_ta_cb(lv_event_t *e)
                 if (cmd[0] == '/') {
                     /* Slash command — handle locally */
                     dispatch_slash_command(cmd);
+                } else if (s_ghost.mode == GHOST_MODE_LOCAL) {
+                    /* Local shell — dispatch to thistle_shell */
+                    char prompt[140];
+                    snprintf(prompt, sizeof(prompt), "$ %s", cmd);
+                    ghost_print_line(prompt);
+                    int ret = thistle_shell_exec(cmd, shell_output_cb, NULL);
+                    if (ret == -2) {
+                        /* Special: clear command */
+                        lv_textarea_set_text(s_ghost.output_ta, "");
+                    }
                 } else {
-                    /* Send over UART with \r\n */
+                    /* UART mode — send over serial with \r\n */
                     if (s_ghost.local_echo) {
                         ghost_print_raw(cmd);
                         ghost_print_raw("\r\n");
@@ -300,6 +359,7 @@ esp_err_t ghostterm_ui_create(lv_obj_t *parent)
     }
 
     memset(&s_ghost, 0, sizeof(s_ghost));
+    s_ghost.mode       = GHOST_MODE_LOCAL;
     s_ghost.uart_num   = UART_NUM_2;
     s_ghost.baud_rate  = 115200;
     s_ghost.local_echo = true;
@@ -341,11 +401,11 @@ esp_err_t ghostterm_ui_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, clr->text, LV_PART_MAIN);
 
-    /* Baud rate label (right-aligned) */
-    s_ghost.baud_label = lv_label_create(hdr);
-    lv_obj_set_style_text_font(s_ghost.baud_label, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_ghost.baud_label, clr->text_secondary, LV_PART_MAIN);
-    update_baud_label();
+    /* Mode label (right-aligned) */
+    s_ghost.mode_label = lv_label_create(hdr);
+    lv_obj_set_style_text_font(s_ghost.mode_label, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_ghost.mode_label, clr->text_secondary, LV_PART_MAIN);
+    update_mode_label();
 
     /* Output textarea (read-only, auto-scroll, monospace via montserrat_14) */
     s_ghost.output_ta = lv_textarea_create(s_ghost.root);
@@ -422,19 +482,16 @@ esp_err_t ghostterm_ui_create(lv_obj_t *parent)
     lv_obj_set_style_text_font(send_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(send_lbl, clr->primary, LV_PART_MAIN);
 
-    /* Initialize UART and start RX task */
-    ghostterm_uart_init();
-    ghostterm_rx_task_start();
+    /* Initialize UART only if starting in UART mode */
+    if (s_ghost.mode == GHOST_MODE_UART) {
+        ghostterm_uart_init();
+        ghostterm_rx_task_start();
+    }
 
     /* Startup banner */
-    ghost_print_line("[GhostTerm] Serial terminal ready");
-    {
-        char buf[48];
-        snprintf(buf, sizeof(buf), "[GhostTerm] UART%d @ %d 8N1",
-                 s_ghost.uart_num, s_ghost.baud_rate);
-        ghost_print_line(buf);
-    }
-    ghost_print_line("[GhostTerm] Type /help for commands");
+    ghost_print_line("ThistleOS Shell");
+    ghost_print_line("Type 'help' for commands, '/help' for terminal options");
+    ghost_print_line("");
 
     return ESP_OK;
 }

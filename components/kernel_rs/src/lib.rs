@@ -59,4 +59,5 @@ pub mod burn_timer;
 pub mod msg_queue;
 pub mod msg_crypto;
 pub mod driver_reload;
+pub mod thistle_shell;
 mod ffi;

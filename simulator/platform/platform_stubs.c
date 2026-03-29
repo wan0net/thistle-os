@@ -318,6 +318,17 @@ esp_err_t gpio_set_pull_mode(gpio_num_t pin, int mode) { (void)pin; (void)mode; 
 esp_err_t gpio_set_intr_type(gpio_num_t pin, gpio_intr_type_t type) { (void)pin; (void)type; return 0; }
 esp_err_t gpio_intr_enable(gpio_num_t pin) { (void)pin; return 0; }
 
+/* ── Shell command stubs (thistle_shell.rs FFI) ───────────────────── */
+/* esp_restart and esp_get_free_heap_size are static inline in esp_system.h,
+   but Rust FFI needs real exported symbols. */
+uint32_t __attribute__((used)) esp_get_free_heap_size(void) { return 256 * 1024; }
+void __attribute__((used)) esp_restart(void) { printf("esp_restart() — exiting simulator\n"); exit(0); }
+int  app_manager_get_count(void) { return 0; }
+uint64_t hal_storage_get_total_bytes(void) { return 10 * 1024 * 1024; }
+uint64_t hal_storage_get_free_bytes(void) { return 5 * 1024 * 1024; }
+int  wifi_manager_scan_start(void) { return 0; }
+int  wifi_manager_scan_get_count(void) { return 0; }
+
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }
 int drv_a7682e_stop_ppp(void) { return 0; }
