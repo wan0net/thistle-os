@@ -71,14 +71,32 @@ pub fn dispatch_input(tree: &mut UiTree, event: &InputEvent) -> bool {
 // ---------------------------------------------------------------------------
 
 fn dispatch_touch_down(tree: &mut UiTree, x: i32, y: i32) -> bool {
+    // If any dropdown is open and the tap is outside it, close it.
+    close_open_dropdowns_if_outside(tree, x, y);
+
     let Some(hit) = tree.find_at_point(x, y) else {
         return false;
     };
 
     // If a focusable widget was tapped, give it focus.
-    let is_focusable = matches!(tree.get(hit), Some(Widget::TextInput(_)));
+    let is_focusable = matches!(
+        tree.get(hit),
+        Some(Widget::TextInput(_))
+            | Some(Widget::Button(_))
+            | Some(Widget::Switch(_))
+            | Some(Widget::Checkbox(_))
+            | Some(Widget::Slider(_))
+            | Some(Widget::Dropdown(_))
+    );
     if is_focusable {
         tree.set_focus(Some(hit));
+    }
+
+    // Handle slider drag on touch-down.
+    if let Some(Widget::Slider(_)) = tree.get(hit) {
+        update_slider_value(tree, hit, x);
+        LAST_TOUCH_Y.store(y, Ordering::Relaxed);
+        return true;
     }
 
     // Set pressed state on the hit widget.
@@ -149,6 +167,12 @@ fn dispatch_touch_up(tree: &mut UiTree, x: i32, y: i32) -> bool {
         return true;
     }
 
+    // Handle Dropdown: tap toggles open state, or selects an option.
+    if let Some(Widget::Dropdown(_)) = tree.get(hit) {
+        handle_dropdown_tap(tree, hit, x, y);
+        return true;
+    }
+
     false
 }
 
@@ -180,6 +204,15 @@ fn dispatch_touch_move(tree: &mut UiTree, x: i32, y: i32) -> bool {
     if last_y < 0 {
         return false;
     }
+
+    // Handle slider drag on touch-move.
+    if let Some(hit) = tree.find_at_point(x, y) {
+        if let Some(Widget::Slider(_)) = tree.get(hit) {
+            update_slider_value(tree, hit, x);
+            return true;
+        }
+    }
+
     let delta_y = last_y - y; // positive = scroll down (content moves up)
     if delta_y == 0 {
         return false;
@@ -234,6 +267,11 @@ fn apply_scroll(tree: &mut UiTree, target: WidgetId, delta: i32) -> bool {
 // ---------------------------------------------------------------------------
 
 fn dispatch_key(tree: &mut UiTree, code: u32) -> bool {
+    // Tab cycles focus regardless of whether something is focused.
+    if code == KEY_TAB {
+        return focus_next(tree);
+    }
+
     let Some(focused) = tree.focus() else {
         return false;
     };
@@ -242,6 +280,7 @@ fn dispatch_key(tree: &mut UiTree, code: u32) -> bool {
         KEY_BACKSPACE => handle_backspace(tree, focused),
         KEY_LEFT => handle_cursor_move(tree, focused, -1),
         KEY_RIGHT => handle_cursor_move(tree, focused, 1),
+        KEY_ENTER => handle_enter(tree, focused),
         _ => false,
     }
 }
@@ -330,6 +369,255 @@ fn handle_cursor_move(tree: &mut UiTree, focused: WidgetId, delta: i32) -> bool 
         true
     } else {
         false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Enter key handling — Button, Switch, Checkbox, Dropdown
+// ---------------------------------------------------------------------------
+
+fn handle_enter(tree: &mut UiTree, focused: WidgetId) -> bool {
+    // Button: fire on_press.
+    if let Some(Widget::Button(_)) = tree.get(focused) {
+        let callback = {
+            let Widget::Button(btn) = tree.get(focused).unwrap() else {
+                unreachable!()
+            };
+            btn.on_press
+        };
+        if let Some(cb) = callback {
+            let id = tree.get(focused).unwrap().common().id;
+            cb(id);
+            tree.mark_dirty(focused);
+            return true;
+        }
+        return false;
+    }
+
+    // Switch: toggle.
+    if let Some(Widget::Switch(_)) = tree.get(focused) {
+        let (on_change, id, new_state) = {
+            let Widget::Switch(sw) = tree.get_mut(focused).unwrap() else {
+                unreachable!()
+            };
+            sw.on = !sw.on;
+            (sw.on_change, sw.common.id, sw.on)
+        };
+        tree.mark_dirty(focused);
+        if let Some(cb) = on_change {
+            cb(id, if new_state { "on" } else { "off" });
+        }
+        return true;
+    }
+
+    // Checkbox: toggle.
+    if let Some(Widget::Checkbox(_)) = tree.get(focused) {
+        let (on_change, id, new_state) = {
+            let Widget::Checkbox(cb_w) = tree.get_mut(focused).unwrap() else {
+                unreachable!()
+            };
+            cb_w.checked = !cb_w.checked;
+            (cb_w.on_change, cb_w.common.id, cb_w.checked)
+        };
+        tree.mark_dirty(focused);
+        if let Some(cb) = on_change {
+            cb(id, if new_state { "checked" } else { "unchecked" });
+        }
+        return true;
+    }
+
+    // Dropdown: toggle open.
+    if let Some(Widget::Dropdown(_)) = tree.get(focused) {
+        let Widget::Dropdown(dd) = tree.get_mut(focused).unwrap() else {
+            unreachable!()
+        };
+        dd.open = !dd.open;
+        tree.mark_dirty(focused);
+        return true;
+    }
+
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Slider touch helpers
+// ---------------------------------------------------------------------------
+
+fn update_slider_value(tree: &mut UiTree, id: WidgetId, x: i32) {
+    let (on_change, wid, new_val) = {
+        let Some(Widget::Slider(sl)) = tree.get_mut(id) else {
+            return;
+        };
+        let c = &sl.common;
+        let left = c.pos.x;
+        let width = c.size.w as i32;
+        if width <= 0 {
+            return;
+        }
+        let rel_x = (x - left).clamp(0, width);
+        let range = (sl.max - sl.min) as i32;
+        let val = sl.min as i32 + (rel_x * range) / width;
+        let val = val.clamp(sl.min as i32, sl.max as i32) as u8;
+        sl.value = val;
+        (sl.on_change, sl.common.id, val)
+    };
+    tree.mark_dirty(id);
+    if let Some(cb) = on_change {
+        let mut buf = heapless::String::<8>::new();
+        let _ = core::fmt::Write::write_fmt(&mut buf, format_args!("{}", new_val));
+        cb(wid, buf.as_str());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dropdown helpers
+// ---------------------------------------------------------------------------
+
+fn close_open_dropdowns_if_outside(tree: &mut UiTree, x: i32, y: i32) {
+    // Collect IDs of open dropdowns.
+    let root = tree.root();
+    let mut open_ids = alloc::vec::Vec::new();
+    tree.walk(root, &mut |id, w| {
+        if let Widget::Dropdown(dd) = w {
+            if dd.open {
+                open_ids.push(id);
+            }
+        }
+        true
+    });
+
+    for id in open_ids {
+        let inside = {
+            let Some(Widget::Dropdown(dd)) = tree.get(id) else {
+                continue;
+            };
+            let c = &dd.common;
+            let total_h = c.size.h as i32 + (c.size.h as i32 * dd.options.len() as i32);
+            x >= c.pos.x
+                && x < c.pos.x + c.size.w as i32
+                && y >= c.pos.y
+                && y < c.pos.y + total_h
+        };
+        if !inside {
+            if let Some(Widget::Dropdown(dd)) = tree.get_mut(id) {
+                dd.open = false;
+            }
+            tree.mark_dirty(id);
+        }
+    }
+}
+
+fn handle_dropdown_tap(tree: &mut UiTree, id: WidgetId, _x: i32, y: i32) {
+    let (was_open, item_h, pos_y, option_count, on_change, wid) = {
+        let Some(Widget::Dropdown(dd)) = tree.get(id) else {
+            return;
+        };
+        (
+            dd.open,
+            dd.common.size.h as i32,
+            dd.common.pos.y,
+            dd.options.len(),
+            dd.on_change,
+            dd.common.id,
+        )
+    };
+
+    if !was_open {
+        // Open the dropdown.
+        if let Some(Widget::Dropdown(dd)) = tree.get_mut(id) {
+            dd.open = true;
+        }
+        tree.mark_dirty(id);
+        return;
+    }
+
+    // Dropdown is open — check if tap is on an option.
+    let list_top = pos_y + item_h;
+    if y >= list_top && option_count > 0 {
+        let option_idx = ((y - list_top) / item_h) as usize;
+        if option_idx < option_count {
+            let selected_text = {
+                let Widget::Dropdown(dd) = tree.get_mut(id).unwrap() else {
+                    unreachable!()
+                };
+                dd.selected = option_idx as u8;
+                dd.open = false;
+                dd.options
+                    .get(option_idx)
+                    .map(|s| {
+                        let mut buf = heapless::String::<32>::new();
+                        let _ = buf.push_str(s.as_str());
+                        buf
+                    })
+            };
+            tree.mark_dirty(id);
+            if let Some(cb) = on_change {
+                if let Some(text) = &selected_text {
+                    cb(wid, text.as_str());
+                }
+            }
+            return;
+        }
+    }
+
+    // Tap on the closed portion — just close it.
+    if let Some(Widget::Dropdown(dd)) = tree.get_mut(id) {
+        dd.open = false;
+    }
+    tree.mark_dirty(id);
+}
+
+// ---------------------------------------------------------------------------
+// Tab focus navigation
+// ---------------------------------------------------------------------------
+
+fn focus_next(tree: &mut UiTree) -> bool {
+    let focusable_ids = collect_focusable(tree);
+    if focusable_ids.is_empty() {
+        return false;
+    }
+
+    let current = tree.focus();
+    let next_idx = match current {
+        Some(id) => {
+            let pos = focusable_ids.iter().position(|&fid| fid == id).unwrap_or(0);
+            (pos + 1) % focusable_ids.len()
+        }
+        None => 0,
+    };
+    tree.set_focus(Some(focusable_ids[next_idx]));
+    true
+}
+
+fn collect_focusable(tree: &UiTree) -> alloc::vec::Vec<WidgetId> {
+    let mut result = alloc::vec::Vec::new();
+    collect_focusable_recursive(tree, tree.root(), &mut result);
+    result
+}
+
+fn collect_focusable_recursive(
+    tree: &UiTree,
+    id: WidgetId,
+    result: &mut alloc::vec::Vec<WidgetId>,
+) {
+    if let Some(widget) = tree.get(id) {
+        if !widget.common().visible {
+            return;
+        }
+        match widget {
+            Widget::TextInput(_)
+            | Widget::Button(_)
+            | Widget::Switch(_)
+            | Widget::Checkbox(_)
+            | Widget::Slider(_)
+            | Widget::Dropdown(_) => {
+                result.push(id);
+            }
+            _ => {}
+        }
+    }
+    for &child in tree.children(id) {
+        collect_focusable_recursive(tree, child, result);
     }
 }
 

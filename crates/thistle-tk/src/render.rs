@@ -261,6 +261,12 @@ fn render_node<D, M>(
         Widget::Checkbox(cb) => {
             draw_checkbox(cb, scroll_y, theme, mapper, target);
         }
+        Widget::Slider(sl) => {
+            draw_slider(sl, scroll_y, theme, mapper, target);
+        }
+        Widget::Dropdown(dd) => {
+            draw_dropdown(dd, scroll_y, theme, mapper, target);
+        }
     }
 
     // Compute the effective scroll offset for children of this node.
@@ -295,6 +301,23 @@ fn render_node<D, M>(
             }
         }
         render_node(tree, child_id, theme, mapper, target, child_scroll);
+    }
+
+    // Draw scrollbar for scrollable containers after children are rendered.
+    if let Some(Widget::Container(container)) = tree.get(id) {
+        let container_y = container.common.pos.y;
+        let content_height = tree
+            .children(id)
+            .iter()
+            .filter_map(|&child_id| {
+                tree.get(child_id).map(|w| {
+                    let c = w.common();
+                    (c.pos.y - container_y) + c.size.h as i32
+                })
+            })
+            .max()
+            .unwrap_or(0);
+        draw_scrollbar(container, content_height, theme, mapper, target, scroll_y);
     }
 }
 
@@ -798,6 +821,197 @@ fn draw_checkbox<D, M>(
         let tx = c.pos.x + box_size as i32 + 6;
         let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
         let _ = Text::new(cb.label.as_str(), Point::new(tx, ty), text_style).draw(target);
+    }
+}
+
+fn draw_scrollbar<D, M>(
+    container: &crate::widget::ContainerWidget,
+    content_height: i32,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+    scroll_y: i32,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &container.common;
+    let container_h = c.size.h as i32;
+    if content_height <= container_h {
+        return; // no overflow, no scrollbar
+    }
+
+    let track_x = c.pos.x + c.size.w as i32 - 4;
+    let track_y = c.pos.y - scroll_y;
+    let track_h = container_h;
+
+    // Thumb proportional to visible portion.
+    let thumb_h = ((container_h as f32 / content_height as f32) * track_h as f32) as i32;
+    let thumb_h = thumb_h.max(10); // minimum 10px
+    let scroll_range = content_height - container_h;
+    let thumb_y = if scroll_range > 0 {
+        track_y
+            + ((container.scroll_offset as f32 / scroll_range as f32)
+                * (track_h - thumb_h) as f32) as i32
+    } else {
+        track_y
+    };
+
+    // Draw thumb (filled rectangle).
+    let track_color = mapper.map(Color::TextSecondary, theme);
+    let thumb_rect = Rectangle::new(
+        Point::new(track_x, thumb_y),
+        embedded_graphics::geometry::Size::new(3, thumb_h as u32),
+    );
+    let style = PrimitiveStyleBuilder::new().fill_color(track_color).build();
+    let _ = thumb_rect.into_styled(style).draw(target);
+}
+
+fn draw_slider<D, M>(
+    sl: &crate::widget::SliderWidget,
+    scroll_y: i32,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &sl.common;
+    let dy = c.pos.y - scroll_y;
+    let w = c.size.w;
+    let h = c.size.h;
+
+    // Track — horizontal rounded rectangle (full width, thin).
+    let track_h: u32 = 4;
+    let track_y = dy + (h as i32 - track_h as i32) / 2;
+    let track_color = mapper.map(sl.track_color, theme);
+    let track_rect = Rectangle::new(
+        Point::new(c.pos.x, track_y),
+        embedded_graphics::geometry::Size::new(w, track_h),
+    );
+    let track_style = PrimitiveStyleBuilder::new().fill_color(track_color).build();
+    let rounded_track = RoundedRectangle::with_equal_corners(
+        track_rect,
+        embedded_graphics::geometry::Size::new(2, 2),
+    );
+    let _ = rounded_track.into_styled(track_style).draw(target);
+
+    // Filled portion from left.
+    let range = (sl.max - sl.min).max(1) as u32;
+    let val = sl.value.clamp(sl.min, sl.max) - sl.min;
+    let fill_w = (w * val as u32) / range;
+    if fill_w > 0 {
+        let fill_color = mapper.map(sl.fill_color, theme);
+        let fill_rect = Rectangle::new(
+            Point::new(c.pos.x, track_y),
+            embedded_graphics::geometry::Size::new(fill_w, track_h),
+        );
+        let fill_style = PrimitiveStyleBuilder::new().fill_color(fill_color).build();
+        let rounded_fill = RoundedRectangle::with_equal_corners(
+            fill_rect,
+            embedded_graphics::geometry::Size::new(2, 2),
+        );
+        let _ = rounded_fill.into_styled(fill_style).draw(target);
+    }
+
+    // Thumb — circle at current value position.
+    let thumb_diameter: u32 = h.min(16);
+    let thumb_x = c.pos.x + fill_w as i32 - (thumb_diameter as i32 / 2);
+    let thumb_y = dy + (h as i32 - thumb_diameter as i32) / 2;
+    let thumb_color = mapper.map(sl.thumb_color, theme);
+    let thumb_style = PrimitiveStyleBuilder::new().fill_color(thumb_color).build();
+    let _ = Circle::new(
+        Point::new(thumb_x, thumb_y),
+        thumb_diameter,
+    )
+    .into_styled(thumb_style)
+    .draw(target);
+}
+
+fn draw_dropdown<D, M>(
+    dd: &crate::widget::DropdownWidget,
+    scroll_y: i32,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &dd.common;
+    let dy = c.pos.y - scroll_y;
+
+    // Closed state: rectangle with selected text + down arrow.
+    let bg = mapper.map(dd.bg_color, theme);
+    let rect = Rectangle::new(
+        Point::new(c.pos.x, dy),
+        embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+    );
+    let bg_style = PrimitiveStyleBuilder::new().fill_color(bg).build();
+    let _ = rect.into_styled(bg_style).draw(target);
+
+    // Border.
+    let border_color = mapper.map(Color::TextSecondary, theme);
+    let border_style = PrimitiveStyleBuilder::new()
+        .stroke_color(border_color)
+        .stroke_width(1)
+        .build();
+    let _ = rect.into_styled(border_style).draw(target);
+
+    // Selected option text.
+    let text_color = mapper.map(dd.text_color, theme);
+    let font = font_for_size(&FontSize::Normal);
+    let text_style = MonoTextStyle::new(font, text_color);
+    let fh = font_height(&FontSize::Normal) as i32;
+    let tx = c.pos.x + 4;
+    let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
+
+    let selected_text = dd
+        .options
+        .get(dd.selected as usize)
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let _ = Text::new(selected_text, Point::new(tx, ty), text_style).draw(target);
+
+    // Down arrow indicator on the right.
+    let arrow_x = c.pos.x + c.size.w as i32 - 14;
+    let _ = Text::new("v", Point::new(arrow_x, ty), text_style).draw(target);
+
+    // Open state: draw option list below.
+    if dd.open {
+        let item_h = c.size.h;
+        let list_y = dy + c.size.h as i32;
+        let option_count = dd.options.len() as u32;
+        let list_h = item_h * option_count;
+
+        // List background.
+        let list_rect = Rectangle::new(
+            Point::new(c.pos.x, list_y),
+            embedded_graphics::geometry::Size::new(c.size.w, list_h),
+        );
+        let _ = list_rect.into_styled(bg_style).draw(target);
+        let _ = list_rect.into_styled(border_style).draw(target);
+
+        for (i, option) in dd.options.iter().enumerate() {
+            let oy = list_y + (i as i32 * item_h as i32);
+
+            // Highlight selected option.
+            if i == dd.selected as usize {
+                let highlight_color = mapper.map(Color::Primary, theme);
+                let highlight_rect = Rectangle::new(
+                    Point::new(c.pos.x, oy),
+                    embedded_graphics::geometry::Size::new(c.size.w, item_h),
+                );
+                let highlight_style = PrimitiveStyleBuilder::new()
+                    .fill_color(highlight_color)
+                    .build();
+                let _ = highlight_rect.into_styled(highlight_style).draw(target);
+            }
+
+            let oty = oy + ((item_h as i32 - fh) / 2) + fh;
+            let _ = Text::new(option.as_str(), Point::new(tx, oty), text_style).draw(target);
+        }
     }
 }
 

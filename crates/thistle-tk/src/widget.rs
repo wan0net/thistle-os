@@ -455,6 +455,75 @@ impl Default for CheckboxWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Slider — horizontal slider (0-100 range)
+// ---------------------------------------------------------------------------
+
+/// Horizontal slider with a draggable thumb.
+#[derive(Clone, Debug)]
+pub struct SliderWidget {
+    pub common: CommonProps,
+    pub value: u8,
+    pub min: u8,
+    pub max: u8,
+    pub track_color: Color,
+    pub fill_color: Color,
+    pub thumb_color: Color,
+    pub on_change: Option<OnChange>,
+}
+
+impl Default for SliderWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps {
+                width_hint: SizeHint::Fixed(120),
+                height_hint: SizeHint::Fixed(24),
+                ..CommonProps::default()
+            },
+            value: 50,
+            min: 0,
+            max: 100,
+            track_color: Color::TextSecondary,
+            fill_color: Color::Primary,
+            thumb_color: Color::Primary,
+            on_change: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dropdown — select from a list of options
+// ---------------------------------------------------------------------------
+
+/// Dropdown select with a list of options.
+#[derive(Clone, Debug)]
+pub struct DropdownWidget {
+    pub common: CommonProps,
+    pub options: heapless::Vec<HString<32>, 16>,
+    pub selected: u8,
+    pub open: bool,
+    pub bg_color: Color,
+    pub text_color: Color,
+    pub on_change: Option<OnChange>,
+}
+
+impl Default for DropdownWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(28),
+                ..CommonProps::default()
+            },
+            options: heapless::Vec::new(),
+            selected: 0,
+            open: false,
+            bg_color: Color::Surface,
+            text_color: Color::Text,
+            on_change: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Widget enum
 // ---------------------------------------------------------------------------
 
@@ -473,6 +542,8 @@ pub enum Widget {
     StatusBar(StatusBarWidget),
     Switch(SwitchWidget),
     Checkbox(CheckboxWidget),
+    Slider(SliderWidget),
+    Dropdown(DropdownWidget),
 }
 
 impl Widget {
@@ -491,6 +562,8 @@ impl Widget {
             Widget::StatusBar(w) => &w.common,
             Widget::Switch(w) => &w.common,
             Widget::Checkbox(w) => &w.common,
+            Widget::Slider(w) => &w.common,
+            Widget::Dropdown(w) => &w.common,
         }
     }
 
@@ -509,6 +582,8 @@ impl Widget {
             Widget::StatusBar(w) => &mut w.common,
             Widget::Switch(w) => &mut w.common,
             Widget::Checkbox(w) => &mut w.common,
+            Widget::Slider(w) => &mut w.common,
+            Widget::Dropdown(w) => &mut w.common,
         }
     }
 }
