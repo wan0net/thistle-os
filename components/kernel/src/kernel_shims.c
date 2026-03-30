@@ -85,3 +85,10 @@ __attribute__((weak)) uint32_t wm_widget_theme_bg(void) { return 0xFFFFFF; }
 __attribute__((weak)) uint32_t wm_widget_theme_surface(void) { return 0xF0F0F0; }
 __attribute__((weak)) uint32_t wm_widget_theme_text(void) { return 0x000000; }
 __attribute__((weak)) uint32_t wm_widget_theme_text_secondary(void) { return 0x808080; }
+
+// lstat shim — ESP-IDF newlib doesn't provide lstat (no symlinks on SPIFFS/FAT).
+// Rust std::fs::metadata calls lstat internally. Forward to stat.
+#include <sys/stat.h>
+int __attribute__((weak)) lstat(const char *path, struct stat *buf) {
+    return stat(path, buf);
+}

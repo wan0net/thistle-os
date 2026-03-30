@@ -129,6 +129,57 @@ extern "C" {
     fn hal_get_registry() -> *const crate::hal_registry::HalRegistry;
 }
 
+// ---------------------------------------------------------------------------
+// FFI implementations for functions declared in the extern block above.
+// These provide real implementations that the firmware linker needs.
+// ---------------------------------------------------------------------------
+
+/// Read total bytes from the first mounted HAL storage driver.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn hal_storage_get_total_bytes() -> u64 {
+    let reg = unsafe { hal_get_registry() };
+    if reg.is_null() { return 0; }
+    let r = unsafe { &*reg };
+    for i in 0..r.storage_count as usize {
+        if !r.storage[i].is_null() {
+            let drv = unsafe { &*r.storage[i] };
+            if let Some(f) = drv.get_total_bytes {
+                return unsafe { f() };
+            }
+        }
+    }
+    0
+}
+
+/// Read free bytes from the first mounted HAL storage driver.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn hal_storage_get_free_bytes() -> u64 {
+    let reg = unsafe { hal_get_registry() };
+    if reg.is_null() { return 0; }
+    let r = unsafe { &*reg };
+    for i in 0..r.storage_count as usize {
+        if !r.storage[i].is_null() {
+            let drv = unsafe { &*r.storage[i] };
+            if let Some(f) = drv.get_free_bytes {
+                return unsafe { f() };
+            }
+        }
+    }
+    0
+}
+
+/// Stub for wifi scan start — placeholder until async scan is implemented.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn wifi_manager_scan_start() -> i32 { -1 }
+
+/// Stub for wifi scan count — placeholder until async scan is implemented.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
+
 // Test stubs — provide linkable C symbols for functions not already defined
 // in the Rust crate. Functions like wifi_manager_get_state, app_manager_launch,
 // kernel_uptime_ms, etc. are already implemented in their respective modules.
