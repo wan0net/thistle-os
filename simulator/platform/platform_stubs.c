@@ -379,10 +379,8 @@ esp_err_t gpio_intr_enable(gpio_num_t pin) { (void)pin; return 0; }
 uint32_t __attribute__((used)) esp_get_free_heap_size(void) { return 256 * 1024; }
 void __attribute__((used)) esp_restart(void) { printf("esp_restart() — exiting simulator\n"); exit(0); }
 /* app_manager_get_count now provided by Rust app_manager.rs */
-uint64_t hal_storage_get_total_bytes(void) { return 10 * 1024 * 1024; }
-uint64_t hal_storage_get_free_bytes(void) { return 5 * 1024 * 1024; }
-int  wifi_manager_scan_start(void) { return 0; }
-int  wifi_manager_scan_get_count(void) { return 0; }
+/* hal_storage_get_total/free_bytes and wifi_manager_scan_start/get_count
+ * now provided by Rust thistle_shell.rs — no C stubs needed */
 
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }
