@@ -119,13 +119,19 @@ extern "C" {
     fn wifi_manager_get_state() -> i32;
     fn wifi_manager_get_ip() -> *const c_char;
     fn wifi_manager_get_rssi() -> i32;
-    fn wifi_manager_scan_start() -> i32;
-    fn wifi_manager_scan_get_count() -> i32;
     fn ble_manager_get_state() -> i32;
     fn ble_manager_get_peer_name() -> *const c_char;
+    fn driver_loader_get_count() -> i32;
+}
+
+/* Functions implemented in this module (not extern) on real builds,
+ * but declared extern for test builds where stubs provide them. */
+#[cfg(test)]
+extern "C" {
     fn hal_storage_get_total_bytes() -> u64;
     fn hal_storage_get_free_bytes() -> u64;
-    fn driver_loader_get_count() -> i32;
+    fn wifi_manager_scan_start() -> i32;
+    fn wifi_manager_scan_get_count() -> i32;
     fn hal_get_registry() -> *const crate::hal_registry::HalRegistry;
 }
 
