@@ -2,9 +2,9 @@
 // Kernel version constants
 
 pub const VERSION_MAJOR: u32 = 0;
-pub const VERSION_MINOR: u32 = 1;
+pub const VERSION_MINOR: u32 = 5;
 pub const VERSION_PATCH: u32 = 0;
-pub const VERSION_STRING: &str = "0.1.0";
+pub const VERSION_STRING: &str = "0.5.0";
 
 /// Compare a semver requirement string against the running kernel version.
 /// Returns true if the requirement is satisfied (req <= current).
@@ -29,8 +29,7 @@ mod tests {
 
     #[test]
     fn test_satisfies_exact() {
-        // "0.1.0" should be satisfied by the current kernel 0.1.0
-        assert!(satisfies("0.1.0"));
+        assert!(satisfies("0.5.0"));
     }
 
     #[test]
@@ -48,7 +47,7 @@ mod tests {
     #[test]
     fn test_satisfies_higher_minor() {
         // Requires a higher minor version within the same major
-        assert!(!satisfies("0.2.0"));
+        assert!(!satisfies("0.6.0"));
     }
 
     #[test]

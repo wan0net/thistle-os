@@ -86,11 +86,34 @@ jobs:
           fi
           echo "Firmware size OK: $SIZE / $MAX_SIZE bytes"
 
+      - name: Sign firmware
+        if: env.THISTLE_SIGNING_KEY != ''
+        env:
+          THISTLE_SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          pip3 install PyNaCl
+          python3 -c "
+          import nacl.signing, os
+          key_hex = os.environ['THISTLE_SIGNING_KEY']
+          sk = nacl.signing.SigningKey(bytes.fromhex(key_hex))
+          data = open('build/thistle_os.bin', 'rb').read()
+          signed = sk.sign(data)
+          sig = signed.signature  # 64-byte Ed25519 signature
+          open('build/thistle_os.bin.sig', 'wb').write(sig)
+          vk = sk.verify_key
+          open('build/thistle_os.bin.pub', 'wb').write(vk.encode())
+          print(f'Signed: {len(data)} bytes, sig: {sig.hex()[:32]}...')
+          "
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
           name: thistle-os-firmware
-          path: build/thistle_os.bin
+          path: |
+            build/thistle_os.bin
+            build/thistle_os.bin.sig
+            build/thistle_os.bin.pub
 
   rust-tests:
     name: Rust Kernel Tests

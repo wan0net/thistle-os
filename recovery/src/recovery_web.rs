@@ -69,6 +69,7 @@ pub static STATE: Mutex<RecoveryState> = Mutex::new(RecoveryState::new());
 /// future universal boards or boards with ambiguous chip identification).
 const KNOWN_BOARDS: &[(&str, &str, &str)] = &[
     ("tdeck-pro",    "LilyGo T-Deck Pro (E-Paper, Keyboard, LoRa, GPS)", "esp32s3"),
+    ("tdeck-plus",   "LilyGo T-Deck Plus (LCD, Keyboard, LoRa, GPS, Power Mgmt)", "esp32s3"),
     ("tdeck",        "LilyGo T-Deck (LCD, Keyboard, LoRa, GPS)",         "esp32s3"),
     ("tdisplay-s3",  "LilyGo T-Display-S3 (LCD, Touch)",                 "esp32s3"),
     ("t3-s3",        "LilyGo T3-S3 (OLED, LoRa)",                        "esp32s3"),

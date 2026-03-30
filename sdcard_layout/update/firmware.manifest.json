@@ -2,11 +2,11 @@
     "type": "firmware",
     "id": "com.thistle.os",
     "name": "ThistleOS",
-    "version": "0.1.0",
+    "version": "0.5.0",
     "author": "ThistleOS Contributors",
     "description": "ThistleOS firmware for ESP32-S3 devices",
     "arch": "esp32s3",
     "entry": "thistle_os.bin",
     "changelog": "Initial release with 14 built-in apps, Ed25519 signing, multi-board support",
-    "compatible_boards": ["tdeck-pro", "tdeck"]
+    "compatible_boards": ["tdeck-pro", "tdeck", "tdeck-plus", "tdisplay", "heltec-v3", "cardputer", "t3-s3", "rak3312"]
 }

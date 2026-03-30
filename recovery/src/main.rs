@@ -273,7 +273,7 @@ fn main() -> anyhow::Result<()> {
                     Some(b) => println!("Selected board: {}", b),
                     None    => println!("No board selected. Use 'board <id>' to select."),
                 }
-                println!("Known boards (esp32s3): tdeck-pro, tdeck, tdisplay-s3, t3-s3");
+                println!("Known boards (esp32s3): tdeck-pro, tdeck-plus, tdeck, tdisplay-s3, t3-s3");
                 println!("Known boards (esp32):   cyd-2432s028");
                 println!("Known boards (esp32c3): c3-mini");
             }
@@ -316,7 +316,7 @@ fn main() -> anyhow::Result<()> {
             }
             _ if cmd.starts_with("board ") => {
                 let board_id = cmd[6..].trim();
-                let known = ["tdeck-pro", "tdeck", "tdisplay-s3", "t3-s3", "cyd-2432s028", "c3-mini"];
+                let known = ["tdeck-pro", "tdeck-plus", "tdeck", "tdisplay-s3", "t3-s3", "cyd-2432s028", "c3-mini"];
                 if known.contains(&board_id) {
                     {
                         let mut st = recovery_web::STATE.lock().unwrap();

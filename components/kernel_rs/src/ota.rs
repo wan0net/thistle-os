@@ -302,8 +302,7 @@ pub unsafe extern "C" fn ota_apply_from_http(
 /// Returns a pointer to a static C string. Do not free.
 #[no_mangle]
 pub extern "C" fn ota_get_current_version() -> *const c_char {
-    // Matches THISTLE_VERSION_STRING from version.h
-    b"0.1.0\0".as_ptr() as *const c_char
+    b"0.5.0\0".as_ptr() as *const c_char
 }
 
 /// Return the label of the currently running OTA partition.
@@ -391,7 +390,7 @@ mod tests {
     fn test_get_current_version_matches_expected() {
         let ptr = ota_get_current_version();
         let version = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
-        assert_eq!(version, "0.1.0", "OTA version must be \"0.1.0\"");
+        assert_eq!(version, "0.5.0", "OTA version must match VERSION_STRING");
     }
 
     // -----------------------------------------------------------------------
