@@ -174,6 +174,10 @@ pub extern "C" fn kernel_init() -> i32 {
     // whether to launch it based on the active WM)
     crate::tk_launcher::register();
 
+    // Register the thistle-tk flashlight (first LVGL-to-tk migration).
+    // The LVGL variant registers separately in main.c for the LVGL WM path.
+    crate::tk_flashlight::register();
+
     // Permissions (Rust)
     crate::permissions::init();
 

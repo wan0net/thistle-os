@@ -29,6 +29,7 @@ pub mod crypto;
 pub mod widget;
 pub mod tk_wm;
 pub mod tk_launcher;
+pub mod tk_flashlight;
 pub mod tk_appstore;
 pub mod tk_meshchat;
 pub mod drv_kbd_tca8418;
