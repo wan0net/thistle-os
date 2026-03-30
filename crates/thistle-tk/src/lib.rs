@@ -25,3 +25,4 @@ pub use color::Color;
 pub use theme::Theme;
 pub use widget::{Widget, WidgetId};
 pub use tree::UiTree;
+pub use render::{render, render_dirty, ColorMapper, MonoMapper, RgbMapper};

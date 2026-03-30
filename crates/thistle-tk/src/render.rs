@@ -12,14 +12,15 @@
 //! stays fully `no_std` and platform-independent.
 
 use embedded_graphics::{
-    mono_font::{
-        ascii::{FONT_6X10, FONT_7X14, FONT_10X20},
-        MonoFont, MonoTextStyle,
-    },
     pixelcolor::{BinaryColor, PixelColor, Rgb565},
     prelude::*,
     primitives::{Circle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Line},
-    text::Text,
+};
+
+use u8g2_fonts::{
+    FontRenderer,
+    fonts,
+    types::{FontColor, HorizontalAlignment, VerticalPosition},
 };
 
 use crate::color::Color;
@@ -80,6 +81,32 @@ where
     M: ColorMapper,
 {
     render_node(tree, tree.root(), theme, mapper, target, 0);
+}
+
+/// Render only the dirty region of the widget tree.
+///
+/// Returns the dirty rectangle that was rendered, or `None` if nothing was
+/// dirty.  The caller (window manager) can use the returned rectangle to
+/// perform a partial display flush — critical for e-paper where only the
+/// changed region should be sent to the panel.
+pub fn render_dirty<D, M>(
+    tree: &mut UiTree,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) -> Option<Rectangle>
+where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let dirty = tree.get_dirty_rect()?;
+
+    // For now, render the full tree — the caller can use the dirty rect to
+    // only flush that region to the display hardware.
+    render(tree, theme, mapper, target);
+
+    tree.clear_dirty_rect();
+    Some(dirty)
 }
 
 // ---------------------------------------------------------------------------
@@ -344,9 +371,6 @@ fn draw_label<D, M>(
     M: ColorMapper,
 {
     let color = mapper.map(label.color, theme);
-    let font = font_for_size(&label.font_size);
-    let style = MonoTextStyle::new(font, color);
-    let char_w = font_char_width(&label.font_size);
     let line_h = font_height(&label.font_size);
 
     let x = label.common.pos.x;
@@ -356,39 +380,56 @@ fn draw_label<D, M>(
     if !label.word_wrap || max_w == 0 {
         // Single line — no wrapping.
         let ty = y + line_h as i32;
-        let _ = Text::new(label.text.as_str(), Point::new(x, ty), style).draw(target);
+        draw_text_u8g2(label.text.as_str(), x, ty, &label.font_size, color, target);
         return;
     }
 
-    // Word-wrap: split text into lines that fit within max_w.
-    let chars_per_line = if char_w > 0 { (max_w / char_w).max(1) as usize } else { 40 };
+    // Proportional word-wrap: measure words incrementally.
     let max_lines = if label.max_lines == 0 { usize::MAX } else { label.max_lines as usize };
-
     let mut line_y = y + line_h as i32;
     let mut lines_drawn = 0usize;
-    let mut remaining = label.text.as_str();
 
-    while !remaining.is_empty() && lines_drawn < max_lines {
-        if remaining.len() <= chars_per_line {
-            // Fits on one line.
-            let _ = Text::new(remaining, Point::new(x, line_y), style).draw(target);
-            break;
-        }
+    // Build lines word-by-word, measuring with proportional metrics.
+    let mut line_start = 0usize; // byte offset into text where current line starts
+    let text = label.text.as_str();
+    let words = text.split_whitespace();
+    // We track byte ranges into the original text to avoid alloc.
+    let mut line_end = 0usize;
+    let mut first_word_on_line = true;
 
-        // Find a break point.
-        let slice = &remaining[..chars_per_line.min(remaining.len())];
-        let break_at = if let Some(space_pos) = slice.rfind(' ') {
-            space_pos + 1 // break after the space
+    for word in words {
+        // Compute the byte offset of this word in the original text.
+        let word_start = word.as_ptr() as usize - text.as_ptr() as usize;
+        let word_end = word_start + word.len();
+
+        let test_end = word_end;
+        let test_str = &text[line_start..test_end];
+        let w = text_width_u8g2(test_str, &label.font_size);
+
+        if w > max_w && !first_word_on_line {
+            // Flush current line (up to line_end).
+            let line = text[line_start..line_end].trim_end();
+            draw_text_u8g2(line, x, line_y, &label.font_size, color, target);
+            line_y += line_h as i32;
+            lines_drawn += 1;
+            if lines_drawn >= max_lines {
+                return;
+            }
+            line_start = word_start;
+            line_end = word_end;
+            first_word_on_line = true;
         } else {
-            chars_per_line.min(remaining.len()) // hard break
-        };
+            line_end = word_end;
+            first_word_on_line = false;
+        }
+    }
 
-        let line = remaining[..break_at].trim_end();
-        let _ = Text::new(line, Point::new(x, line_y), style).draw(target);
-
-        remaining = remaining[break_at..].trim_start();
-        line_y += line_h as i32;
-        lines_drawn += 1;
+    // Flush remaining text.
+    if line_start < text.len() && lines_drawn < max_lines {
+        let line = text[line_start..line_end].trim_end();
+        if !line.is_empty() {
+            draw_text_u8g2(line, x, line_y, &label.font_size, color, target);
+        }
     }
 }
 
@@ -432,13 +473,11 @@ fn draw_button<D, M>(
 
     // Center the text inside the button.
     let text_color = mapper.map(button.text_color, theme);
-    let font = font_for_size(&FontSize::Normal);
-    let text_style = MonoTextStyle::new(font, text_color);
-    let text_w = text_width(button.text.as_str(), &FontSize::Normal) as i32;
+    let text_w = text_width_u8g2(button.text.as_str(), &FontSize::Normal) as i32;
     let text_h = font_height(&FontSize::Normal) as i32;
     let tx = c.pos.x + ((c.size.w as i32 - text_w) / 2).max(0);
     let ty = (c.pos.y - scroll_y) + ((c.size.h as i32 - text_h) / 2) + text_h; // baseline
-    let _ = Text::new(button.text.as_str(), Point::new(tx, ty), text_style).draw(target);
+    draw_text_u8g2(button.text.as_str(), tx, ty, &FontSize::Normal, text_color, target);
 }
 
 fn draw_text_input<D, M>(
@@ -480,16 +519,15 @@ fn draw_text_input<D, M>(
         input.text.as_str()
     };
 
-    let font = font_for_size(&FontSize::Normal);
-    let text_style = MonoTextStyle::new(font, text_color);
     let fh = font_height(&FontSize::Normal) as i32;
     let tx = c.pos.x + 2;
     let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
-    let _ = Text::new(display_text, Point::new(tx, ty), text_style).draw(target);
+    draw_text_u8g2(display_text, tx, ty, &FontSize::Normal, text_color, target);
 
-    // Cursor line.
+    // Cursor line — compute position from proportional text width.
     if !input.text.is_empty() || input.cursor_pos == 0 {
-        let cursor_x = tx + input.cursor_pos as i32 * font_char_width(&FontSize::Normal) as i32;
+        let text_before_cursor = &input.text.as_str()[..input.cursor_pos as usize];
+        let cursor_x = tx + text_width_u8g2(text_before_cursor, &FontSize::Normal) as i32;
         let cursor_top = dy + 2;
         let cursor_bottom = dy + c.size.h as i32 - 2;
         let cursor_color = mapper.map(Color::Text, theme);
@@ -571,29 +609,23 @@ fn draw_list_item<D, M>(
 
     // Title (Normal size)
     let title_color = mapper.map(li.title_color, theme);
-    let title_font = font_for_size(&FontSize::Normal);
-    let title_style = MonoTextStyle::new(title_font, title_color);
     let tx = c.pos.x + 4;
     let ty = dy + font_height(&FontSize::Normal) as i32;
-    let _ = Text::new(li.title.as_str(), Point::new(tx, ty), title_style).draw(target);
+    draw_text_u8g2(li.title.as_str(), tx, ty, &FontSize::Normal, title_color, target);
 
     // Subtitle (below title, Small size)
     if !li.subtitle.is_empty() {
         let sub_color = mapper.map(li.subtitle_color, theme);
-        let sub_font = font_for_size(&FontSize::Small);
-        let sub_style = MonoTextStyle::new(sub_font, sub_color);
         let sub_y = ty + font_height(&FontSize::Small) as i32 + 2;
-        let _ = Text::new(li.subtitle.as_str(), Point::new(tx, sub_y), sub_style).draw(target);
+        draw_text_u8g2(li.subtitle.as_str(), tx, sub_y, &FontSize::Small, sub_color, target);
     }
 
     // Badge (right-aligned, Small size)
     if !li.badge.is_empty() {
         let badge_color = mapper.map(li.badge_color, theme);
-        let badge_font = font_for_size(&FontSize::Small);
-        let badge_style = MonoTextStyle::new(badge_font, badge_color);
-        let badge_w = text_width(li.badge.as_str(), &FontSize::Small) as i32;
+        let badge_w = text_width_u8g2(li.badge.as_str(), &FontSize::Small) as i32;
         let bx = c.pos.x + c.size.w as i32 - badge_w - 6;
-        let _ = Text::new(li.badge.as_str(), Point::new(bx, ty), badge_style).draw(target);
+        draw_text_u8g2(li.badge.as_str(), bx, ty, &FontSize::Small, badge_color, target);
     }
 }
 
@@ -679,28 +711,26 @@ fn draw_status_bar<D, M>(
     let _ = rect.into_styled(bg_style).draw(target);
 
     let text_color = mapper.map(sb.text_color, theme);
-    let font = font_for_size(&FontSize::Small);
-    let text_style = MonoTextStyle::new(font, text_color);
     let fh = font_height(&FontSize::Small) as i32;
     let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
 
     // Left text
     if !sb.left_text.is_empty() {
-        let _ = Text::new(sb.left_text.as_str(), Point::new(c.pos.x + 4, ty), text_style).draw(target);
+        draw_text_u8g2(sb.left_text.as_str(), c.pos.x + 4, ty, &FontSize::Small, text_color, target);
     }
 
     // Center text
     if !sb.center_text.is_empty() {
-        let tw = text_width(sb.center_text.as_str(), &FontSize::Small) as i32;
+        let tw = text_width_u8g2(sb.center_text.as_str(), &FontSize::Small) as i32;
         let cx = c.pos.x + (c.size.w as i32 - tw) / 2;
-        let _ = Text::new(sb.center_text.as_str(), Point::new(cx, ty), text_style).draw(target);
+        draw_text_u8g2(sb.center_text.as_str(), cx, ty, &FontSize::Small, text_color, target);
     }
 
     // Right text
     if !sb.right_text.is_empty() {
-        let tw = text_width(sb.right_text.as_str(), &FontSize::Small) as i32;
+        let tw = text_width_u8g2(sb.right_text.as_str(), &FontSize::Small) as i32;
         let rx = c.pos.x + c.size.w as i32 - tw - 4;
-        let _ = Text::new(sb.right_text.as_str(), Point::new(rx, ty), text_style).draw(target);
+        draw_text_u8g2(sb.right_text.as_str(), rx, ty, &FontSize::Small, text_color, target);
     }
 }
 
@@ -815,12 +845,10 @@ fn draw_checkbox<D, M>(
     // Label to the right of the checkbox.
     if !cb.label.is_empty() {
         let text_color = mapper.map(Color::Text, theme);
-        let font = font_for_size(&FontSize::Normal);
-        let text_style = MonoTextStyle::new(font, text_color);
         let fh = font_height(&FontSize::Normal) as i32;
         let tx = c.pos.x + box_size as i32 + 6;
         let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
-        let _ = Text::new(cb.label.as_str(), Point::new(tx, ty), text_style).draw(target);
+        draw_text_u8g2(cb.label.as_str(), tx, ty, &FontSize::Normal, text_color, target);
     }
 }
 
@@ -961,8 +989,6 @@ fn draw_dropdown<D, M>(
 
     // Selected option text.
     let text_color = mapper.map(dd.text_color, theme);
-    let font = font_for_size(&FontSize::Normal);
-    let text_style = MonoTextStyle::new(font, text_color);
     let fh = font_height(&FontSize::Normal) as i32;
     let tx = c.pos.x + 4;
     let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
@@ -972,11 +998,11 @@ fn draw_dropdown<D, M>(
         .get(dd.selected as usize)
         .map(|s| s.as_str())
         .unwrap_or("");
-    let _ = Text::new(selected_text, Point::new(tx, ty), text_style).draw(target);
+    draw_text_u8g2(selected_text, tx, ty, &FontSize::Normal, text_color, target);
 
     // Down arrow indicator on the right.
     let arrow_x = c.pos.x + c.size.w as i32 - 14;
-    let _ = Text::new("v", Point::new(arrow_x, ty), text_style).draw(target);
+    draw_text_u8g2("v", arrow_x, ty, &FontSize::Normal, text_color, target);
 
     // Open state: draw option list below.
     if dd.open {
@@ -1010,37 +1036,77 @@ fn draw_dropdown<D, M>(
             }
 
             let oty = oy + ((item_h as i32 - fh) / 2) + fh;
-            let _ = Text::new(option.as_str(), Point::new(tx, oty), text_style).draw(target);
+            draw_text_u8g2(option.as_str(), tx, oty, &FontSize::Normal, text_color, target);
         }
     }
 }
 
 fn font_height(size: &FontSize) -> u32 {
     match size {
-        FontSize::Small => 10,   // FONT_6X10
-        FontSize::Normal => 14,  // FONT_7X14
-        FontSize::Large => 20,   // FONT_10X20
+        FontSize::Small => 12,   // helvR10 actual height
+        FontSize::Normal => 16,  // helvR14 actual height
+        FontSize::Large => 21,   // helvR18 actual height
     }
 }
 
-fn font_for_size(size: &FontSize) -> &'static MonoFont<'static> {
+/// Render text using u8g2 proportional fonts.
+fn draw_text_u8g2<D: DrawTarget>(
+    text: &str,
+    x: i32,
+    y: i32,
+    size: &FontSize,
+    color: D::Color,
+    target: &mut D,
+) {
+    let fc = FontColor::Transparent(color);
+    let pos = Point::new(x, y);
     match size {
-        FontSize::Small => &FONT_6X10,
-        FontSize::Normal => &FONT_7X14,
-        FontSize::Large => &FONT_10X20,
+        FontSize::Small => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR10_tr>();
+            let _ = font.render_aligned(
+                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+            );
+        }
+        FontSize::Normal => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR14_tr>();
+            let _ = font.render_aligned(
+                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+            );
+        }
+        FontSize::Large => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR18_tr>();
+            let _ = font.render_aligned(
+                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+            );
+        }
     }
 }
 
-fn font_char_width(size: &FontSize) -> u32 {
-    match size {
-        FontSize::Small => 6,    // FONT_6X10
-        FontSize::Normal => 7,   // FONT_7X14
-        FontSize::Large => 10,   // FONT_10X20
-    }
-}
-
-fn text_width(text: &str, size: &FontSize) -> u32 {
-    text.len() as u32 * font_char_width(size)
+/// Measure the rendered width of text using u8g2 proportional fonts.
+fn text_width_u8g2(text: &str, size: &FontSize) -> u32 {
+    let fallback = || text.len() as u32 * match size {
+        FontSize::Small => 6,
+        FontSize::Normal => 7,
+        FontSize::Large => 10,
+    };
+    let dims = match size {
+        FontSize::Small => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR10_tr>();
+            font.get_rendered_dimensions(text, Point::zero(), VerticalPosition::Baseline)
+        }
+        FontSize::Normal => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR14_tr>();
+            font.get_rendered_dimensions(text, Point::zero(), VerticalPosition::Baseline)
+        }
+        FontSize::Large => {
+            let font = FontRenderer::new::<fonts::u8g2_font_helvR18_tr>();
+            font.get_rendered_dimensions(text, Point::zero(), VerticalPosition::Baseline)
+        }
+    };
+    dims.ok()
+        .and_then(|d| d.bounding_box)
+        .map(|bb| bb.size.width)
+        .unwrap_or_else(fallback)
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 //! [`WidgetId`] handles via methods on [`UiTree`].
 
 use alloc::vec::Vec;
+use embedded_graphics::{prelude::Point, primitives::Rectangle};
 use heapless::Vec as HVec;
 
 use crate::widget::{Widget, WidgetId};
@@ -32,6 +33,31 @@ struct Node {
 }
 
 // ---------------------------------------------------------------------------
+// Dirty-rect helpers
+// ---------------------------------------------------------------------------
+
+/// Compute the smallest rectangle that contains both `a` and `b`.
+fn union_rect(a: Rectangle, b: Rectangle) -> Rectangle {
+    let a_x2 = a.top_left.x + a.size.width as i32;
+    let a_y2 = a.top_left.y + a.size.height as i32;
+    let b_x2 = b.top_left.x + b.size.width as i32;
+    let b_y2 = b.top_left.y + b.size.height as i32;
+
+    let min_x = a.top_left.x.min(b.top_left.x);
+    let min_y = a.top_left.y.min(b.top_left.y);
+    let max_x = a_x2.max(b_x2);
+    let max_y = a_y2.max(b_y2);
+
+    Rectangle::new(
+        Point::new(min_x, min_y),
+        embedded_graphics::geometry::Size::new(
+            (max_x - min_x) as u32,
+            (max_y - min_y) as u32,
+        ),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // UiTree
 // ---------------------------------------------------------------------------
 
@@ -45,6 +71,9 @@ pub struct UiTree {
     free: Vec<WidgetId>,
     /// The widget that currently holds keyboard / input focus.
     focus: Option<WidgetId>,
+    /// Accumulated dirty region — the union of all widgets marked dirty since
+    /// the last call to [`clear_dirty_rect`](UiTree::clear_dirty_rect).
+    dirty_rect: Option<Rectangle>,
 }
 
 impl UiTree {
@@ -62,6 +91,7 @@ impl UiTree {
             root: 0,
             free: Vec::new(),
             focus: None,
+            dirty_rect: None,
         }
     }
 
@@ -233,8 +263,22 @@ impl UiTree {
     }
 
     /// Mark a widget (and its ancestors) as dirty so the renderer knows to
-    /// repaint.
+    /// repaint.  Also expands the accumulated dirty rectangle to include the
+    /// widget's bounds.
     pub fn mark_dirty(&mut self, id: WidgetId) {
+        // Expand the dirty rect to include this widget's bounds.
+        if let Some(node) = self.nodes.get(id as usize).filter(|n| n.alive) {
+            let c = node.widget.common();
+            let widget_rect = Rectangle::new(
+                Point::new(c.pos.x, c.pos.y),
+                embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+            );
+            self.dirty_rect = Some(match self.dirty_rect {
+                Some(existing) => union_rect(existing, widget_rect),
+                None => widget_rect,
+            });
+        }
+
         let mut current = Some(id);
         while let Some(cid) = current {
             if let Some(node) = self.nodes.get_mut(cid as usize).filter(|n| n.alive) {
@@ -244,6 +288,16 @@ impl UiTree {
                 break;
             }
         }
+    }
+
+    /// Return the accumulated dirty rectangle, or `None` if nothing is dirty.
+    pub fn get_dirty_rect(&self) -> Option<Rectangle> {
+        self.dirty_rect
+    }
+
+    /// Clear the accumulated dirty rectangle.
+    pub fn clear_dirty_rect(&mut self) {
+        self.dirty_rect = None;
     }
 
     /// Clear the dirty flag on every widget in the tree.
