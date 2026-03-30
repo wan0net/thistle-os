@@ -78,7 +78,24 @@ impl UiTree {
     }
 
     /// Set input focus to the given widget (or `None` to clear).
+    ///
+    /// Also updates the `focused` flag on the old and new widgets so the
+    /// renderer can draw a focus ring.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
+        // Clear focused on the previous widget.
+        if let Some(old) = self.focus {
+            if let Some(node) = self.nodes.get_mut(old as usize).filter(|n| n.alive) {
+                node.widget.common_mut().focused = false;
+                node.widget.common_mut().dirty = true;
+            }
+        }
+        // Set focused on the new widget.
+        if let Some(new) = id {
+            if let Some(node) = self.nodes.get_mut(new as usize).filter(|n| n.alive) {
+                node.widget.common_mut().focused = true;
+                node.widget.common_mut().dirty = true;
+            }
+        }
         self.focus = id;
     }
 

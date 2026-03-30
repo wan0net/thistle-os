@@ -26,6 +26,11 @@ pub struct Theme {
     pub success: (u8, u8, u8),
     pub warning: (u8, u8, u8),
 
+    /// Overlay color for pressed/active widgets.
+    pub pressed: (u8, u8, u8),
+    /// Border color drawn around focused widgets.
+    pub focus_border: (u8, u8, u8),
+
     pub font_size_small: u32,
     pub font_size_normal: u32,
     pub font_size_large: u32,
@@ -44,6 +49,8 @@ impl Theme {
             error: (0, 0, 0),
             success: (0, 0, 0),
             warning: (0, 0, 0),
+            pressed: (0, 0, 0),
+            focus_border: (0, 0, 0),
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,
@@ -62,6 +69,8 @@ impl Theme {
             error: (207, 102, 121),     // muted red
             success: (76, 175, 80),     // green
             warning: (255, 183, 77),    // amber
+            pressed: (60, 60, 60),      // lighter gray overlay
+            focus_border: (187, 134, 252), // primary color
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,
@@ -81,6 +90,8 @@ impl Theme {
             error: (239, 68, 68),         // #EF4444
             success: (34, 197, 94),       // #22C55E
             warning: (245, 158, 11),      // #F59E0B
+            pressed: (50, 50, 48),        // slightly lighter than surface
+            focus_border: (37, 99, 235),  // primary blue
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,

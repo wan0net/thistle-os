@@ -72,6 +72,18 @@ pub struct CommonProps {
     pub padding: (u16, u16, u16, u16),
     pub visible: bool,
     pub dirty: bool,
+    /// Border width in pixels (0 = no border).
+    pub border_width: u16,
+    /// Border color (semantic).
+    pub border_color: Color,
+    /// Corner radius for rounded borders (0 = square corners).
+    pub border_radius: u16,
+    /// Background color. Canonical location — checked before widget-specific bg.
+    pub bg_color: Option<Color>,
+    /// `true` while the widget is being touched / pressed down.
+    pub pressed: bool,
+    /// `true` when the widget holds keyboard focus.
+    pub focused: bool,
 }
 
 impl Default for CommonProps {
@@ -85,6 +97,12 @@ impl Default for CommonProps {
             padding: (0, 0, 0, 0),
             visible: true,
             dirty: true,
+            border_width: 0,
+            border_color: Color::TextSecondary,
+            border_radius: 0,
+            bg_color: None,
+            pressed: false,
+            focused: false,
         }
     }
 }
@@ -380,6 +398,63 @@ impl Default for StatusBarWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Switch — toggle on/off
+// ---------------------------------------------------------------------------
+
+/// Toggle switch (on/off).
+#[derive(Clone, Debug)]
+pub struct SwitchWidget {
+    pub common: CommonProps,
+    pub on: bool,
+    pub on_color: Color,
+    pub off_color: Color,
+    pub on_change: Option<OnChange>,
+}
+
+impl Default for SwitchWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps {
+                width_hint: SizeHint::Fixed(44),
+                height_hint: SizeHint::Fixed(24),
+                ..CommonProps::default()
+            },
+            on: false,
+            on_color: Color::Primary,
+            off_color: Color::TextSecondary,
+            on_change: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Checkbox — check/uncheck with label
+// ---------------------------------------------------------------------------
+
+/// Checkbox with an optional label to the right.
+#[derive(Clone, Debug)]
+pub struct CheckboxWidget {
+    pub common: CommonProps,
+    pub checked: bool,
+    pub label: HString<64>,
+    pub on_change: Option<OnChange>,
+}
+
+impl Default for CheckboxWidget {
+    fn default() -> Self {
+        Self {
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(20),
+                ..CommonProps::default()
+            },
+            checked: false,
+            label: HString::new(),
+            on_change: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Widget enum
 // ---------------------------------------------------------------------------
 
@@ -396,6 +471,8 @@ pub enum Widget {
     Divider(DividerWidget),
     Spacer(SpacerWidget),
     StatusBar(StatusBarWidget),
+    Switch(SwitchWidget),
+    Checkbox(CheckboxWidget),
 }
 
 impl Widget {
@@ -412,6 +489,8 @@ impl Widget {
             Widget::Divider(w) => &w.common,
             Widget::Spacer(w) => &w.common,
             Widget::StatusBar(w) => &w.common,
+            Widget::Switch(w) => &w.common,
+            Widget::Checkbox(w) => &w.common,
         }
     }
 
@@ -428,6 +507,8 @@ impl Widget {
             Widget::Divider(w) => &mut w.common,
             Widget::Spacer(w) => &mut w.common,
             Widget::StatusBar(w) => &mut w.common,
+            Widget::Switch(w) => &mut w.common,
+            Widget::Checkbox(w) => &mut w.common,
         }
     }
 }

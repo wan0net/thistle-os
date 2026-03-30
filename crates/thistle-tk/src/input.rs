@@ -81,6 +81,12 @@ fn dispatch_touch_down(tree: &mut UiTree, x: i32, y: i32) -> bool {
         tree.set_focus(Some(hit));
     }
 
+    // Set pressed state on the hit widget.
+    if let Some(w) = tree.get_mut(hit) {
+        w.common_mut().pressed = true;
+    }
+    tree.mark_dirty(hit);
+
     // Record initial touch position for scroll tracking.
     LAST_TOUCH_Y.store(y, Ordering::Relaxed);
 
@@ -90,6 +96,9 @@ fn dispatch_touch_down(tree: &mut UiTree, x: i32, y: i32) -> bool {
 fn dispatch_touch_up(tree: &mut UiTree, x: i32, y: i32) -> bool {
     // Clear scroll tracking state.
     LAST_TOUCH_Y.store(-1, Ordering::Relaxed);
+
+    // Clear pressed state on all widgets via a full tree walk.
+    clear_all_pressed(tree);
 
     let Some(hit) = tree.find_at_point(x, y) else {
         return false;
@@ -108,7 +117,58 @@ fn dispatch_touch_up(tree: &mut UiTree, x: i32, y: i32) -> bool {
         return true;
     }
 
+    // Handle Switch toggle on tap.
+    if let Some(Widget::Switch(_)) = tree.get(hit) {
+        let (on_change, id, new_state) = {
+            let Widget::Switch(sw) = tree.get_mut(hit).unwrap() else {
+                unreachable!()
+            };
+            sw.on = !sw.on;
+            (sw.on_change, sw.common.id, sw.on)
+        };
+        tree.mark_dirty(hit);
+        if let Some(cb) = on_change {
+            cb(id, if new_state { "on" } else { "off" });
+        }
+        return true;
+    }
+
+    // Handle Checkbox toggle on tap.
+    if let Some(Widget::Checkbox(_)) = tree.get(hit) {
+        let (on_change, id, new_state) = {
+            let Widget::Checkbox(cb_w) = tree.get_mut(hit).unwrap() else {
+                unreachable!()
+            };
+            cb_w.checked = !cb_w.checked;
+            (cb_w.on_change, cb_w.common.id, cb_w.checked)
+        };
+        tree.mark_dirty(hit);
+        if let Some(cb) = on_change {
+            cb(id, if new_state { "checked" } else { "unchecked" });
+        }
+        return true;
+    }
+
     false
+}
+
+/// Clear the `pressed` flag on every widget in the tree.
+fn clear_all_pressed(tree: &mut UiTree) {
+    let root = tree.root();
+    // Collect ids first to avoid borrow issues.
+    let mut ids = alloc::vec::Vec::new();
+    tree.walk(root, &mut |id, w| {
+        if w.common().pressed {
+            ids.push(id);
+        }
+        true
+    });
+    for id in ids {
+        if let Some(w) = tree.get_mut(id) {
+            w.common_mut().pressed = false;
+        }
+        tree.mark_dirty(id);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ use embedded_graphics::{
     },
     pixelcolor::{BinaryColor, PixelColor, Rgb565},
     prelude::*,
-    primitives::{PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Line},
+    primitives::{Circle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Line},
     text::Text,
 };
 
@@ -83,6 +83,114 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// Common background + border rendering for all widgets
+// ---------------------------------------------------------------------------
+
+/// Draw the common background fill, pressed overlay, border, and focus ring
+/// for any widget.  Called before widget-specific rendering.
+fn draw_widget_bg_and_border<D, M>(
+    widget: &Widget,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+    scroll_y: i32,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = widget.common();
+    let y = c.pos.y - scroll_y;
+    let rect = Rectangle::new(
+        Point::new(c.pos.x, y),
+        embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
+    );
+
+    // Background fill (from CommonProps — canonical location).
+    if let Some(bg) = c.bg_color {
+        let bg_color = if c.pressed {
+            // When pressed, use the theme's pressed color instead.
+            let (r, g, b) = theme.pressed;
+            mapper.map(Color::Rgb(r, g, b), theme)
+        } else {
+            mapper.map(bg, theme)
+        };
+        let style = PrimitiveStyleBuilder::new().fill_color(bg_color).build();
+        if c.border_radius > 0 {
+            let rounded = RoundedRectangle::with_equal_corners(
+                rect,
+                embedded_graphics::geometry::Size::new(
+                    c.border_radius as u32,
+                    c.border_radius as u32,
+                ),
+            );
+            let _ = rounded.into_styled(style).draw(target);
+        } else {
+            let _ = rect.into_styled(style).draw(target);
+        }
+    } else if c.pressed {
+        // No bg_color but pressed — draw the pressed overlay.
+        let (r, g, b) = theme.pressed;
+        let pressed_color = mapper.map(Color::Rgb(r, g, b), theme);
+        let style = PrimitiveStyleBuilder::new().fill_color(pressed_color).build();
+        if c.border_radius > 0 {
+            let rounded = RoundedRectangle::with_equal_corners(
+                rect,
+                embedded_graphics::geometry::Size::new(
+                    c.border_radius as u32,
+                    c.border_radius as u32,
+                ),
+            );
+            let _ = rounded.into_styled(style).draw(target);
+        } else {
+            let _ = rect.into_styled(style).draw(target);
+        }
+    }
+
+    // Border
+    if c.border_width > 0 {
+        let border_color = mapper.map(c.border_color, theme);
+        let style = PrimitiveStyleBuilder::new()
+            .stroke_color(border_color)
+            .stroke_width(c.border_width as u32)
+            .build();
+        if c.border_radius > 0 {
+            let rounded = RoundedRectangle::with_equal_corners(
+                rect,
+                embedded_graphics::geometry::Size::new(
+                    c.border_radius as u32,
+                    c.border_radius as u32,
+                ),
+            );
+            let _ = rounded.into_styled(style).draw(target);
+        } else {
+            let _ = rect.into_styled(style).draw(target);
+        }
+    }
+
+    // Focus ring — draw an extra 1px border in the focus color.
+    if c.focused {
+        let (r, g, b) = theme.focus_border;
+        let focus_color = mapper.map(Color::Rgb(r, g, b), theme);
+        let style = PrimitiveStyleBuilder::new()
+            .stroke_color(focus_color)
+            .stroke_width(2)
+            .build();
+        if c.border_radius > 0 {
+            let rounded = RoundedRectangle::with_equal_corners(
+                rect,
+                embedded_graphics::geometry::Size::new(
+                    c.border_radius as u32,
+                    c.border_radius as u32,
+                ),
+            );
+            let _ = rounded.into_styled(style).draw(target);
+        } else {
+            let _ = rect.into_styled(style).draw(target);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Recursive per-widget rendering
 // ---------------------------------------------------------------------------
 
@@ -104,15 +212,20 @@ fn render_node<D, M>(
         return;
     }
 
+    // Draw common background, borders, and focus ring for every widget.
+    draw_widget_bg_and_border(widget, theme, mapper, target, scroll_y);
+
     match widget {
         Widget::Container(c) => {
-            // Optionally fill the container background (not offset — the
-            // container itself sits at its layout position).
-            if let Some(bg) = c.bg_color {
-                let color = mapper.map(bg, theme);
-                let rect = widget_rect_scrolled(widget, scroll_y);
-                let style = PrimitiveStyleBuilder::new().fill_color(color).build();
-                let _ = rect.into_styled(style).draw(target);
+            // Container-specific bg_color fallback (backward compat) — only
+            // draw if CommonProps.bg_color was not already set.
+            if c.common.bg_color.is_none() {
+                if let Some(bg) = c.bg_color {
+                    let color = mapper.map(bg, theme);
+                    let rect = widget_rect_scrolled(widget, scroll_y);
+                    let style = PrimitiveStyleBuilder::new().fill_color(color).build();
+                    let _ = rect.into_styled(style).draw(target);
+                }
             }
         }
         Widget::Label(l) => {
@@ -141,6 +254,12 @@ fn render_node<D, M>(
         }
         Widget::StatusBar(sb) => {
             draw_status_bar(sb, scroll_y, theme, mapper, target);
+        }
+        Widget::Switch(sw) => {
+            draw_switch(sw, scroll_y, theme, mapper, target);
+        }
+        Widget::Checkbox(cb) => {
+            draw_checkbox(cb, scroll_y, theme, mapper, target);
         }
     }
 
@@ -261,7 +380,13 @@ fn draw_button<D, M>(
     M: ColorMapper,
 {
     let c = &button.common;
-    let bg = mapper.map(button.bg_color, theme);
+    // Use pressed color when the button is being pressed.
+    let bg = if c.pressed {
+        let (r, g, b) = theme.pressed;
+        mapper.map(Color::Rgb(r, g, b), theme)
+    } else {
+        mapper.map(button.bg_color, theme)
+    };
     let rect = Rectangle::new(
         Point::new(c.pos.x, c.pos.y - scroll_y),
         embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
@@ -306,15 +431,21 @@ fn draw_text_input<D, M>(
     let c = &input.common;
     let dy = c.pos.y - scroll_y;
 
-    // Border rectangle.
-    let border_color = mapper.map(input.border_color, theme);
+    // Border rectangle — use focus color when focused.
+    let border_color = if c.focused {
+        let (r, g, b) = theme.focus_border;
+        mapper.map(Color::Rgb(r, g, b), theme)
+    } else {
+        mapper.map(input.border_color, theme)
+    };
+    let stroke_w = if c.focused { 2 } else { 1 };
     let rect = Rectangle::new(
         Point::new(c.pos.x, dy),
         embedded_graphics::geometry::Size::new(c.size.w, c.size.h),
     );
     let border_style = PrimitiveStyleBuilder::new()
         .stroke_color(border_color)
-        .stroke_width(1)
+        .stroke_width(stroke_w)
         .build();
     let _ = rect.into_styled(border_style).draw(target);
 
@@ -547,6 +678,126 @@ fn draw_status_bar<D, M>(
         let tw = text_width(sb.right_text.as_str(), &FontSize::Small) as i32;
         let rx = c.pos.x + c.size.w as i32 - tw - 4;
         let _ = Text::new(sb.right_text.as_str(), Point::new(rx, ty), text_style).draw(target);
+    }
+}
+
+fn draw_switch<D, M>(
+    sw: &crate::widget::SwitchWidget,
+    scroll_y: i32,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &sw.common;
+    let dy = c.pos.y - scroll_y;
+    let w = c.size.w;
+    let h = c.size.h;
+
+    // Track — rounded rectangle.
+    let track_color = if sw.on {
+        mapper.map(sw.on_color, theme)
+    } else {
+        mapper.map(sw.off_color, theme)
+    };
+    let radius = h / 2;
+    let rect = Rectangle::new(
+        Point::new(c.pos.x, dy),
+        embedded_graphics::geometry::Size::new(w, h),
+    );
+    let track_style = PrimitiveStyleBuilder::new().fill_color(track_color).build();
+    let rounded = RoundedRectangle::with_equal_corners(
+        rect,
+        embedded_graphics::geometry::Size::new(radius, radius),
+    );
+    let _ = rounded.into_styled(track_style).draw(target);
+
+    // Thumb — filled circle (white), inset 2px.
+    let thumb_diameter = h.saturating_sub(4);
+    let thumb_y = dy + 2;
+    let thumb_x = if sw.on {
+        c.pos.x + w as i32 - thumb_diameter as i32 - 2
+    } else {
+        c.pos.x + 2
+    };
+    let thumb_color = mapper.map(Color::White, theme);
+    let thumb_style = PrimitiveStyleBuilder::new().fill_color(thumb_color).build();
+    let _ = Circle::new(
+        Point::new(thumb_x, thumb_y),
+        thumb_diameter,
+    )
+    .into_styled(thumb_style)
+    .draw(target);
+}
+
+fn draw_checkbox<D, M>(
+    cb: &crate::widget::CheckboxWidget,
+    scroll_y: i32,
+    theme: &Theme,
+    mapper: &M,
+    target: &mut D,
+) where
+    D: DrawTarget<Color = M::TargetColor>,
+    M: ColorMapper,
+{
+    let c = &cb.common;
+    let dy = c.pos.y - scroll_y;
+    let box_size: u32 = 16;
+
+    // Center the check box vertically within the widget height.
+    let box_y = dy + ((c.size.h as i32 - box_size as i32) / 2).max(0);
+    let box_rect = Rectangle::new(
+        Point::new(c.pos.x, box_y),
+        embedded_graphics::geometry::Size::new(box_size, box_size),
+    );
+
+    if cb.checked {
+        // Filled square.
+        let fill_color = mapper.map(Color::Primary, theme);
+        let style = PrimitiveStyleBuilder::new().fill_color(fill_color).build();
+        let _ = box_rect.into_styled(style).draw(target);
+
+        // Draw a simple checkmark using two lines (white).
+        let check_color = mapper.map(Color::White, theme);
+        let line_style = PrimitiveStyleBuilder::new()
+            .stroke_color(check_color)
+            .stroke_width(2)
+            .build();
+        // Short descending stroke then long ascending stroke.
+        let bx = c.pos.x;
+        let _ = Line::new(
+            Point::new(bx + 3, box_y + box_size as i32 / 2),
+            Point::new(bx + 6, box_y + box_size as i32 - 4),
+        )
+        .into_styled(line_style)
+        .draw(target);
+        let _ = Line::new(
+            Point::new(bx + 6, box_y + box_size as i32 - 4),
+            Point::new(bx + box_size as i32 - 3, box_y + 3),
+        )
+        .into_styled(line_style)
+        .draw(target);
+    } else {
+        // Border only.
+        let border_color = mapper.map(Color::TextSecondary, theme);
+        let style = PrimitiveStyleBuilder::new()
+            .stroke_color(border_color)
+            .stroke_width(1)
+            .build();
+        let _ = box_rect.into_styled(style).draw(target);
+    }
+
+    // Label to the right of the checkbox.
+    if !cb.label.is_empty() {
+        let text_color = mapper.map(Color::Text, theme);
+        let font = font_for_size(&FontSize::Normal);
+        let text_style = MonoTextStyle::new(font, text_color);
+        let fh = font_height(&FontSize::Normal) as i32;
+        let tx = c.pos.x + box_size as i32 + 6;
+        let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
+        let _ = Text::new(cb.label.as_str(), Point::new(tx, ty), text_style).draw(target);
     }
 }
 
