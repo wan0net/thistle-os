@@ -25,6 +25,7 @@ extern "C" {
     fn driver_loader_init() -> i32;
     fn driver_loader_load_with_config(path: *const c_char, config: *const c_char) -> i32;
     fn board_init() -> i32;
+    fn board_detect_and_write() -> i32;
 }
 
 // SPI/I2C init — only on real hardware
@@ -52,11 +53,27 @@ fn load_config(config_path: &str) -> i32 {
     let json = match fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(_) => {
-            // Fall back to compiled board_init() + start all drivers
-            let ret = unsafe { board_init() };
-            if ret != ESP_OK { return ret; }
-            unsafe { crate::driver_manager::driver_manager_start_all(); }
-            return ESP_OK;
+            // No board.json — try I2C auto-detection to create one
+            let detect_ret = unsafe { board_detect_and_write() };
+            if detect_ret == ESP_OK {
+                // Detection wrote board.json to SPIFFS — retry loading it
+                match fs::read_to_string(config_path) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        // Detection succeeded but file still unreadable — safe mode
+                        let ret = unsafe { board_init() };
+                        if ret != ESP_OK { return ret; }
+                        unsafe { crate::driver_manager::driver_manager_start_all(); }
+                        return ESP_OK;
+                    }
+                }
+            } else {
+                // Detection not available or failed — fall back to compiled board_init()
+                let ret = unsafe { board_init() };
+                if ret != ESP_OK { return ret; }
+                unsafe { crate::driver_manager::driver_manager_start_all(); }
+                return ESP_OK;
+            }
         }
     };
 

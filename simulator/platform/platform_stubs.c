@@ -382,6 +382,9 @@ void __attribute__((used)) esp_restart(void) { printf("esp_restart() — exiting
 /* hal_storage_get_total/free_bytes and wifi_manager_scan_start/get_count
  * now provided by Rust thistle_shell.rs — no C stubs needed */
 
+/* ── Board auto-detection stub (real impl in board_fallback.c) ────── */
+int board_detect_and_write(void) { return -1; /* ESP_ERR_NOT_SUPPORTED — sim uses board_simulator.c */ }
+
 /* ── Modem PPP stubs ───────────────────────────────────────────────── */
 int drv_a7682e_start_ppp(void) { return -1; }
 int drv_a7682e_stop_ppp(void) { return 0; }
