@@ -23,7 +23,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin
@@ -35,14 +35,14 @@ jobs:
           restore-keys: rust-wasm-${{ runner.os }}-
 
       - name: Cache Rust WASM build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: components/kernel_rs/target
           key: rust-wasm-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock', 'components/kernel_rs/src/**', 'crates/thistle-tk/src/**') }}
           restore-keys: rust-wasm-target-${{ runner.os }}-
 
       - name: Cache LVGL
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: managed_components/lvgl__lvgl
           key: lvgl-v9.2.2
