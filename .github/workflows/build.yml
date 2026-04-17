@@ -295,7 +295,7 @@ jobs:
           key: rust-esp-recovery-${{ runner.os }}-v1
           restore-keys: rust-esp-recovery-${{ runner.os }}-
 
-      - name: Install Rust + espup
+      - name: Install Rust + espup + ldproxy
         shell: bash
         run: |
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
@@ -307,6 +307,11 @@ jobs:
           fi
           if [ ! -f "$HOME/export-esp.sh" ]; then
             espup install
+          fi
+          # ldproxy is the linker wrapper cargo invokes for xtensa-esp32s3-espidf.
+          # espup installs the toolchain but not ldproxy; cargo install it explicitly.
+          if ! command -v ldproxy &> /dev/null; then
+            cargo install ldproxy
           fi
 
       - name: Cache recovery target dir
