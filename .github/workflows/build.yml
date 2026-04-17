@@ -276,3 +276,56 @@ jobs:
         with:
           name: trivy-results
           path: trivy-results.sarif
+
+  recovery-build:
+    name: Build Recovery OS (Rust/esp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache Rust ESP toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            ~/.rustup
+            ~/.espup
+          key: rust-esp-recovery-${{ runner.os }}-v1
+          restore-keys: rust-esp-recovery-${{ runner.os }}-
+
+      - name: Install Rust + espup
+        shell: bash
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          . "$HOME/.cargo/env"
+          if ! command -v espup &> /dev/null; then
+            cargo install espup
+          fi
+          if [ ! -f "$HOME/export-esp.sh" ]; then
+            espup install
+          fi
+
+      - name: Cache recovery target dir
+        uses: actions/cache@v4
+        with:
+          path: recovery/target
+          key: recovery-target-${{ runner.os }}-${{ hashFiles('recovery/Cargo.lock', 'recovery/src/**') }}
+          restore-keys: recovery-target-${{ runner.os }}-
+
+      - name: Build recovery
+        shell: bash
+        working-directory: recovery
+        run: |
+          . "$HOME/.cargo/env"
+          . "$HOME/export-esp.sh"
+          cargo build --release
+
+      - name: Upload recovery artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: thistle-recovery
+          path: recovery/target/xtensa-esp32s3-espidf/release/thistleos-recovery
