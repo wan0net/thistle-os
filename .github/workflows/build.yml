@@ -28,8 +28,9 @@ jobs:
           path: |
             /root/.cargo
             /root/.rustup
-          key: rust-esp-toolchain-v2
-          restore-keys: rust-esp-toolchain-
+          key: rust-esp-toolchain-v3-espup016
+          # Don't restore from older prefixes — older caches have espup 0.17.0
+          # contents that break the build. Only match the fully-qualified key.
 
       - name: Install Rust ESP toolchain
         shell: bash
@@ -40,8 +41,10 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
           fi
           . "$HOME/.cargo/env"
-          if ! command -v espup &> /dev/null; then
-            cargo install espup
+          # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
+          # that aborts with "Unsuported file extension: 'part'" during install.
+          if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
+            cargo install espup --version 0.16.0 --force
           fi
           if ! command -v ldproxy &>/dev/null; then
             espup install
@@ -292,8 +295,9 @@ jobs:
             ~/.cargo
             ~/.rustup
             ~/.espup
-          key: rust-esp-recovery-${{ runner.os }}-v1
-          restore-keys: rust-esp-recovery-${{ runner.os }}-
+          key: rust-esp-recovery-${{ runner.os }}-v2-espup016
+          # Don't restore from older prefixes — v1 caches contain corrupt
+          # espup 0.17.0 state that reproduces the "part" extension error.
 
       - name: Install Rust + espup + ldproxy
         shell: bash
@@ -302,9 +306,14 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
           . "$HOME/.cargo/env"
-          if ! command -v espup &> /dev/null; then
-            cargo install espup
+          # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
+          # that aborts with "Unsuported file extension: 'part'" during install.
+          if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
+            cargo install espup --version 0.16.0 --force
           fi
+          # Clear any stale .part files from prior interrupted runs so espup
+          # doesn't try to re-use them.
+          find "$HOME/.rustup" "$HOME/.espup" -name '*.part' -delete 2>/dev/null || true
           if [ ! -f "$HOME/export-esp.sh" ]; then
             espup install
           fi
