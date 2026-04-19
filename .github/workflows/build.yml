@@ -22,7 +22,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust ESP toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: rust-cache
         with:
           path: |
@@ -54,7 +54,7 @@ jobs:
           # adds cargo to PATH when invoking the Rust build.
 
       - name: Cache ESP-IDF + Rust builds
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             build
@@ -127,7 +127,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin
@@ -139,7 +139,7 @@ jobs:
           restore-keys: rust-stable-${{ runner.os }}-
 
       - name: Cache Cargo build artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: components/kernel_rs/target
           key: rust-test-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
@@ -289,7 +289,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust ESP toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo
@@ -324,7 +324,7 @@ jobs:
           fi
 
       - name: Cache recovery target dir
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: recovery/target
           key: recovery-target-${{ runner.os }}-${{ hashFiles('recovery/Cargo.lock', 'recovery/src/**') }}
