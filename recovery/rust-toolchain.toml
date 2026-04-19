@@ -1,0 +1,15 @@
+# Pin this crate to Espressif's fork of Rust (the `esp` toolchain),
+# which ships the Xtensa LLVM backend required for the
+# `xtensa-esp32s3-espidf` target configured in .cargo/config.toml.
+#
+# Install with:
+#   cargo install espup && espup install
+#
+# Without this file Cargo defaults to `stable`, whose LLVM has no
+# Xtensa backend, and builds fail with:
+#   'esp32s3' is not a recognized processor for this target
+#   error[E0463]: can't find crate for `core`
+#
+# See issue #15.
+[toolchain]
+channel = "esp"

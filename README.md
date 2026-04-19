@@ -134,7 +134,7 @@ ThistleOS has a built-in app store that downloads apps, firmware updates, and dr
 ```
 Device                          GitHub Pages (or any HTTPS host)
   │                                │
-  ├─ Fetch catalog.json ──────────►│ { entries: [ {type:"app", url:...}, ... ] }
+  ├─ Fetch catalog.json ───────────►│ { entries: [ {type:"app", url:...}, ... ] }
   │                                │
   ├─ Download .app.elf ◄───────────│ Binary + SHA-256 hash
   │                                │
@@ -275,7 +275,7 @@ Signing and verification at every level — from boot to apps:
 ┌─────────────────────────────────────────────┐
 │  eFuse (optional, production only)          │
 │  Burns Recovery public key hash — permanent │
-├─────────────────────────────────────────────┤
+├────────────────────────────────────────────┤
 │  Recovery OS (ota_0) — IMMUTABLE            │
 │  Holds Ed25519 public key                   │
 │  Verifies ThistleOS firmware signature      │
@@ -294,7 +294,7 @@ Signing and verification at every level — from boot to apps:
 │  Signed apps: full permissions              │
 │  Unsigned apps: PERM_IPC only               │
 │  Each app declares required capabilities    │
-└─────────────────────────────────────────────┘
+└───────────────────────────────────────────┘
 ```
 
 | Layer | What's verified | What happens on failure |
@@ -358,7 +358,8 @@ The simulator runs the **real kernel and app code** in an SDL2 window with:
 **Option A — Flash Recovery OS and let it self-provision:**
 ```bash
 cd recovery
-cargo build --release
+. $HOME/export-esp.sh          # puts xtensa-esp-elf linker on PATH (from espup install)
+cargo build --release          # rust-toolchain.toml pins Rust to the `esp` channel
 espflash flash target/xtensa-esp32s3-espidf/release/thistleos-recovery
 # Connect to "ThistleOS-Recovery" WiFi → follow captive portal
 ```
@@ -432,9 +433,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 - [ ] Port remaining apps from C/LVGL to Rust/thistle-tk
 - [ ] Compile existing drivers as standalone .drv.elf files
 - [ ] Move built-in apps to .app.elf on SPIFFS
-- [ ] Wire display server into boot sequence
-
-### Planned
+- [ ] Wire display server into boot sequence### Planned
 - [ ] Permission enforcement at syscall boundary
 - [ ] Claude API integration in AI assistant
 - [ ] WASM web simulator with terminal + app store
