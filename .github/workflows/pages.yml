@@ -48,7 +48,7 @@ jobs:
           key: lvgl-v9.2.2
 
       - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v16
         with:
           version: 3.1.51
           actions-cache-folder: 'emsdk-cache'
