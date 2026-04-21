@@ -102,7 +102,7 @@ jobs:
           cp simulator/sdcard/appstore/catalog.json _site/apps/ 2>/dev/null || true
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
 
   deploy:
     name: Deploy to GitHub Pages
