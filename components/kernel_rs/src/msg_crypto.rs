@@ -241,7 +241,7 @@ fn encrypt_message(
 
     // 1. Generate random nonce
     let mut nonce = [0u8; NONCE_LEN];
-    if getrandom::getrandom(&mut nonce).is_err() {
+    if getrandom::fill(&mut nonce).is_err() {
         return Err(ESP_FAIL);
     }
 
