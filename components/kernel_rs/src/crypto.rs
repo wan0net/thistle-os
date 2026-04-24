@@ -15,10 +15,10 @@
 
 use std::os::raw::c_char;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::{Sha256, Digest};
-use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit, generic_array::GenericArray};
+use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit as AesKeyInit, generic_array::GenericArray};
 use ed25519_dalek::{Signer, Verifier};
 
 const ESP_OK: i32 = 0;
@@ -53,7 +53,7 @@ fn sw_sha256(data: &[u8], hash_out: &mut [u8; 32]) {
 }
 
 fn sw_hmac_sha256(key: &[u8], data: &[u8], mac_out: &mut [u8; 32]) {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).unwrap();
+    let mut mac = HmacSha256::new_from_slice(key).unwrap();
     mac.update(data);
     let result = mac.finalize().into_bytes();
     mac_out.copy_from_slice(&result);
