@@ -12,8 +12,8 @@
 
 use std::sync::Mutex;
 
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-use hmac::{Hmac, Mac};
+use aes::cipher::{BlockEncrypt, KeyInit as AesKeyInit, generic_array::GenericArray};
+use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
@@ -169,7 +169,7 @@ fn aes256_ctr_process(key: &[u8; 32], nonce: &[u8; 16], input: &[u8], output: &m
 
 /// HMAC-SHA256 with output to a 32-byte array.
 fn compute_hmac(key: &[u8; 32], data: &[u8]) -> [u8; 32] {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).unwrap();
+    let mut mac = HmacSha256::new_from_slice(key).unwrap();
     mac.update(data);
     let result = mac.finalize().into_bytes();
     let mut out = [0u8; 32];
