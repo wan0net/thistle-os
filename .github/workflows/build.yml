@@ -95,7 +95,7 @@ jobs:
           THISTLE_SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
         shell: bash
         run: |
-          pip3 install PyNaCl
+          python3 -m pip install PyNaCl
           python3 -c "
           import nacl.signing, os
           key_hex = os.environ['THISTLE_SIGNING_KEY']
