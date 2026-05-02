@@ -59,17 +59,17 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="../index.html">ThistleOS</a> / <a href="../drivers.html">Drivers</a> / drv_light_ltr553</div>
       <h1>drv_light_ltr553</h1>
-      <p class="lead">Ambient light and proximity sensor driver for the LTR-553ALS. Reads lux and proximity via I2C.</p>
+      <p class="lead">Ambient light and proximity sensor driver for the LTR-553ALS. The Rust path now performs real init and reads, but still needs on-device validation on T-Deck Pro.</p>
     </div>
 
-    <h2>Overview <span class="badge badge-green">Proven</span></h2>
+    <h2>Overview <span class="badge badge-yellow">Partial</span></h2>
     <div class="table-wrap">
       <table>
         <tbody>
           <tr><td><strong>HAL Type</strong></td><td>Light</td></tr>
           <tr><td><strong>Chip</strong></td><td>LTR-553</td></tr>
           <tr><td><strong>Interface</strong></td><td>I2C</td></tr>
-          <tr><td><strong>Description</strong></td><td>Provides ambient light (lux) and proximity distance. Used by the kernel for automatic display brightness adjustment.</td></tr>
+          <tr><td><strong>Description</strong></td><td>Provides ambient light (lux) and proximity reads over I2C. The active Rust implementation now ports the register init and read path, but still needs hardware verification on T-Deck Pro.</td></tr>
         </tbody>
       </table>
     </div>
@@ -80,7 +80,7 @@
         <tbody>
           <tr><td><strong>Source</strong></td><td><code>components/kernel_rs/src/drv_light_ltr553.rs</code> (324 lines)</td></tr>
           <tr><td><strong>Wraps</strong></td><td>None &mdash; manual I2C register reads</td></tr>
-          <tr><td><strong>Tests</strong></td><td>11 unit tests</td></tr>
+          <tr><td><strong>Tests</strong></td><td>13 focused unit tests</td></tr>
         </tbody>
       </table>
     </div>
@@ -91,7 +91,7 @@
       <table>
         <thead><tr><th>Device</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td><a href="../devices/tdeck-pro.html">T-Deck Pro</a></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td><a href="../devices/tdeck-pro.html">T-Deck Pro</a></td><td><span class="badge badge-yellow">Partial</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -100,7 +100,7 @@
     <p>Configured via <code>board.json</code>: I2C address, <code>pin_sda</code>, <code>pin_scl</code>.</p>
 
     <h2>Known Issues</h2>
-    <p>No known issues.</p>
+    <p>Needs on-device validation for lux stability and proximity behavior on the T-Deck Pro before it should be treated as proven.</p>
 
     <div class="page-footer">
       <span>ThistleOS &mdash; BSD 3-Clause</span>

@@ -201,7 +201,7 @@ ThistleOS ships with 14 apps that demonstrate the platform. All are built-in but
 | **Settings** | WiFi, Bluetooth, Appearance (themes), Drivers (live HAL status), About |
 | **File Manager** | SD card browser with directory navigation |
 | **Reader** | Plain text ebook reader with pagination |
-| **Messenger** | Multi-transport chat (LoRa broadcast, SMS, BLE relay, Internet) |
+| **Messenger** | Messaging app with working LoRa transport and in-progress SMS/BLE/Internet backends |
 | **Navigator** | GPS dashboard with GPX track recording |
 | **Notes** | Text editor with auto-save |
 | **Assistant** | AI chat interface (API integration planned) |
@@ -229,6 +229,15 @@ Themes are JSON files on the SD card. Switch instantly in Settings → Appearanc
 ```
 
 Included themes: Default (monochrome for e-paper), Dark, link42 (dark), link42 Light.
+
+## Current Beta Notes
+
+The current beta is strongest on the primary boards, T-Deck Pro and T-Deck. A few user-visible paths are still being hardened:
+
+- Messenger's LoRa path is the most complete transport today.
+- BLE relay and Internet messaging backends are present as scaffolding but are not yet complete end-to-end transports.
+- The T-Deck Pro light sensor now has a real Rust LTR-553 driver path, but it still needs on-device validation before we should call it proven.
+- Stage 1 of the roadmap is focused on closing these truth gaps before expanding feature scope.
 
 ## Network Abstraction
 

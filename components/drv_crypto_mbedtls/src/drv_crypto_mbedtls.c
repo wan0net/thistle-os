@@ -5,7 +5,6 @@
 // acceleration on ESP32-S3 and other chips) as a HAL crypto driver.
 #include "drv_crypto_mbedtls.h"
 #include "hal/crypto.h"
-#include "mbedtls/sha256.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "esp_random.h"
@@ -22,8 +21,12 @@ static esp_err_t hw_sha256(const uint8_t *data, size_t len, uint8_t *hash_out)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // mbedtls_sha256(): last param 0 = SHA-256 (not SHA-224)
-    int ret = mbedtls_sha256(data, len, hash_out, 0);
+    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (!md_info) {
+        return ESP_FAIL;
+    }
+
+    int ret = mbedtls_md(md_info, data, len, hash_out);
     return (ret == 0) ? ESP_OK : ESP_FAIL;
 }
 

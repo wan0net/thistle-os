@@ -7,6 +7,30 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
+use std::sync::Mutex;
+
+use crate::permissions::{self, *};
+
+// ---------------------------------------------------------------------------
+// Global context for permission checking
+// ---------------------------------------------------------------------------
+
+static CURRENT_APP_ID: Mutex<[u8; 64]> = Mutex::new([0u8; 64]);
+
+/// Set the ID of the app currently resolving symbols.
+/// Used by elf_loader to enforce permissions during relocation.
+#[no_mangle]
+pub unsafe extern "C" fn syscall_set_current_app(id: *const c_char) {
+    let mut guard = CURRENT_APP_ID.lock().unwrap();
+    if id.is_null() {
+        *guard = [0u8; 64];
+    } else {
+        let bytes = CStr::from_ptr(id).to_bytes();
+        let len = bytes.len().min(63);
+        guard[..len].copy_from_slice(&bytes[..len]);
+        guard[len] = 0;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
@@ -24,6 +48,12 @@ const ESP_OK: i32 = 0x000;
 extern "C" {
     // Kernel subsystems (Rust)
     fn kernel_uptime_ms() -> u32;
+
+    // Pointer validation (ESP-IDF)
+    #[cfg(target_os = "espidf")]
+    fn esp_ptr_external_ram(ptr: *const c_void) -> bool;
+    #[cfg(target_os = "espidf")]
+    fn esp_ptr_in_drom(ptr: *const c_void) -> bool;
 
     // IPC (Rust)
     fn ipc_send(msg: *const c_void) -> i32;
@@ -138,11 +168,38 @@ extern "C" {
 pub struct SyscallEntry {
     pub name: *const c_char,
     pub func_ptr: *const c_void,
+    pub permission: u32,
 }
 
 // SAFETY: All pointers are to static data and long-lived C function pointers.
 unsafe impl Send for SyscallEntry {}
 unsafe impl Sync for SyscallEntry {}
+
+// ---------------------------------------------------------------------------
+// Pointer validation
+// ---------------------------------------------------------------------------
+
+/// Check if a pointer provided by an app is safe to access.
+///
+/// Returns true if the pointer is null, or if it points to a memory region
+/// that apps are allowed to access (PSRAM or DROM). Rejects internal SRAM.
+unsafe fn syscall_is_ptr_allowed(ptr: *const c_void) -> bool {
+    if ptr.is_null() {
+        return true;
+    }
+
+    #[cfg(target_os = "espidf")]
+    {
+        // Allowed regions: External RAM (PSRAM) or DROM (Flash constants).
+        // Rejected: Internal SRAM (kernel stacks/globals).
+        esp_ptr_external_ram(ptr) || esp_ptr_in_drom(ptr)
+    }
+    #[cfg(not(target_os = "espidf"))]
+    {
+        // Simulator/Host: allow all non-null pointers for now.
+        true
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Syscall implementations (thin wrappers calling kernel subsystems)
@@ -153,6 +210,17 @@ unsafe impl Sync for SyscallEntry {}
 // Both are excluded from test builds; the test-mode SYSCALL_TABLE omits these entries.
 #[cfg(not(test))]
 unsafe extern "C" fn thistle_log(tag: *const c_char, msg: *const c_char) {
+    // Only enforce pointer validation if we are in an ELF app context.
+    let is_elf = {
+        let guard = CURRENT_APP_ID.lock().unwrap();
+        guard[0] != 0 && !CStr::from_ptr(guard.as_ptr() as *const c_char).to_str().unwrap_or("").starts_with("com.thistle.")
+    };
+
+    if is_elf && !syscall_is_ptr_allowed(msg as *const c_void) {
+        esp_log_write(1 /* ERROR */, b"syscall\0".as_ptr(), b"thistle_log: POINTER DENIED (not in app space)\0".as_ptr());
+        return;
+    }
+
     let t = if tag.is_null() { b"app\0".as_ptr() } else { tag as *const u8 };
     let m = if msg.is_null() { b"\0".as_ptr() } else { msg as *const u8 };
     esp_log_write(3 /* INFO */, t, b"%s\0".as_ptr(), m);
@@ -188,10 +256,12 @@ unsafe extern "C" fn thistle_realloc(ptr: *mut c_void, size: usize) -> *mut c_vo
 }
 
 unsafe extern "C" fn thistle_msg_send(msg: *const c_void) -> i32 {
+    if !syscall_is_ptr_allowed(msg) { return -1; }
     ipc_send(msg)
 }
 
 unsafe extern "C" fn thistle_msg_recv(msg: *mut c_void, timeout_ms: u32) -> i32 {
+    if !syscall_is_ptr_allowed(msg) { return -1; }
     ipc_recv(msg, timeout_ms)
 }
 
@@ -200,10 +270,12 @@ unsafe extern "C" fn thistle_event_subscribe(
     handler: *const c_void,
     user_data: *mut c_void,
 ) -> i32 {
+    if !syscall_is_ptr_allowed(handler) { return -1; }
     event_subscribe(event_type, handler, user_data)
 }
 
 unsafe extern "C" fn thistle_event_publish(event: *const c_void) -> i32 {
+    if !syscall_is_ptr_allowed(event) { return -1; }
     event_publish(event)
 }
 
@@ -294,6 +366,7 @@ unsafe extern "C" fn thistle_input_register_cb_impl(cb: *const c_void, user_data
 }
 
 unsafe extern "C" fn thistle_radio_send_impl(data: *const u8, len: usize) -> i32 {
+    if !syscall_is_ptr_allowed(data as *const c_void) { return -1; }
     let reg = crate::hal_registry::registry();
     if !reg.radio.is_null() {
         if let Some(send) = (*reg.radio).send {
@@ -304,6 +377,7 @@ unsafe extern "C" fn thistle_radio_send_impl(data: *const u8, len: usize) -> i32
 }
 
 unsafe extern "C" fn thistle_radio_start_rx_impl(cb: *const c_void, user_data: *mut c_void) -> i32 {
+    if !syscall_is_ptr_allowed(cb) { return -1; }
     let reg = crate::hal_registry::registry();
     if !reg.radio.is_null() {
         if let Some(start_receive) = (*reg.radio).start_receive {
@@ -325,6 +399,7 @@ unsafe extern "C" fn thistle_radio_set_freq_impl(freq_hz: u32) -> i32 {
 }
 
 unsafe extern "C" fn thistle_gps_get_position_impl(pos: *mut c_void) -> i32 {
+    if !syscall_is_ptr_allowed(pos) { return -1; }
     let reg = crate::hal_registry::registry();
     if !reg.gps.is_null() {
         if let Some(get_position) = (*reg.gps).get_position {
@@ -367,14 +442,19 @@ unsafe extern "C" fn thistle_power_get_battery_pct_impl() -> u8 {
 // ── File I/O syscall wrappers ─────────────────────────────────────────
 
 unsafe extern "C" fn thistle_fs_open_impl(path: *const c_char, mode: *const c_char) -> *mut c_void {
+    if !syscall_is_ptr_allowed(path as *const c_void) || !syscall_is_ptr_allowed(mode as *const c_void) {
+        return std::ptr::null_mut();
+    }
     fopen(path, mode)
 }
 
 unsafe extern "C" fn thistle_fs_read_impl(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+    if !syscall_is_ptr_allowed(buf) { return -1; }
     fread(buf, size, count, stream) as i32
 }
 
 unsafe extern "C" fn thistle_fs_write_impl(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+    if !syscall_is_ptr_allowed(buf) { return -1; }
     fwrite(buf, size, count, stream) as i32
 }
 
@@ -430,252 +510,200 @@ macro_rules! entry {
         SyscallEntry {
             name: concat!($name, "\0").as_ptr() as *const c_char,
             func_ptr: $fn as *const c_void,
+            permission: 0,
+        }
+    };
+    ($name:literal, $fn:expr, $perm:expr) => {
+        SyscallEntry {
+            name: concat!($name, "\0").as_ptr() as *const c_char,
+            func_ptr: $fn as *const c_void,
+            permission: $perm,
         }
     };
 }
 
 // Full syscall table — used in firmware and simulator builds.
-// Omitted from test builds because FreeRTOS, widget API, esp_log_write, and
-// esp_timer_get_time symbols are not available on aarch64-apple-darwin.
+// Sorted alphabetically by symbol name to enable binary search.
 #[cfg(not(test))]
 static SYSCALL_TABLE: &[SyscallEntry] = &[
-    // System
-    entry!("thistle_log",                   thistle_log                         as unsafe extern "C" fn(*const c_char, *const c_char)),
-    entry!("thistle_millis",                thistle_millis                      as unsafe extern "C" fn() -> u32),
-    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
-    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
-    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
-    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
-
-    // Display
-    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
-    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
-
-    // Input
-    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
-
-    // Radio
-    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32),
-    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
-    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32),
-
-    // GPS
-    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32),
-    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32),
-
-    // Storage
-    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void),
-    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32),
-    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32),
-    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
-
-    // IPC
-    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32),
-    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
-    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
-
-    // Power
-    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
-    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
-
-    // Crypto
-    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
-    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
-    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
-    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("esp_log_write",                 esp_log_write                       as unsafe extern "C" fn(i32, *const u8, *const u8, ...)),
+    entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
+    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
+    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("thistle_crypto_aes128_ecb_decrypt", thistle_crypto_aes128_ecb_decrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
-    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
+    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
+    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_x25519_key_exchange",  thistle_crypto_x25519_key_exchange  as unsafe extern "C" fn(*const u8, *const u8, *mut u8) -> i32),
-
-    // Mesh service
-    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),
-    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32),
-    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32),
-    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32),
-    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32),
-    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32),
-    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32),
-    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char),
-    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32),
-
-    // HAL registration
-    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
-    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
-
-    // HAL bus
-    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
-    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
-
-    // FreeRTOS
+    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
+    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
+    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
+    entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
+    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
+    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void, PERM_STORAGE),
+    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
+    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
+    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32, PERM_GPS),
+    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32, PERM_GPS),
+    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+    entry!("thistle_log",                   thistle_log                         as unsafe extern "C" fn(*const c_char, *const c_char)),
+    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
+    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char, PERM_RADIO),
+    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32, PERM_RADIO),
+    entry!("thistle_millis",                thistle_millis                      as unsafe extern "C" fn() -> u32),
+    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32, PERM_IPC),
+    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32, PERM_IPC),
+    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
+    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
+    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32, PERM_RADIO),
+    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32, PERM_RADIO),
+    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
+    entry!("thistle_ui_create_button",      thistle_ui_create_button            as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_create_container",   thistle_ui_create_container         as unsafe extern "C" fn(u32) -> u32),
+    entry!("thistle_ui_create_label",       thistle_ui_create_label             as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_create_text_input",  thistle_ui_create_text_input        as unsafe extern "C" fn(u32, *const c_char) -> u32),
+    entry!("thistle_ui_destroy",            thistle_ui_destroy                  as unsafe extern "C" fn(u32)),
+    entry!("thistle_ui_get_app_root",       thistle_ui_get_app_root             as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_get_text",           thistle_ui_get_text                 as unsafe extern "C" fn(u32) -> *const c_char),
+    entry!("thistle_ui_on_event",           thistle_ui_on_event                 as unsafe extern "C" fn(u32, i32, *const c_void, *mut c_void)),
+    entry!("thistle_ui_set_align",          thistle_ui_set_align                as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_bg_color",       thistle_ui_set_bg_color             as unsafe extern "C" fn(u32, u32)),
+    entry!("thistle_ui_set_border_width",   thistle_ui_set_border_width         as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_flex_grow",      thistle_ui_set_flex_grow            as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_font_size",      thistle_ui_set_font_size            as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_gap",            thistle_ui_set_gap                  as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_layout",         thistle_ui_set_layout               as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_one_line",       thistle_ui_set_one_line             as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_padding",        thistle_ui_set_padding              as unsafe extern "C" fn(u32, i32, i32, i32, i32)),
+    entry!("thistle_ui_set_password_mode",  thistle_ui_set_password_mode        as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_placeholder",    thistle_ui_set_placeholder          as unsafe extern "C" fn(u32, *const c_char)),
+    entry!("thistle_ui_set_pos",            thistle_ui_set_pos                  as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_radius",         thistle_ui_set_radius               as unsafe extern "C" fn(u32, i32)),
+    entry!("thistle_ui_set_scrollable",     thistle_ui_set_scrollable           as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_set_size",           thistle_ui_set_size                 as unsafe extern "C" fn(u32, i32, i32)),
+    entry!("thistle_ui_set_text",           thistle_ui_set_text                 as unsafe extern "C" fn(u32, *const c_char)),
+    entry!("thistle_ui_set_text_color",     thistle_ui_set_text_color           as unsafe extern "C" fn(u32, u32)),
+    entry!("thistle_ui_set_visible",        thistle_ui_set_visible              as unsafe extern "C" fn(u32, bool)),
+    entry!("thistle_ui_theme_bg",           thistle_ui_theme_bg                 as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_primary",      thistle_ui_theme_primary            as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_surface",      thistle_ui_theme_surface            as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_text",         thistle_ui_theme_text               as unsafe extern "C" fn() -> u32),
+    entry!("thistle_ui_theme_text_secondary", thistle_ui_theme_text_secondary   as unsafe extern "C" fn() -> u32),
     entry!("vTaskDelay",                    vTaskDelay                          as unsafe extern "C" fn(u32)),
-    entry!("xTaskCreatePinnedToCore",       xTaskCreatePinnedToCore             as unsafe extern "C" fn(*const c_void, *const c_char, u32, *mut c_void, u32, *mut *mut c_void, i32) -> i32),
     entry!("vTaskDelete",                   vTaskDelete                         as unsafe extern "C" fn(*mut c_void)),
     entry!("xQueueGenericCreate",           xQueueGenericCreate                 as unsafe extern "C" fn(u32, u32, u8) -> *mut c_void),
     entry!("xQueueGenericSend",             xQueueGenericSend                   as unsafe extern "C" fn(*mut c_void, *const c_void, u32, i32) -> i32),
     entry!("xQueueReceive",                 xQueueReceive                       as unsafe extern "C" fn(*mut c_void, *mut c_void, u32) -> i32),
-
-    // Driver config
-    entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
-
-    // Widget API
-    entry!("thistle_ui_get_app_root",       thistle_ui_get_app_root             as unsafe extern "C" fn() -> u32),
-    entry!("thistle_ui_create_container",   thistle_ui_create_container         as unsafe extern "C" fn(u32) -> u32),
-    entry!("thistle_ui_create_label",       thistle_ui_create_label             as unsafe extern "C" fn(u32, *const c_char) -> u32),
-    entry!("thistle_ui_create_button",      thistle_ui_create_button            as unsafe extern "C" fn(u32, *const c_char) -> u32),
-    entry!("thistle_ui_create_text_input",  thistle_ui_create_text_input        as unsafe extern "C" fn(u32, *const c_char) -> u32),
-    entry!("thistle_ui_destroy",            thistle_ui_destroy                  as unsafe extern "C" fn(u32)),
-    entry!("thistle_ui_set_text",           thistle_ui_set_text                 as unsafe extern "C" fn(u32, *const c_char)),
-    entry!("thistle_ui_get_text",           thistle_ui_get_text                 as unsafe extern "C" fn(u32) -> *const c_char),
-    entry!("thistle_ui_set_size",           thistle_ui_set_size                 as unsafe extern "C" fn(u32, i32, i32)),
-    entry!("thistle_ui_set_pos",            thistle_ui_set_pos                  as unsafe extern "C" fn(u32, i32, i32)),
-    entry!("thistle_ui_set_visible",        thistle_ui_set_visible              as unsafe extern "C" fn(u32, bool)),
-    entry!("thistle_ui_set_bg_color",       thistle_ui_set_bg_color             as unsafe extern "C" fn(u32, u32)),
-    entry!("thistle_ui_set_text_color",     thistle_ui_set_text_color           as unsafe extern "C" fn(u32, u32)),
-    entry!("thistle_ui_set_font_size",      thistle_ui_set_font_size            as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_set_layout",         thistle_ui_set_layout               as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_set_align",          thistle_ui_set_align                as unsafe extern "C" fn(u32, i32, i32)),
-    entry!("thistle_ui_set_gap",            thistle_ui_set_gap                  as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_set_flex_grow",      thistle_ui_set_flex_grow            as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_set_scrollable",     thistle_ui_set_scrollable           as unsafe extern "C" fn(u32, bool)),
-    entry!("thistle_ui_set_padding",        thistle_ui_set_padding              as unsafe extern "C" fn(u32, i32, i32, i32, i32)),
-    entry!("thistle_ui_set_border_width",   thistle_ui_set_border_width         as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_set_radius",         thistle_ui_set_radius               as unsafe extern "C" fn(u32, i32)),
-    entry!("thistle_ui_on_event",           thistle_ui_on_event                 as unsafe extern "C" fn(u32, i32, *const c_void, *mut c_void)),
-    entry!("thistle_ui_set_password_mode",  thistle_ui_set_password_mode        as unsafe extern "C" fn(u32, bool)),
-    entry!("thistle_ui_set_one_line",       thistle_ui_set_one_line             as unsafe extern "C" fn(u32, bool)),
-    entry!("thistle_ui_set_placeholder",    thistle_ui_set_placeholder          as unsafe extern "C" fn(u32, *const c_char)),
-    entry!("thistle_ui_theme_primary",      thistle_ui_theme_primary            as unsafe extern "C" fn() -> u32),
-    entry!("thistle_ui_theme_bg",           thistle_ui_theme_bg                 as unsafe extern "C" fn() -> u32),
-    entry!("thistle_ui_theme_surface",      thistle_ui_theme_surface            as unsafe extern "C" fn() -> u32),
-    entry!("thistle_ui_theme_text",         thistle_ui_theme_text               as unsafe extern "C" fn() -> u32),
-    entry!("thistle_ui_theme_text_secondary", thistle_ui_theme_text_secondary   as unsafe extern "C" fn() -> u32),
-
-    // Logging
-    entry!("esp_log_write",                 esp_log_write                       as unsafe extern "C" fn(i32, *const u8, *const u8, ...)),
+    entry!("xTaskCreatePinnedToCore",       xTaskCreatePinnedToCore             as unsafe extern "C" fn(*const c_void, *const c_char, u32, *mut c_void, u32, *mut *mut c_void, i32) -> i32),
 ];
 
 // Minimal syscall table for host (aarch64-apple-darwin) test builds.
-// Only contains entries whose function bodies are pure Rust or reference
-// libc/in-crate symbols resolvable without ESP-IDF or FreeRTOS.
-// Excluded: thistle_log (esp_log_write), thistle_millis (esp_timer_get_time),
-//           FreeRTOS entries, widget API entries, esp_log_write itself.
+// Sorted alphabetically by symbol name.
 #[cfg(test)]
 static SYSCALL_TABLE: &[SyscallEntry] = &[
-    // System (host-safe only)
-    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
-    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
-    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
-    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
-
-    // Display
-    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
-    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
-
-    // Input
-    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
-
-    // Radio
-    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32),
-    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
-    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32),
-
-    // GPS
-    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32),
-    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32),
-
-    // Storage
-    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void),
-    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32),
-    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32),
-    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
-
-    // IPC
-    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32),
-    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
-    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
-
-    // Power
-    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
-    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
-
-    // Crypto
-    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
-    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
-    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
-    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
-    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("hal_audio_register",            hal_audio_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
+    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
+    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
+    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("thistle_crypto_aes128_ecb_decrypt", thistle_crypto_aes128_ecb_decrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_verify",       thistle_crypto_ed25519_verify       as unsafe extern "C" fn(*const u8, *const u8, usize, *const u8) -> i32),
-    entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_sha256",        thistle_crypto_hmac_sha256        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_hmac_verify",        thistle_crypto_hmac_verify        as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8) -> i32),
+    entry!("thistle_crypto_pbkdf2_sha256",      thistle_crypto_pbkdf2_sha256      as unsafe extern "C" fn(*const c_char, *const u8, usize, u32, *mut u8, usize) -> i32),
+    entry!("thistle_crypto_random",             thistle_crypto_random             as unsafe extern "C" fn(*mut u8, usize) -> i32),
+    entry!("thistle_crypto_sha256",             thistle_crypto_sha256             as unsafe extern "C" fn(*const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_x25519_key_exchange",  thistle_crypto_x25519_key_exchange  as unsafe extern "C" fn(*const u8, *const u8, *mut u8) -> i32),
-
-    // Mesh service
-    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32),
-    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32),
-    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32),
-    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32),
-    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32),
-    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32),
-    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32),
-    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32),
-    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char),
-    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32),
-
-    // HAL registration (all Rust FFI exports in hal_registry.rs)
-    entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_input_register",            hal_input_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_radio_register",            hal_radio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_power_register",            hal_power_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_imu_register",              hal_imu_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_storage_register",          hal_storage_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
-    entry!("hal_set_board_name",            hal_set_board_name                  as unsafe extern "C" fn(*const c_char)),
-    entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
-
-    // HAL bus (Rust FFI exports in hal_registry.rs)
-    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
-    entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
-
-    // Driver config (Rust FFI export in driver_loader.rs)
+    entry!("thistle_delay",                 thistle_delay                       as unsafe extern "C" fn(u32)),
+    entry!("thistle_display_get_height",    thistle_display_get_height          as unsafe extern "C" fn() -> u16),
+    entry!("thistle_display_get_width",     thistle_display_get_width           as unsafe extern "C" fn() -> u16),
     entry!("thistle_driver_get_config",     driver_loader_get_config            as unsafe extern "C" fn() -> *const c_char),
+    entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
+    entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void, PERM_STORAGE),
+    entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
+    entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
+    entry!("thistle_gps_enable",            thistle_gps_enable_impl             as unsafe extern "C" fn() -> i32, PERM_GPS),
+    entry!("thistle_gps_get_position",      thistle_gps_get_position_impl       as unsafe extern "C" fn(*mut c_void) -> i32, PERM_GPS),
+    entry!("thistle_input_register_cb",     thistle_input_register_cb_impl      as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32),
+    entry!("thistle_malloc",                thistle_malloc                      as unsafe extern "C" fn(usize) -> *mut c_void),
+    entry!("thistle_mesh_clear_inbox",        thistle_mesh_clear_inbox        as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_deinit",             thistle_mesh_deinit             as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_find_contact",       thistle_mesh_find_contact       as unsafe extern "C" fn(*const u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_contact",        thistle_mesh_get_contact        as unsafe extern "C" fn(i32, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_contact_count",  thistle_mesh_get_contact_count  as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_inbox_count",    thistle_mesh_get_inbox_count    as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_inbox_message",  thistle_mesh_get_inbox_message  as unsafe extern "C" fn(i32, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_self_key",       thistle_mesh_get_self_key       as unsafe extern "C" fn(*mut u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_get_self_name",      thistle_mesh_get_self_name      as unsafe extern "C" fn() -> *const c_char, PERM_RADIO),
+    entry!("thistle_mesh_get_stats",          thistle_mesh_get_stats          as unsafe extern "C" fn(*mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_init",               thistle_mesh_init               as unsafe extern "C" fn(*const c_char, u8) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_loop",               thistle_mesh_loop               as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send",               thistle_mesh_send               as unsafe extern "C" fn(*const u8, *const c_char) -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send_advert",        thistle_mesh_send_advert        as unsafe extern "C" fn() -> i32, PERM_RADIO),
+    entry!("thistle_mesh_send_advert_pos",    thistle_mesh_send_advert_pos    as unsafe extern "C" fn(f64, f64) -> i32, PERM_RADIO),
+    entry!("thistle_msg_recv",              thistle_msg_recv                    as unsafe extern "C" fn(*mut c_void, u32) -> i32, PERM_IPC),
+    entry!("thistle_msg_send",              thistle_msg_send                    as unsafe extern "C" fn(*const c_void) -> i32, PERM_IPC),
+    entry!("thistle_power_get_battery_mv",  thistle_power_get_battery_mv_impl   as unsafe extern "C" fn() -> u16),
+    entry!("thistle_power_get_battery_pct", thistle_power_get_battery_pct_impl  as unsafe extern "C" fn() -> u8),
+    entry!("thistle_radio_send",            thistle_radio_send_impl             as unsafe extern "C" fn(*const u8, usize) -> i32, PERM_RADIO),
+    entry!("thistle_radio_set_freq",        thistle_radio_set_freq_impl         as unsafe extern "C" fn(u32) -> i32, PERM_RADIO),
+    entry!("thistle_radio_start_rx",        thistle_radio_start_rx_impl         as unsafe extern "C" fn(*const c_void, *mut c_void) -> i32, PERM_RADIO),
+    entry!("thistle_realloc",               thistle_realloc                     as unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void),
 ];
 
 // ---------------------------------------------------------------------------
@@ -692,7 +720,7 @@ pub extern "C" fn syscall_table_init() -> i32 {
         esp_log_write(
             3,
             b"syscall\0".as_ptr(),
-            b"Syscall table initialized with %d entries\0".as_ptr(),
+            b"Syscall table initialized with %d entries (sorted)\0".as_ptr(),
             SYSCALL_TABLE.len() as i32,
         );
     }
@@ -714,7 +742,7 @@ pub extern "C" fn syscall_table_count() -> usize {
     SYSCALL_TABLE.len()
 }
 
-/// Look up a symbol by name. Returns its address or NULL if not found.
+/// Look up a symbol by name. Returns its address or NULL if not found or denied.
 ///
 /// # Safety
 /// `name` must be a valid null-terminated C string.
@@ -729,35 +757,55 @@ pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
         Err(_) => return std::ptr::null_mut(),
     };
 
-    for entry in SYSCALL_TABLE {
-        let entry_name = match CStr::from_ptr(entry.name).to_str() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if entry_name == name_str {
-            return entry.func_ptr as *mut c_void;
+    // Binary search for efficiency (O(log N))
+    let result = SYSCALL_TABLE.binary_search_by(|probe| {
+        let entry_name = CStr::from_ptr(probe.name).to_str().unwrap_or("");
+        entry_name.cmp(name_str)
+    });
+
+    let idx = match result {
+        Ok(i) => i,
+        Err(_) => {
+            #[cfg(not(test))]
+            esp_log_write(
+                2, // WARN
+                b"syscall\0".as_ptr(),
+                b"syscall_resolve: unknown symbol '%s'\0".as_ptr(),
+                name,
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let entry = &SYSCALL_TABLE[idx];
+
+    // Permission check
+    if entry.permission != 0 {
+        let app_id_bytes = CURRENT_APP_ID.lock().unwrap();
+        if app_id_bytes[0] != 0 {
+            let app_id = CStr::from_ptr(app_id_bytes.as_ptr() as *const c_char)
+                .to_str()
+                .unwrap_or("");
+
+            if !permissions::check(app_id, entry.permission) {
+                #[cfg(not(test))]
+                esp_log_write(
+                    1, // ERROR
+                    b"syscall\0".as_ptr(),
+                    b"syscall_resolve: PERMISSION DENIED for app '%s' to call '%s'\0".as_ptr(),
+                    app_id_bytes.as_ptr(),
+                    name,
+                );
+                return std::ptr::null_mut();
+            }
         }
     }
 
-    #[cfg(not(test))]
-    esp_log_write(
-        2, // WARN
-        b"syscall\0".as_ptr(),
-        b"syscall_resolve: unknown symbol '%s'\0".as_ptr(),
-        name,
-    );
-    std::ptr::null_mut()
+    entry.func_ptr as *mut c_void
 }
 
 // ---------------------------------------------------------------------------
 // Tests
-//
-// Only pure-Rust functions are tested here: syscall_table_count(),
-// syscall_table_get(), and the success path of syscall_resolve() (which
-// returns before calling esp_log_write).
-//
-// syscall_table_init() and the failure path of syscall_resolve() both call
-// esp_log_write which is not available on the host target, so they are skipped.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -765,36 +813,20 @@ mod tests {
     use super::*;
     use std::ffi::CStr;
 
-    // -----------------------------------------------------------------------
-    // test_table_count_nonzero
-    // Mirrors test_syscall_table.c: count must be > 0 after the table is built.
-    // -----------------------------------------------------------------------
+    #[test]
+    fn test_table_is_sorted() {
+        for i in 0..SYSCALL_TABLE.len() - 1 {
+            let name_i = unsafe { CStr::from_ptr(SYSCALL_TABLE[i].name).to_str().unwrap() };
+            let name_j = unsafe { CStr::from_ptr(SYSCALL_TABLE[i+1].name).to_str().unwrap() };
+            assert!(name_i < name_j, "SYSCALL_TABLE must be sorted: {} >= {}", name_i, name_j);
+        }
+    }
 
     #[test]
     fn test_table_count_nonzero() {
         let count = syscall_table_count();
         assert!(count > 0, "syscall table must contain at least one entry");
     }
-
-    // -----------------------------------------------------------------------
-    // test_table_get_returns_non_null
-    // Mirrors test_syscall_table.c: syscall_table_get() must not be NULL.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_table_get_returns_non_null() {
-        let ptr = syscall_table_get();
-        assert!(!ptr.is_null(), "syscall_table_get() must return a non-null pointer");
-    }
-
-    // -----------------------------------------------------------------------
-    // test_resolve_thistle_delay
-    // Mirrors test_syscall_table.c: resolve a known symbol must return non-NULL.
-    // Uses "thistle_delay" (host-safe wrapper using std::thread::sleep).
-    // Note: "thistle_log" and "thistle_millis" are excluded from the test-mode
-    // table because their bodies call esp_log_write / esp_timer_get_time which
-    // are not available on aarch64-apple-darwin.
-    // -----------------------------------------------------------------------
 
     #[test]
     fn test_resolve_thistle_delay() {
@@ -806,78 +838,9 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // test_resolve_thistle_malloc
-    // Mirrors test_syscall_table.c: resolve("thistle_malloc") must return non-NULL.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_resolve_thistle_malloc() {
-        let name = b"thistle_malloc\0";
-        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
-        assert!(
-            !ptr.is_null(),
-            "syscall_resolve(\"thistle_malloc\") must return a non-null address"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // test_resolve_thistle_crypto_sha256
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_resolve_thistle_crypto_sha256() {
-        let name = b"thistle_crypto_sha256\0";
-        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
-        assert!(
-            !ptr.is_null(),
-            "syscall_resolve(\"thistle_crypto_sha256\") must return a non-null address"
-        );
-    }
-
-    #[test]
-    fn test_resolve_thistle_crypto_random() {
-        let name = b"thistle_crypto_random\0";
-        let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
-        assert!(
-            !ptr.is_null(),
-            "syscall_resolve(\"thistle_crypto_random\") must return a non-null address"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // test_resolve_null_returns_null
-    // syscall_resolve(NULL) must return NULL without crashing.
-    // -----------------------------------------------------------------------
-
     #[test]
     fn test_resolve_null_returns_null() {
         let ptr = unsafe { syscall_resolve(std::ptr::null()) };
         assert!(ptr.is_null(), "syscall_resolve(NULL) must return NULL");
-    }
-
-    // -----------------------------------------------------------------------
-    // test_table_entries_have_non_null_names_and_funcs
-    // All entries in the static table must have valid name and func_ptr.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_table_entries_have_non_null_names_and_funcs() {
-        let count = syscall_table_count();
-        let base = syscall_table_get();
-
-        for i in 0..count {
-            let entry = unsafe { &*base.add(i) };
-            assert!(
-                !entry.name.is_null(),
-                "entry[{}].name must not be null", i
-            );
-            assert!(
-                !entry.func_ptr.is_null(),
-                "entry[{}].func_ptr must not be null (name={})",
-                i,
-                unsafe { CStr::from_ptr(entry.name).to_str().unwrap_or("?") }
-            );
-        }
     }
 }

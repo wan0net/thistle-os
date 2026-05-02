@@ -103,6 +103,7 @@ static struct {
 
     /* --- Transport select screen --- */
     lv_obj_t   *transport_select_screen;
+    lv_obj_t   *transport_select_list;
 
     /* --- Chat screen --- */
     lv_obj_t   *chat_screen;
@@ -131,6 +132,7 @@ static lv_timer_t *s_tick_timer;
 static void show_screen(app_screen_t screen);
 static void build_conv_list_screen(void);
 static void build_transport_select_screen(void);
+static void refresh_transport_select_list(void);
 static void build_chat_screen(void);
 static void refresh_conv_list(void);
 static void open_conversation(int conv_idx);
@@ -139,6 +141,8 @@ static void add_message_to_conv(int conv_idx, const char *sender,
                                 const char *text, bool is_self);
 static void send_message(void);
 static void kernel_tick_cb(lv_timer_t *timer);
+static int find_conversation_index(msg_transport_t transport);
+static int ensure_conversation(msg_transport_t transport);
 
 /* ------------------------------------------------------------------ */
 /* Transport RX callback (may be called from any task context)         */
@@ -163,14 +167,8 @@ static void rx_async_handler(void *arg)
     if (!rx) return;
     atomic_fetch_sub(&s_pending_rx, 1);
 
-    /* Find the matching conversation by transport type */
-    int ci = -1;
-    for (int i = 0; i < s_msg.conv_count; i++) {
-        if (s_msg.convs[i].transport == rx->transport) {
-            ci = i;
-            break;
-        }
-    }
+    /* Create the conversation on first inbound message if needed. */
+    int ci = ensure_conversation(rx->transport);
 
     if (ci >= 0) {
         /*
@@ -296,8 +294,10 @@ static void show_screen(app_screen_t screen)
             }
             break;
         case SCREEN_TRANSPORT_SELECT:
-            if (s_msg.transport_select_screen)
+            if (s_msg.transport_select_screen) {
+                refresh_transport_select_list();
                 lv_obj_clear_flag(s_msg.transport_select_screen, LV_OBJ_FLAG_HIDDEN);
+            }
             break;
         case SCREEN_CHAT:
             if (s_msg.chat_screen)
@@ -450,6 +450,34 @@ static void refresh_conv_list(void)
     }
 }
 
+static int find_conversation_index(msg_transport_t transport)
+{
+    for (int i = 0; i < s_msg.conv_count; i++) {
+        if (s_msg.convs[i].transport == transport) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int ensure_conversation(msg_transport_t transport)
+{
+    int ci = find_conversation_index(transport);
+    if (ci >= 0) {
+        return ci;
+    }
+
+    if (s_msg.conv_count >= MAX_CONVS) {
+        ESP_LOGW(TAG, "no free conversation slots for transport %d", (int)transport);
+        return -1;
+    }
+
+    ci = s_msg.conv_count++;
+    memset(&s_msg.convs[ci], 0, sizeof(conversation_t));
+    s_msg.convs[ci].transport = transport;
+    return ci;
+}
+
 /* ------------------------------------------------------------------ */
 /* Transport select screen                                              */
 /* ------------------------------------------------------------------ */
@@ -457,20 +485,14 @@ static void refresh_conv_list(void)
 static void transport_pick_cb(lv_event_t *e)
 {
     msg_transport_t type = (msg_transport_t)(intptr_t)lv_event_get_user_data(e);
+    const msg_transport_driver_t *drv = messenger_get_transport(type);
+    if (!drv || !drv->is_available()) {
+        ESP_LOGI(TAG, "transport %d is not available", (int)type);
+        return;
+    }
 
     /* Find or create a conversation for this transport */
-    int ci = -1;
-    for (int i = 0; i < s_msg.conv_count; i++) {
-        if (s_msg.convs[i].transport == type) {
-            ci = i;
-            break;
-        }
-    }
-    if (ci < 0 && s_msg.conv_count < MAX_CONVS) {
-        ci = s_msg.conv_count++;
-        memset(&s_msg.convs[ci], 0, sizeof(conversation_t));
-        s_msg.convs[ci].transport = type;
-    }
+    int ci = ensure_conversation(type);
     if (ci >= 0) {
         open_conversation(ci);
     }
@@ -519,51 +541,65 @@ static void build_transport_select_screen(void)
     lv_obj_add_event_cb(title, transport_back_cb, LV_EVENT_CLICKED, NULL);
 
     /* Transport buttons */
-    lv_obj_t *list = lv_obj_create(scr);
-    lv_obj_set_size(list, DISP_W, DISP_H - HEADER_H);
-    lv_obj_set_pos(list, 0, HEADER_H);
-    lv_obj_set_style_bg_color(list, colors->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(list, 8, LV_PART_MAIN);
-    lv_obj_set_style_radius(list, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(list, 8, LV_PART_MAIN);
-    lv_obj_clear_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    s_msg.transport_select_list = lv_obj_create(scr);
+    lv_obj_set_size(s_msg.transport_select_list, DISP_W, DISP_H - HEADER_H);
+    lv_obj_set_pos(s_msg.transport_select_list, 0, HEADER_H);
+    lv_obj_set_style_bg_color(s_msg.transport_select_list, colors->bg, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_msg.transport_select_list, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_msg.transport_select_list, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_msg.transport_select_list, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_msg.transport_select_list, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(s_msg.transport_select_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_msg.transport_select_list, 8, LV_PART_MAIN);
+    lv_obj_clear_flag(s_msg.transport_select_list, LV_OBJ_FLAG_SCROLLABLE);
 
+    refresh_transport_select_list();
+}
+
+static void refresh_transport_select_list(void)
+{
+    if (!s_msg.transport_select_list) return;
+    const theme_colors_t *colors = theme_get_colors();
+    lv_obj_clean(s_msg.transport_select_list);
+
+    int visible_count = 0;
     for (int t = 0; t < MSG_TRANSPORT_COUNT; t++) {
         const msg_transport_driver_t *drv = messenger_get_transport((msg_transport_t)t);
-        if (!drv) continue;
+        if (!drv || !drv->is_available()) continue;
 
-        bool avail = drv->is_available();
-
-        lv_obj_t *btn = lv_button_create(list);
+        lv_obj_t *btn = lv_button_create(s_msg.transport_select_list);
         lv_obj_set_size(btn, DISP_W - 16, 36);
-        lv_obj_set_style_bg_color(btn,
-            avail ? colors->primary : colors->surface,
-            LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, colors->primary, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_radius(btn, 4, LV_PART_MAIN);
-        lv_obj_set_style_border_width(btn,
-            avail ? 0 : 1,
-            LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, colors->text_secondary, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
 
         char btn_label[48];
-        snprintf(btn_label, sizeof(btn_label), "%s %s%s",
-                 drv->icon, drv->name,
-                 avail ? "" : " — unavailable");
+        snprintf(btn_label, sizeof(btn_label), "%s %s", drv->icon, drv->name);
 
         lv_obj_t *lbl = lv_label_create(btn);
         lv_label_set_text(lbl, btn_label);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_color(lbl,
-            avail ? lv_color_white() : colors->text_secondary,
-            LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_white(), LV_PART_MAIN);
         lv_obj_center(lbl);
 
         lv_obj_add_event_cb(btn, transport_pick_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)t);
+        visible_count++;
+    }
+
+    if (visible_count == 0) {
+        lv_obj_t *empty = lv_label_create(s_msg.transport_select_list);
+        lv_label_set_text(empty, "No message transports are ready yet.");
+        lv_obj_set_style_text_font(empty, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(empty, colors->text_secondary, LV_PART_MAIN);
+    } else if (visible_count == 1) {
+        lv_obj_t *hint = lv_label_create(s_msg.transport_select_list);
+        lv_label_set_text(hint, "More transports will appear when their backends are ready.");
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(hint, DISP_W - 16);
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_style_text_color(hint, colors->text_secondary, LV_PART_MAIN);
     }
 }
 
@@ -1065,19 +1101,11 @@ esp_err_t messenger_ui_create(lv_obj_t *parent)
     build_transport_select_screen();
     build_chat_screen();
 
-    /*
-     * Pre-populate one conversation per transport so the list is
-     * immediately meaningful.  Only LoRa will show as available on
-     * typical hardware; others show as "(unavailable)" until the
-     * corresponding drivers are implemented.
-     */
+    /* Pre-populate only conversations whose transports are actually ready. */
     for (int t = 0; t < MSG_TRANSPORT_COUNT; t++) {
         const msg_transport_driver_t *drv = messenger_get_transport((msg_transport_t)t);
-        if (!drv) continue;
-
-        int ci = s_msg.conv_count++;
-        memset(&s_msg.convs[ci], 0, sizeof(conversation_t));
-        s_msg.convs[ci].transport = (msg_transport_t)t;
+        if (!drv || !drv->is_available()) continue;
+        (void)ensure_conversation((msg_transport_t)t);
     }
 
     /* Start the kernel tick timer (1 second interval) */

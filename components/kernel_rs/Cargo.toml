@@ -24,6 +24,12 @@ libc = { version = "0.2", optional = true }
 [features]
 default = []
 sim-bus = ["libc"]  # Link I2C/SPI calls to C virtual bus (simulator only)
+esp32 = []
+esp32s2 = []
+esp32s3 = []
+esp32c3 = []
+esp32c6 = []
+esp32h2 = []
 
 [build-dependencies]
 embuild = "0.33"

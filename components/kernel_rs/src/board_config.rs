@@ -81,13 +81,18 @@ fn load_config(config_path: &str) -> i32 {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    // Parse board name
+    let mut board_arch = String::new();
+
+    // Parse board metadata
     if let Some(board_section) = extract_object(&json, "board") {
         if let Some(name) = json_get_string(&board_section, "name") {
             set_board_name(&name);
             if let Ok(cname) = CString::new(name.as_str()) {
                 unsafe { hal_set_board_name(cname.as_ptr()); }
             }
+        }
+        if let Some(arch) = json_get_string(&board_section, "arch") {
+            board_arch = arch;
         }
     }
 
@@ -101,6 +106,7 @@ fn load_config(config_path: &str) -> i32 {
         for i in 0..8 {
             if let Some(drv) = nth_object(&drivers_arr, i) {
                 let entry = json_get_string(&drv, "entry").unwrap_or_default();
+                let driver_id = json_get_string(&drv, "id").unwrap_or_default();
 
                 if entry.is_empty() { continue; }
 
@@ -110,7 +116,8 @@ fn load_config(config_path: &str) -> i32 {
                 }
 
                 // Extract config sub-object
-                let config = extract_object(&drv, "config").unwrap_or_else(|| "{}".to_string());
+                let raw_config = extract_object(&drv, "config").unwrap_or_else(|| "{}".to_string());
+                let config = normalize_driver_config(&driver_id, &board_arch, &raw_config);
 
                 // Try SPIFFS first, then SD
                 let paths = [
@@ -139,6 +146,58 @@ fn load_config(config_path: &str) -> i32 {
     }
 
     ESP_OK
+}
+
+fn normalize_driver_config(driver_id: &str, board_arch: &str, config: &str) -> String {
+    if matches!(driver_id, "com.thistle.drv.power-tp4065b" | "com.thistle.drv.power-heltec-v3") {
+        return normalize_tp4065b_power_config(board_arch, config);
+    }
+    config.to_string()
+}
+
+fn normalize_tp4065b_power_config(board_arch: &str, config: &str) -> String {
+    if json_get_int(config, "adc_channel").is_some() && json_get_int(config, "pin_charge_status").is_some() {
+        return config.to_string();
+    }
+
+    let adc_pin = match json_get_int(config, "adc_pin") {
+        Some(pin) => pin as i32,
+        None => return config.to_string(),
+    };
+    let charge_pin = json_get_int(config, "charge_pin").unwrap_or(-1) as i32;
+
+    let adc_channel = match adc_pin_to_channel(board_arch, adc_pin) {
+        Some(channel) => channel,
+        None => return config.to_string(),
+    };
+
+    append_json_fields(
+        config,
+        &format!(
+            "\"adc_channel\": {}, \"pin_charge_status\": {}",
+            adc_channel, charge_pin
+        ),
+    )
+}
+
+fn adc_pin_to_channel(board_arch: &str, adc_pin: i32) -> Option<i32> {
+    match board_arch {
+        // ESP32-S3 ADC1 channels map directly: GPIO1..GPIO10 -> channel 0..9.
+        "esp32s3" if (1..=10).contains(&adc_pin) => Some(adc_pin - 1),
+        _ => None,
+    }
+}
+
+fn append_json_fields(config: &str, fields: &str) -> String {
+    let trimmed = config.trim();
+    if !trimmed.ends_with('}') {
+        return config.to_string();
+    }
+
+    let insert_at = trimmed.len() - 1;
+    let needs_comma = !trimmed[..insert_at].trim_end().ends_with('{');
+    let separator = if needs_comma { ", " } else { "" };
+    format!("{}{}{}{}", &trimmed[..insert_at], separator, fields, &trimmed[insert_at..])
 }
 
 // Simple JSON array/object extraction helpers
@@ -293,6 +352,33 @@ pub extern "C" fn board_config_get_wm_name() -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_normalize_tp4065b_power_config_adds_channel_fields_for_esp32s3() {
+        let config = r#"{ "adc_pin": 4, "charge_pin": 10 }"#;
+        let normalized = normalize_tp4065b_power_config("esp32s3", config);
+
+        assert!(normalized.contains(r#""adc_pin": 4"#));
+        assert!(normalized.contains(r#""charge_pin": 10"#));
+        assert!(normalized.contains(r#""adc_channel": 3"#));
+        assert!(normalized.contains(r#""pin_charge_status": 10"#));
+    }
+
+    #[test]
+    fn test_normalize_tp4065b_power_config_keeps_existing_channel_fields() {
+        let config = r#"{ "adc_channel": 3, "pin_charge_status": 10 }"#;
+        let normalized = normalize_tp4065b_power_config("esp32s3", config);
+
+        assert_eq!(normalized, config);
+    }
+
+    #[test]
+    fn test_normalize_tp4065b_power_config_skips_unknown_adc_pin_mapping() {
+        let config = r#"{ "adc_pin": 33, "charge_pin": 10 }"#;
+        let normalized = normalize_tp4065b_power_config("esp32s3", config);
+
+        assert_eq!(normalized, config);
+    }
 
     // ─── find_array tests ────────────────────────────────────────────────
 

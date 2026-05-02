@@ -84,6 +84,15 @@
                 "rx": 44,
                 "baud_rate": 9600
             }
+        },
+        {
+            "id": "com.thistle.drv.power-tp4065b",
+            "hal": "power",
+            "entry": "power-tp4065b.drv.elf",
+            "config": {
+                "adc_pin": 4,
+                "charge_pin": 10
+            }
         }
     ]
 }

@@ -83,6 +83,7 @@ extern "C" {
     // Syscall table
     fn syscall_resolve(name: *const c_char) -> *mut c_void;
     fn syscall_table_count() -> usize;
+    fn syscall_set_current_app(id: *const c_char);
 
     // Logging
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
@@ -112,6 +113,8 @@ pub struct ElfAppHandle {
     task: *mut c_void,
     loaded: bool,
     running: bool,
+    load_addr: usize,
+    load_size: usize,
     // Slot index in the global array
     slot: usize,
 }
@@ -127,6 +130,8 @@ impl ElfAppHandle {
             task: std::ptr::null_mut(),
             loaded: false,
             running: false,
+            load_addr: 0,
+            load_size: 0,
             slot: 0,
         }
     }
@@ -322,6 +327,17 @@ pub unsafe extern "C" fn elf_app_load(
     std::ptr::copy_nonoverlapping(file_data.as_ptr(), buf as *mut u8, size);
     drop(file_data);
 
+    // Update the app slot with the load address and size
+    {
+        let mut state = match STATE.lock() {
+            Ok(s) => s,
+            Err(_) => { free(buf); return ESP_FAIL; }
+        };
+        let app = &mut state.ensure_apps()[slot_idx];
+        app.load_addr = buf as usize;
+        app.load_size = size;
+    }
+
     // 3. Parse manifest FIRST to get the app ID for permission identity
     let mut app_id_buf = [0u8; 64];
     let mut has_manifest_id = false;
@@ -414,7 +430,10 @@ pub unsafe extern "C" fn elf_app_load(
 
     elf_set_symbol_resolver(thistle_symbol_resolver);
 
+    syscall_set_current_app(perm_id);
     let ret = esp_elf_relocate(elf_ptr, buf as *const u8);
+    syscall_set_current_app(std::ptr::null());
+
     free(buf);
 
     if ret != ESP_OK {

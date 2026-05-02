@@ -4,7 +4,8 @@
  *
  * Unified network API used by all apps and subsystems.
  * Replaces direct wifi_manager calls — works over WiFi, 4G, BLE tether,
- * or the simulator's host network transport.
+ * the simulator's host network transport, or an overlay VPN that rides on
+ * top of one of those underlay transports.
  *
  * Usage:
  *   net_is_connected()         — any transport connected?
@@ -28,6 +29,12 @@ bool net_is_connected(void);
 
 /* Get the currently active/connected transport (NULL if none) */
 const hal_net_driver_t *net_get_active(void);
+
+/* Get the active connected non-VPN underlay transport (NULL if none) */
+const hal_net_driver_t *net_get_active_underlay(void);
+
+/* Check if a non-VPN underlay transport is connected */
+bool net_has_underlay_connection(void);
 
 /* Get state of the best available connection */
 hal_net_state_t net_get_state(void);

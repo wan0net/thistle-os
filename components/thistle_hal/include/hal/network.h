@@ -18,6 +18,7 @@ typedef enum {
     HAL_NET_BLE,        /* BLE tethering */
     HAL_NET_ETHERNET,   /* Future */
     HAL_NET_HOST,       /* Simulator — uses host OS networking */
+    HAL_NET_VPN,        /* Overlay VPN — requires another network transport */
 } hal_net_transport_t;
 
 /* Network state */

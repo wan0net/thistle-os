@@ -90,7 +90,7 @@
           <tr><td>Audio DAC</td><td>PCM5102A</td><td>I2S</td><td><code><a href="../drivers.html#drv-audio">drv_audio_pcm5102a</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
           <tr><td>Power</td><td>TP4065B</td><td>ADC</td><td><code><a href="../drivers.html#drv-power">drv_power_tp4065b</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
           <tr><td>IMU</td><td>BHI260AP</td><td>I2C</td><td><code><a href="../drivers.html#drv-imu">drv_imu_bhi260ap</a></code></td><td><span class="badge badge-yellow">Partial</span></td></tr>
-          <tr><td>Light sensor</td><td>LTR-553</td><td>I2C</td><td><code><a href="../drivers.html#drv-light">drv_light_ltr553</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
+          <tr><td>Light sensor</td><td>LTR-553</td><td>I2C</td><td><code><a href="../drivers.html#drv-light">drv_light_ltr553</a></code></td><td><span class="badge badge-yellow">Partial</span></td></tr>
           <tr><td>RTC</td><td>PCF8563</td><td>I2C</td><td><code><a href="../drivers.html#drv-rtc">drv_rtc_pcf8563</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
           <tr><td>SD Card</td><td>MicroSD</td><td>SPI</td><td><code><a href="../drivers.html#drv-sdcard">drv_sdcard</a></code></td><td><span class="badge badge-green">Proven</span></td></tr>
           <tr><td>Cellular modem</td><td>A7682E</td><td>UART / esp_modem</td><td><code><a href="../drivers.html#drv-modem">drv_modem_a7682e</a></code> (C)</td><td><span class="badge badge-green">Proven</span></td></tr>
@@ -107,6 +107,7 @@
       <li>This is the primary development target for ThistleOS.</li>
       <li>Window manager: <strong>thistle-tk</strong> (pure Rust, embedded-graphics, e-paper optimized).</li>
       <li>The BHI260AP IMU driver is partially implemented (registers with HAL, returns defaults).</li>
+      <li>The LTR-553 light sensor now has a real Rust register/read path, but still needs hardware validation before it should be treated as proven.</li>
     </ul>
 
     <div class="page-footer">

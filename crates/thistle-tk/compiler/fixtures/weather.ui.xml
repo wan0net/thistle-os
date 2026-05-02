@@ -1,0 +1,12 @@
+<screen class="screen">
+  <row class="header">
+    <label text="Weather Station" class="title"/>
+  </row>
+
+  <column id="content" class="content">
+    <label id="temperature" text="Temperature: -- C"/>
+    <divider/>
+    <label id="pressure" text="Pressure: -- hPa"/>
+    <button id="refresh" text="Refresh" class="primary" on-press="refresh"/>
+  </column>
+</screen>

@@ -27,6 +27,7 @@ const HAL_NET_STATE_CONNECTED: u32 = 2;
 
 // hal_net_type_t values — must match hal/net.h
 const HAL_NET_WIFI: u32 = 0;
+const HAL_NET_VPN: u32 = 5;
 
 const MAX_NET_TRANSPORTS: usize = 4;
 
@@ -135,6 +136,38 @@ unsafe impl Send for NetManagerState {}
 
 static STATE: Mutex<NetManagerState> = Mutex::new(NetManagerState::new());
 
+fn is_vpn_transport(driver: *const HalNetDriver) -> bool {
+    if driver.is_null() {
+        return false;
+    }
+    unsafe { (*driver).transport_type == HAL_NET_VPN }
+}
+
+unsafe fn driver_is_connected(driver: *const HalNetDriver) -> bool {
+    if driver.is_null() {
+        return false;
+    }
+    match (*driver).is_connected {
+        Some(f) => f(),
+        None => false,
+    }
+}
+
+fn find_connected_transport(state: &NetManagerState, vpn_overlay: bool) -> *const HalNetDriver {
+    for i in 0..state.count {
+        let drv = state.transports[i];
+        if drv.is_null() || is_vpn_transport(drv) != vpn_overlay {
+            continue;
+        }
+        unsafe {
+            if driver_is_connected(drv) {
+                return drv;
+            }
+        }
+    }
+    std::ptr::null()
+}
+
 // ---------------------------------------------------------------------------
 // FFI exports
 // ---------------------------------------------------------------------------
@@ -230,17 +263,32 @@ pub extern "C" fn net_get_active() -> *const HalNetDriver {
         Err(_) => return std::ptr::null(),
     };
 
-    for i in 0..state.count {
-        let drv = state.transports[i];
-        if drv.is_null() { continue; }
-        unsafe {
-            if let Some(f) = (*drv).is_connected {
-                if f() { return drv; }
-            }
-        }
+    let vpn = find_connected_transport(&state, true);
+    if !vpn.is_null() {
+        return vpn;
     }
 
-    std::ptr::null()
+    find_connected_transport(&state, false)
+}
+
+/// Return a pointer to the first connected non-VPN underlay transport, or NULL.
+///
+/// # Safety
+/// Returns a pointer to static vtable data. Do not free.
+#[no_mangle]
+pub extern "C" fn net_get_active_underlay() -> *const HalNetDriver {
+    let state = match STATE.lock() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null(),
+    };
+
+    find_connected_transport(&state, false)
+}
+
+/// Return true if a connected non-VPN underlay transport is available.
+#[no_mangle]
+pub extern "C" fn net_has_underlay_connection() -> bool {
+    !net_get_active_underlay().is_null()
 }
 
 /// Return the best current network state across all transports.
@@ -327,14 +375,51 @@ pub extern "C" fn net_get_transport_name() -> *const c_char {
 /// May be called from C.
 #[no_mangle]
 pub unsafe extern "C" fn net_connect_best(timeout_ms: u32) -> i32 {
-    let count = STATE.lock().map(|s| s.count).unwrap_or(0);
+    let (transports, count) = match STATE.lock() {
+        Ok(s) => (s.transports, s.count),
+        Err(_) => return ESP_FAIL,
+    };
+
+    let active = net_get_active();
+    if !active.is_null() && is_vpn_transport(active) {
+        return ESP_OK;
+    }
+
+    if net_has_underlay_connection() {
+        for i in 0..count {
+            let drv = transports[i];
+            if drv.is_null() || !is_vpn_transport(drv) {
+                continue;
+            }
+
+            if driver_is_connected(drv) {
+                return ESP_OK;
+            }
+
+            if let Some(connect) = (*drv).connect {
+                let ret = connect(std::ptr::null(), std::ptr::null(), timeout_ms);
+                if ret == ESP_OK {
+                    esp_log_write(
+                        ESP_LOG_INFO,
+                        TAG.as_ptr(),
+                        b"Connected via %s\0".as_ptr(),
+                        if (*drv).name.is_null() { b"?\0".as_ptr() as *const c_char } else { (*drv).name },
+                    );
+                    return ESP_OK;
+                }
+            }
+        }
+    }
 
     for i in 0..count {
-        let drv = STATE.lock().map(|s| s.transports[i]).unwrap_or(std::ptr::null());
+        let drv = transports[i];
         if drv.is_null() { continue; }
+        if is_vpn_transport(drv) {
+            continue;
+        }
 
-        if let Some(is_conn) = (*drv).is_connected {
-            if is_conn() { return ESP_OK; }
+        if driver_is_connected(drv) {
+            return ESP_OK;
         }
 
         if let Some(connect) = (*drv).connect {
@@ -437,6 +522,9 @@ mod tests {
     unsafe extern "C" fn mock_get_ip() -> *const c_char {
         b"192.168.1.100\0".as_ptr() as *const c_char
     }
+    unsafe extern "C" fn mock_vpn_get_ip() -> *const c_char {
+        b"100.64.0.42\0".as_ptr() as *const c_char
+    }
     unsafe extern "C" fn mock_get_rssi() -> i8 { -55 }
 
     static MOCK_DISCONNECTED: HalNetDriver = HalNetDriver {
@@ -460,6 +548,18 @@ mod tests {
         get_state: Some(mock_state_connected),
         get_ip: Some(mock_get_ip),
         get_rssi: Some(mock_get_rssi),
+        is_connected: Some(mock_is_connected),
+    };
+
+    static MOCK_VPN_CONNECTED: HalNetDriver = HalNetDriver {
+        transport_type: HAL_NET_VPN,
+        name: b"MockVPN\0".as_ptr() as *const c_char,
+        init: None,
+        connect: None,
+        disconnect: None,
+        get_state: Some(mock_state_connected),
+        get_ip: Some(mock_vpn_get_ip),
+        get_rssi: None,
         is_connected: Some(mock_is_connected),
     };
 
@@ -511,16 +611,15 @@ mod tests {
     }
 
     fn local_get_active(s: &NetManagerState) -> *const HalNetDriver {
-        for i in 0..s.count {
-            let drv = s.transports[i];
-            if drv.is_null() { continue; }
-            unsafe {
-                if let Some(f) = (*drv).is_connected {
-                    if f() { return drv; }
-                }
-            }
+        let vpn = find_connected_transport(s, true);
+        if !vpn.is_null() {
+            return vpn;
         }
-        std::ptr::null()
+        find_connected_transport(s, false)
+    }
+
+    fn local_get_active_underlay(s: &NetManagerState) -> *const HalNetDriver {
+        find_connected_transport(s, false)
     }
 
     fn local_get_ip(s: &NetManagerState) -> *const c_char {
@@ -646,6 +745,31 @@ mod tests {
         assert_eq!(active, &MOCK_CONNECTED as *const HalNetDriver);
     }
 
+    #[test]
+    fn test_connected_vpn_is_preferred_over_underlay() {
+        let s = make_state_with(&[
+            &MOCK_CONNECTED as *const HalNetDriver,
+            &MOCK_VPN_CONNECTED as *const HalNetDriver,
+        ]);
+        assert!(local_is_connected(&s));
+        let active = local_get_active(&s);
+        assert_eq!(active, &MOCK_VPN_CONNECTED as *const HalNetDriver);
+
+        let ip_ptr = local_get_ip(&s);
+        let ip = unsafe { std::ffi::CStr::from_ptr(ip_ptr).to_str().unwrap() };
+        assert_eq!(ip, "100.64.0.42");
+    }
+
+    #[test]
+    fn test_active_underlay_ignores_connected_vpn() {
+        let s = make_state_with(&[
+            &MOCK_CONNECTED as *const HalNetDriver,
+            &MOCK_VPN_CONNECTED as *const HalNetDriver,
+        ]);
+        let underlay = local_get_active_underlay(&s);
+        assert_eq!(underlay, &MOCK_CONNECTED as *const HalNetDriver);
+    }
+
     // -----------------------------------------------------------------------
     // test_list_transports_empty
     // Mirrors test_net_manager.c: net_list_transports on empty state returns 0.
@@ -667,5 +791,6 @@ mod tests {
         assert_eq!(HAL_NET_STATE_DISCONNECTED, 0);
         assert_eq!(HAL_NET_STATE_CONNECTING,   1);
         assert_eq!(HAL_NET_STATE_CONNECTED,    2);
+        assert_eq!(HAL_NET_VPN, 5);
     }
 }

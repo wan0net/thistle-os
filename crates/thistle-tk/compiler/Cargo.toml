@@ -1,0 +1,12 @@
+[package]
+name = "thistle-tk-ui-compiler"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+description = "Host-only declarative UI compiler for thistle-tk"
+
+[dependencies]
+roxmltree = "0.21.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

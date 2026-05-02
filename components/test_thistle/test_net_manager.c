@@ -62,6 +62,24 @@ static const hal_net_driver_t s_mock_connected = {
 };
 
 /* --------------------------------------------------------------------------
+ * Mock overlay VPN: always connected, returns a tailnet-style IP.
+ * -------------------------------------------------------------------------- */
+
+static const char *mock_vpn_get_ip(void) { return "100.64.0.42"; }
+
+static const hal_net_driver_t s_mock_vpn_connected = {
+    .type         = HAL_NET_VPN,
+    .name         = "MockVPN",
+    .init         = mock_connected_init,
+    .connect      = mock_connected_connect,
+    .disconnect   = mock_connected_disconnect,
+    .get_state    = mock_connected_get_state,
+    .get_ip       = mock_vpn_get_ip,
+    .get_rssi     = NULL,
+    .is_connected = mock_connected_is_connected,
+};
+
+/* --------------------------------------------------------------------------
  * Tests
  * -------------------------------------------------------------------------- */
 
@@ -137,6 +155,32 @@ TEST_CASE("test_net_multiple_transports: disconnected then connected — net pic
     const hal_net_driver_t *active = net_get_active();
     TEST_ASSERT_NOT_NULL(active);
     TEST_ASSERT_EQUAL_STRING("MockConnected", active->name);
+}
+
+TEST_CASE("test_net_vpn_overlay_preferred: connected VPN becomes active over underlay", "[net]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_init());
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_register(&s_mock_connected));
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_register(&s_mock_vpn_connected));
+
+    const hal_net_driver_t *active = net_get_active();
+    TEST_ASSERT_NOT_NULL(active);
+    TEST_ASSERT_EQUAL(HAL_NET_VPN, active->type);
+    TEST_ASSERT_EQUAL_STRING("MockVPN", active->name);
+    TEST_ASSERT_EQUAL_STRING("100.64.0.42", net_get_ip());
+}
+
+TEST_CASE("test_net_active_underlay: connected underlay ignores VPN overlay", "[net]")
+{
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_init());
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_register(&s_mock_connected));
+    TEST_ASSERT_EQUAL(ESP_OK, net_manager_register(&s_mock_vpn_connected));
+
+    TEST_ASSERT_TRUE(net_has_underlay_connection());
+    const hal_net_driver_t *underlay = net_get_active_underlay();
+    TEST_ASSERT_NOT_NULL(underlay);
+    TEST_ASSERT_EQUAL(HAL_NET_HOST, underlay->type);
+    TEST_ASSERT_EQUAL_STRING("MockConnected", underlay->name);
 }
 
 TEST_CASE("test_net_connect_best: mock with connect=ESP_OK succeeds", "[net]")

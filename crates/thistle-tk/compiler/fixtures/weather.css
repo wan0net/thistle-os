@@ -1,0 +1,32 @@
+.screen {
+  layout: column;
+  background: theme(bg);
+}
+
+.header {
+  layout: row;
+  height: 30px;
+  padding: 0 8px;
+  align: start center;
+  background: theme(surface);
+}
+
+.content {
+  layout: column;
+  flex-grow: 1;
+  gap: 4px;
+  scrollable: true;
+}
+
+.title {
+  font-size: large;
+  color: theme(text);
+}
+
+button.primary {
+  height: 26px;
+  padding: 2px 10px;
+  radius: 4px;
+  background: theme(primary);
+  color: theme(bg);
+}

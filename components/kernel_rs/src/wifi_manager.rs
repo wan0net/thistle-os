@@ -8,6 +8,8 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::Mutex;
 
+use crate::event::{event_publish, CEvent, EventType};
+
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
@@ -24,6 +26,15 @@ const WIFI_STATE_DISCONNECTED: u32 = 0;
 const WIFI_STATE_CONNECTING: u32 = 1;
 const WIFI_STATE_CONNECTED: u32 = 2;
 const WIFI_STATE_FAILED: u32 = 3;
+
+#[cfg(target_os = "espidf")]
+const WIFI_MODE_STA: u32 = 1;
+#[cfg(target_os = "espidf")]
+const ESP_EVENT_ANY_ID: i32 = -1;
+#[cfg(target_os = "espidf")]
+const WIFI_EVENT_STA_DISCONNECTED: i32 = 5;
+#[cfg(target_os = "espidf")]
+const IP_EVENT_STA_GOT_IP: i32 = 0;
 
 // SSID max length (matches wifi_manager.h)
 const WIFI_SSID_MAX_LEN: usize = 32;
@@ -71,6 +82,9 @@ static WIFI_STATE: Mutex<WifiState> = Mutex::new(WifiState::new());
 
 #[cfg(target_os = "espidf")]
 extern "C" {
+    static WIFI_EVENT: *const c_char;
+    static IP_EVENT: *const c_char;
+
     fn esp_netif_init() -> i32;
     fn esp_event_loop_create_default() -> i32;
     fn esp_netif_get_handle_from_ifkey(key: *const c_char) -> *mut c_void;
@@ -96,6 +110,55 @@ extern "C" {
     fn esp_netif_sntp_deinit();
     fn calloc(count: usize, size: usize) -> *mut c_void;
     fn free(ptr: *mut c_void);
+}
+
+#[cfg(target_os = "espidf")]
+#[repr(C)]
+struct EspIp4Addr {
+    addr: u32,
+}
+
+#[cfg(target_os = "espidf")]
+#[repr(C)]
+struct EspNetifIpInfo {
+    ip: EspIp4Addr,
+    netmask: EspIp4Addr,
+    gw: EspIp4Addr,
+}
+
+#[cfg(target_os = "espidf")]
+#[repr(C)]
+struct IpEventGotIp {
+    esp_netif: *mut c_void,
+    ip_info: EspNetifIpInfo,
+    ip_changed: bool,
+}
+
+#[cfg(target_os = "espidf")]
+unsafe extern "C" fn wifi_event_handler(
+    _arg: *mut c_void,
+    event_base: *const c_char,
+    event_id: i32,
+    event_data: *mut c_void,
+) {
+    if event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED {
+        wifi_manager_set_state(WIFI_STATE_DISCONNECTED, std::ptr::null());
+        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"WiFi disconnected\0".as_ptr());
+    } else if event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP {
+        let got_ip = event_data as *const IpEventGotIp;
+        if !got_ip.is_null() {
+            let octets = (*got_ip).ip_info.ip.addr.to_le_bytes();
+            let ip = format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3]);
+            if let Ok(ip_cstr) = std::ffi::CString::new(ip) {
+                wifi_manager_set_state(WIFI_STATE_CONNECTED, ip_cstr.as_ptr());
+            } else {
+                wifi_manager_set_state(WIFI_STATE_CONNECTED, std::ptr::null());
+            }
+        } else {
+            wifi_manager_set_state(WIFI_STATE_CONNECTED, std::ptr::null());
+        }
+        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"WiFi got IP\0".as_ptr());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +194,7 @@ pub extern "C" fn wifi_manager_init() -> i32 {
     unsafe {
         // Inline wifi_manager_init_hardware logic (formerly in kernel_shims.c)
         static mut S_WIFI_HW_INITIALIZED: bool = false;
+        static mut S_WIFI_EVENTS_REGISTERED: bool = false;
         if !S_WIFI_HW_INITIALIZED {
             let ret = esp_netif_init();
             if ret != ESP_OK && ret != ESP_ERR_INVALID_STATE {
@@ -157,7 +221,45 @@ pub extern "C" fn wifi_manager_init() -> i32 {
                 esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_init failed: %d\0".as_ptr(), ret);
                 return ret;
             }
+
+            let ret = esp_wifi_set_mode(WIFI_MODE_STA);
+            if ret != ESP_OK {
+                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_set_mode failed: %d\0".as_ptr(), ret);
+                return ret;
+            }
+
+            let ret = esp_wifi_start();
+            if ret != ESP_OK && ret != ESP_ERR_INVALID_STATE {
+                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_start failed: %d\0".as_ptr(), ret);
+                return ret;
+            }
+
             S_WIFI_HW_INITIALIZED = true;
+        }
+
+        if !S_WIFI_EVENTS_REGISTERED {
+            let ret = esp_event_handler_register(
+                WIFI_EVENT,
+                ESP_EVENT_ANY_ID,
+                wifi_event_handler as *const c_void,
+                std::ptr::null_mut(),
+            );
+            if ret != ESP_OK {
+                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"wifi event register failed: %d\0".as_ptr(), ret);
+                return ret;
+            }
+
+            let ret = esp_event_handler_register(
+                IP_EVENT,
+                ESP_EVENT_ANY_ID,
+                wifi_event_handler as *const c_void,
+                std::ptr::null_mut(),
+            );
+            if ret != ESP_OK {
+                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ip event register failed: %d\0".as_ptr(), ret);
+                return ret;
+            }
+            S_WIFI_EVENTS_REGISTERED = true;
         }
     }
 
@@ -838,6 +940,11 @@ pub unsafe extern "C" fn wifi_manager_auto_connect() -> i32 {
 /// `ip` must point to a 16-byte null-terminated string, or may be NULL.
 #[no_mangle]
 pub unsafe extern "C" fn wifi_manager_set_state(new_state: u32, ip: *const c_char) {
+    let old_state = WIFI_STATE
+        .lock()
+        .map(|s| s.state)
+        .unwrap_or(WIFI_STATE_DISCONNECTED);
+
     if let Ok(mut state) = WIFI_STATE.lock() {
         state.state = new_state;
         if new_state == WIFI_STATE_CONNECTED && !ip.is_null() {
@@ -845,6 +952,26 @@ pub unsafe extern "C" fn wifi_manager_set_state(new_state: u32, ip: *const c_cha
             let len = ip_str.len().min(15);
             state.ip[..len].copy_from_slice(&ip_str[..len]);
             state.ip[len] = 0;
+        } else {
+            state.ip = [0u8; 16];
+        }
+    }
+
+    if old_state != new_state {
+        let event_type = match new_state {
+            WIFI_STATE_CONNECTED => Some(EventType::WifiConnected as u32),
+            WIFI_STATE_DISCONNECTED | WIFI_STATE_FAILED => Some(EventType::WifiDisconnected as u32),
+            _ => None,
+        };
+
+        if let Some(event_type) = event_type {
+            let ev = CEvent {
+                event_type,
+                timestamp: 0,
+                data: std::ptr::null_mut(),
+                data_len: 0,
+            };
+            let _ = event_publish(&ev as *const CEvent);
         }
     }
 }
@@ -899,6 +1026,26 @@ mod tests {
         );
 
         // Restore
+        unsafe { wifi_manager_set_state(original, std::ptr::null()) };
+    }
+
+    #[test]
+    fn test_get_ip_cleared_on_disconnect() {
+        let original = wifi_manager_get_state();
+        let ip = std::ffi::CString::new("192.168.1.44").unwrap();
+
+        unsafe { wifi_manager_set_state(WIFI_STATE_CONNECTED, ip.as_ptr()) };
+        assert!(
+            !wifi_manager_get_ip().is_null(),
+            "ip must be available while connected"
+        );
+
+        unsafe { wifi_manager_set_state(WIFI_STATE_DISCONNECTED, std::ptr::null()) };
+        assert!(
+            wifi_manager_get_ip().is_null(),
+            "ip must be cleared after disconnect"
+        );
+
         unsafe { wifi_manager_set_state(original, std::ptr::null()) };
     }
 
