@@ -148,9 +148,6 @@ unsafe extern "C" fn on_create() -> i32 {
     let root = thistle_ui_get_app_root();
 
     let bg_color = thistle_ui_theme_bg();
-    let text_color = thistle_ui_theme_text();
-    let text_secondary = thistle_ui_theme_text_secondary();
-    let surface_color = thistle_ui_theme_surface();
     let primary_color = thistle_ui_theme_primary();
 
     // Root column container filling the screen
@@ -161,29 +158,11 @@ unsafe extern "C" fn on_create() -> i32 {
     thistle_ui_set_bg_color(main_col, bg_color);
     thistle_ui_set_gap(main_col, 0);
 
-    // -- Status bar (24px row) ------------------------------------------------
-    let status_bar = thistle_ui_create_container(main_col);
-    thistle_ui_set_layout(status_bar, LAYOUT_ROW);
-    thistle_ui_set_size(status_bar, -1, STATUS_BAR_HEIGHT);
-    thistle_ui_set_align(status_bar, ALIGN_SPACE_BETWEEN, ALIGN_CENTER);
-    thistle_ui_set_padding(status_bar, 2, 4, 2, 4);
-    thistle_ui_set_bg_color(status_bar, surface_color);
-
-    let title_label = thistle_ui_create_label(
-        status_bar,
-        b"ThistleOS\0".as_ptr() as *const c_char,
-    );
-    thistle_ui_set_text_color(title_label, text_color);
-    thistle_ui_set_font_size(title_label, 12);
-
-    let clock_label = thistle_ui_create_label(
-        status_bar,
-        b"--:--\0".as_ptr() as *const c_char,
-    );
-    thistle_ui_set_text_color(clock_label, text_secondary);
-    thistle_ui_set_font_size(clock_label, 12);
-
-    // -- App list (scrollable column, flex-grow 1 to fill remaining) ----------
+    // -- App list (scrollable column, fills the whole panel) -----------------
+    // The status bar (ThistleOS title + clock placeholder) was a development
+    // placeholder; with real apps now showing up in the list it just stole
+    // 24 px from every entry below. Re-add as part of a proper system-wide
+    // chrome layer when there's something useful to put in it.
     let app_list = thistle_ui_create_container(main_col);
     thistle_ui_set_layout(app_list, LAYOUT_COLUMN);
     thistle_ui_set_flex_grow(app_list, 1);
