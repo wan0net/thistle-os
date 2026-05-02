@@ -10,8 +10,23 @@
 // render function runs layout, renders to a framebuffer, and flushes to the
 // HAL display driver.
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::os::raw::c_char;
 use std::sync::Mutex;
+
+#[cfg(target_os = "espidf")]
+extern "C" {
+    fn esp_log_write(level: i32, tag: *const u8, fmt: *const u8, ...);
+}
+
+#[cfg(target_os = "espidf")]
+macro_rules! wm_log {
+    ($fmt:expr) => {
+        unsafe { esp_log_write(3, b"tk_wm\0".as_ptr(), concat!($fmt, "\0").as_ptr()) }
+    };
+}
+
+static REFRESH_NEEDED: AtomicBool = AtomicBool::new(false);
 
 use thistle_tk::color::Color;
 use thistle_tk::layout::{Align, Direction, Rect};
@@ -307,6 +322,12 @@ pub extern "C" fn tk_wm_init() -> i32 {
     let width = hal_display_width() as u32;
     let height = hal_display_height() as u32;
 
+    #[cfg(target_os = "espidf")]
+    unsafe {
+        esp_log_write(3, b"tk_wm\0".as_ptr(),
+            b"I (?) tk_wm: init %dx%d\0".as_ptr(), width, height);
+    }
+
     let has_refresh = tk_wm_hal_has_refresh_rs();
     let mode = if has_refresh {
         DisplayMode::Mono
@@ -364,6 +385,17 @@ pub extern "C" fn tk_wm_init() -> i32 {
             (None, None, None)
         }
     } else {
+        // Compact / Full layouts — show a centered welcome label until apps
+        // register their UI. Without this the e-paper panel would be entirely
+        // blank on first boot, making it impossible to tell the display is
+        // alive without an oscilloscope.
+        let root_id = tree.root();
+        let mut welcome = LabelWidget::default();
+        let _ = welcome.text.push_str("ThistleOS");
+        welcome.color = Color::Text;
+        welcome.common.width_hint = SizeHint::Percent(1.0);
+        welcome.common.height_hint = SizeHint::Percent(1.0);
+        let _ = tree.add_child(root_id, Widget::Label(welcome));
         (None, None, None)
     };
 
@@ -401,16 +433,31 @@ pub extern "C" fn tk_wm_deinit() {
 }
 
 #[no_mangle]
+pub extern "C" fn tk_wm_do_refresh() {
+    if REFRESH_NEEDED.load(Ordering::Relaxed) {
+        REFRESH_NEEDED.store(false, Ordering::Relaxed);
+        unsafe { tk_wm_hal_refresh_rs(); }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tk_wm_render() {
     let mut lock = TK_WM.lock().unwrap();
     let state = match lock.as_mut() {
         Some(s) => s,
-        None => return,
+        None => {
+            #[cfg(target_os = "espidf")]
+            wm_log!("I (?) tk_wm: render called but WM not initialized");
+            return;
+        }
     };
 
     if !state.dirty {
         return;
     }
+
+    #[cfg(target_os = "espidf")]
+    wm_log!("I (?) tk_wm: rendering dirty frame");
 
     let viewport = Rect {
         x: 0,
@@ -437,8 +484,8 @@ pub extern "C" fn tk_wm_render() {
                 render::render(&state.tree, &state.theme, &MonoMapper, fb);
                 unsafe {
                     tk_wm_hal_flush_rs(&area, fb.buf.as_ptr());
-                    tk_wm_hal_refresh_rs();
                 }
+                REFRESH_NEEDED.store(true, Ordering::Relaxed);
             }
         }
         DisplayMode::Rgb => {

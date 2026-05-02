@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// ThistleOS — GDEQ031T10 3.1" 320x240 B/W e-paper driver
-// Controller: UC8253 (compatible)
+// ThistleOS — GDEQ031T10 3.1" 240x320 B/W e-paper driver
+// Controller: UC8253 (confirmed against GxEPD2_310_GDEQ031T10).
 //
-// SPI wiring assumed: MOSI, SCK wired to the SPI host; CS, DC, RST, BUSY are
-// discrete GPIOs supplied through epaper_gdeq031t10_config_t.
+// Wiring on LilyGo T-Deck Pro: MOSI=33, SCK=36, CS=34, DC=35, BUSY=37,
+// RST=-1 (not connected — chip is reset by toggling 1V8_EN on GPIO38
+// before this driver runs, plus the soft-reset command below).
+//
+// BUSY polarity: LOW = busy, HIGH = ready. Wait while BUSY reads 0.
 
 #include "drv_epaper_gdeq031t10.h"
 
@@ -19,148 +22,76 @@
 
 static const char *TAG = "epaper";
 
-/* ── Panel geometry ─────────────────────────────────────────────────────── */
-/* T-Deck Pro is held portrait (like BlackBerry). Native panel matches:
- * 240 columns × 320 rows. No rotation needed. */
+/* ── Panel geometry ───────────────────────────────────────────────────── */
 #define EPD_WIDTH       240
 #define EPD_HEIGHT      320
-#define EPD_FB_BYTES    (EPD_WIDTH * EPD_HEIGHT / 8)   /* 1-bit packed */
+#define EPD_FB_BYTES    (EPD_WIDTH * EPD_HEIGHT / 8)   /* 9600 bytes */
 
-/* ── UC8253 command codes ────────────────────────────────────────────────── */
-#define CMD_PANEL_SETTING           0x00
-#define CMD_POWER_SETTING           0x01
-#define CMD_POWER_OFF               0x02
-#define CMD_POWER_ON                0x04
-#define CMD_BOOSTER_SOFT_START      0x06
-#define CMD_DEEP_SLEEP              0x07
-#define CMD_DATA_START_TRANSMISSION 0x10
-#define CMD_DATA_STOP               0x11
-#define CMD_DISPLAY_REFRESH         0x12
-#define CMD_PARTIAL_DATA_START      0x14
-#define CMD_PARTIAL_DISPLAY_REFRESH 0x15
-#define CMD_PARTIAL_DISPLAY_END     0x92
-#define CMD_LUT_FULL                0x20
-#define CMD_LUT_PARTIAL             0x21
-#define CMD_PLL_CONTROL             0x30
-#define CMD_TEMPERATURE_SENSOR      0x40
-#define CMD_VCOM_DATA_INTERVAL      0x50
-#define CMD_TCON_SETTING            0x60
-#define CMD_RESOLUTION_SETTING      0x61
-#define CMD_GSST_SETTING            0x65
-#define CMD_REVISION                0x70
-#define CMD_GET_STATUS              0x71
-#define CMD_AUTO_MEASUREMENT_VCOM   0x80
-#define CMD_READ_VCOM_VALUE         0x81
-#define CMD_VCM_DC_SETTING          0x82
-#define CMD_PARTIAL_WINDOW          0x90
+/* ── UC8253 commands (matching GxEPD2_310_GDEQ031T10) ────────────────── */
+#define CMD_PSR             0x00  /* Panel Setting */
+#define CMD_PWR             0x01  /* Power Setting */
+#define CMD_POF             0x02  /* Power OFF */
+#define CMD_PON             0x04  /* Power ON */
+#define CMD_DEEP_SLEEP      0x07
+#define CMD_DTM1            0x10  /* Data Transmission 1 (old/B/W frame) */
+#define CMD_DSP             0x11  /* Data Stop */
+#define CMD_DRF             0x12  /* Display Refresh */
+#define CMD_DTM2            0x13  /* Data Transmission 2 (new/B/W frame) */
+#define CMD_LUT_VCOM        0x20
+#define CMD_PLL             0x30
+#define CMD_TSC             0x40  /* Temperature Sensor */
+#define CMD_CDI             0x50  /* VCOM and Data Interval */
+#define CMD_TCON            0x60
+#define CMD_TRES            0x61  /* Resolution Setting */
+#define CMD_REVISION        0x70
+#define CMD_FLG             0x71  /* Status / FLAG */
+#define CMD_PARTIAL_WINDOW  0x90
+#define CMD_PARTIAL_IN      0x91
+#define CMD_PARTIAL_OUT     0x92
+#define CMD_CCSET           0xE0  /* Cascade Setting */
+#define CMD_TSSET           0xE5  /* Force Temperature */
 
-/* ── LUT tables ─────────────────────────────────────────────────────────── */
-/* Full-refresh LUT for GDEQ031T10 / UC8253 (44 bytes) */
-static const uint8_t LUT_FULL_UPDATE[] __attribute__((unused)) = {
-    0x80, 0x60, 0x40, 0x00, 0x00, 0x00, 0x00,
-    0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00,
-    0x80, 0x60, 0x40, 0x00, 0x00, 0x00, 0x00,
-    0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x03, 0x03, 0x00, 0x00, 0x02,
-    0x09, 0x09, 0x00, 0x00, 0x02,
-    0x03, 0x03, 0x00, 0x00, 0x02,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x15, 0x41, 0xA8, 0x32, 0x30, 0x0A,
-};
-
-/* Partial-refresh LUT (faster, some ghosting) */
-static const uint8_t LUT_PARTIAL_UPDATE[] __attribute__((unused)) = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x0A, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x15, 0x41, 0xA8, 0x32, 0x30, 0x0A,
-};
-
-/* ── Driver state ────────────────────────────────────────────────────────── */
+/* ── Driver state ──────────────────────────────────────────────────── */
 static struct {
     spi_device_handle_t        spi;
     epaper_gdeq031t10_config_t cfg;
     hal_display_refresh_mode_t refresh_mode;
-    uint8_t                   *fb;          /* 1-bit packed framebuffer (new) */
-    uint8_t                   *fb_old;      /* previous frame (for old data cmd 0x10) */
+    uint8_t                   *fb;          /* current frame to send via 0x13 */
+    uint8_t                   *fb_old;      /* previous frame to send via 0x10 */
     bool                       initialised;
+    bool                       init_seq_done;     /* PSR sent since last refresh */
     bool                       power_on;
     bool                       first_refresh_done;
 } s_epd;
 
-/* ── Low-level helpers ───────────────────────────────────────────────────── */
+/* ── Low-level helpers ──────────────────────────────────────────────── */
 
-static void epaper_hw_reset(void)
-{
-    if (s_epd.cfg.pin_rst < 0) {
-        /* RST not connected — skip hardware reset, just wait */
-        vTaskDelay(pdMS_TO_TICKS(20));
-        return;
-    }
-    gpio_set_level(s_epd.cfg.pin_rst, 0);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level(s_epd.cfg.pin_rst, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
-}
-
-/* Wait until BUSY goes low (display idle).  Returns ESP_ERR_TIMEOUT on failure. */
-static esp_err_t epaper_wait_busy(uint32_t timeout_ms)
-{
-    uint32_t elapsed = 0;
-    while (gpio_get_level(s_epd.cfg.pin_busy)) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        elapsed += 10;
-        if (elapsed >= timeout_ms) {
-            ESP_LOGE(TAG, "BUSY timeout after %u ms", (unsigned)timeout_ms);
-            return ESP_ERR_TIMEOUT;
-        }
-    }
-    return ESP_OK;
-}
-
-/* Transmit a single command byte (DC=0). */
 static esp_err_t epaper_send_cmd(uint8_t cmd)
 {
-    gpio_set_level(s_epd.cfg.pin_cs, 0);   /* select */
-    gpio_set_level(s_epd.cfg.pin_dc, 0);   /* command mode */
-    spi_transaction_t t = {
-        .length    = 8,
-        .tx_buffer = &cmd,
-    };
+    gpio_set_level(s_epd.cfg.pin_cs, 0);
+    gpio_set_level(s_epd.cfg.pin_dc, 0);
+    spi_transaction_t t = { .length = 8, .tx_buffer = &cmd };
     esp_err_t ret = spi_device_polling_transmit(s_epd.spi, &t);
-    gpio_set_level(s_epd.cfg.pin_cs, 1);   /* deselect */
+    gpio_set_level(s_epd.cfg.pin_cs, 1);
+    if (ret != ESP_OK) ESP_LOGE(TAG, "cmd 0x%02X spi err: %s", cmd, esp_err_to_name(ret));
     return ret;
 }
 
-/* Transmit data bytes (DC=1). */
 static esp_err_t epaper_send_data(const uint8_t *data, size_t len)
 {
     if (len == 0) return ESP_OK;
-    gpio_set_level(s_epd.cfg.pin_cs, 0);   /* select */
-    gpio_set_level(s_epd.cfg.pin_dc, 1);   /* data mode */
-    /* Send in chunks to avoid SPI DMA limits */
+    gpio_set_level(s_epd.cfg.pin_cs, 0);
+    gpio_set_level(s_epd.cfg.pin_dc, 1);
     esp_err_t ret = ESP_OK;
     size_t sent = 0;
     while (sent < len && ret == ESP_OK) {
         size_t chunk = len - sent;
         if (chunk > 4096) chunk = 4096;
-        spi_transaction_t t = {
-            .length    = chunk * 8,
-            .tx_buffer = data + sent,
-        };
+        spi_transaction_t t = { .length = chunk * 8, .tx_buffer = data + sent };
         ret = spi_device_polling_transmit(s_epd.spi, &t);
         sent += chunk;
     }
-    gpio_set_level(s_epd.cfg.pin_cs, 1);   /* deselect */
+    gpio_set_level(s_epd.cfg.pin_cs, 1);
     return ret;
 }
 
@@ -169,323 +100,316 @@ static esp_err_t epaper_send_data_byte(uint8_t val)
     return epaper_send_data(&val, 1);
 }
 
-/* Load one of the LUT tables into the controller. */
-static esp_err_t __attribute__((unused)) epaper_load_lut(const uint8_t *lut, size_t len)
+/* Wait while BUSY reads LOW (chip is busy). Returns when BUSY goes HIGH or
+ * after timeout_ms — never blocks forever. */
+static void epaper_wait_ready(uint32_t timeout_ms, const char *tag)
 {
-    esp_err_t ret;
-    ret = epaper_send_cmd(CMD_LUT_FULL);
-    if (ret != ESP_OK) return ret;
-    return epaper_send_data(lut, len);
+    uint32_t elapsed = 0;
+    while (gpio_get_level(s_epd.cfg.pin_busy) == 0 && elapsed < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        elapsed += 10;
+    }
+    if (gpio_get_level(s_epd.cfg.pin_busy) == 0) {
+        ESP_LOGW(TAG, "%s: BUSY still LOW after %ums (continuing)", tag, (unsigned)timeout_ms);
+    } else if (elapsed > 0) {
+        ESP_LOGI(TAG, "%s: ready after %ums", tag, (unsigned)elapsed);
+    }
 }
 
-/* ── Init sequence ───────────────────────────────────────────────────────── */
+static void epaper_hw_reset(void)
+{
+    if (s_epd.cfg.pin_rst < 0) {
+        /* T-Deck Pro: RST not connected; rely on 1V8_EN power cycle (board init) */
+        vTaskDelay(pdMS_TO_TICKS(20));
+        return;
+    }
+    gpio_set_level(s_epd.cfg.pin_rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(s_epd.cfg.pin_rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(s_epd.cfg.pin_rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+/* ── UC8253 init sequence (matches GxEPD2 _InitDisplay) ────────────── */
+
+static esp_err_t epaper_init_display(void)
+{
+    esp_err_t ret;
+
+    /* Soft reset via PSR (used because RST is not wired on T-Deck Pro) */
+    ret  = epaper_send_cmd(CMD_PSR);
+    ret |= epaper_send_data_byte(0x1E);   /* soft reset */
+    ret |= epaper_send_data_byte(0x0D);
+    if (ret != ESP_OK) return ret;
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    /* Panel setting: BWOTP / KW mode */
+    ret  = epaper_send_cmd(CMD_PSR);
+    ret |= epaper_send_data_byte(0x1F);
+    ret |= epaper_send_data_byte(0x0D);
+    if (ret != ESP_OK) return ret;
+
+    s_epd.power_on = false;
+    s_epd.init_seq_done = true;
+    return ESP_OK;
+}
+
+static esp_err_t epaper_power_on(void)
+{
+    if (s_epd.power_on) return ESP_OK;
+    esp_err_t ret = epaper_send_cmd(CMD_PON);
+    if (ret != ESP_OK) return ret;
+    epaper_wait_ready(200, "PON");
+    s_epd.power_on = true;
+    return ESP_OK;
+}
+
+static esp_err_t epaper_power_off(void)
+{
+    if (!s_epd.power_on) return ESP_OK;
+    esp_err_t ret = epaper_send_cmd(CMD_POF);
+    if (ret != ESP_OK) return ret;
+    epaper_wait_ready(200, "POF");
+    s_epd.power_on = false;
+    return ESP_OK;
+}
+
+/* ── Driver vtable functions ──────────────────────────────────────── */
 
 static esp_err_t gdeq031t10_init(const void *config)
 {
-    if (!config) {
-        ESP_LOGE(TAG, "init: NULL config");
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (s_epd.initialised) {
-        ESP_LOGW(TAG, "already initialised");
-        return ESP_OK;
-    }
+    if (!config) return ESP_ERR_INVALID_ARG;
+    if (s_epd.initialised) return ESP_OK;
 
     memcpy(&s_epd.cfg, config, sizeof(epaper_gdeq031t10_config_t));
     s_epd.refresh_mode = HAL_DISPLAY_REFRESH_FULL;
 
-    /* ── Allocate framebuffers (new + old for differential refresh) ── */
-    s_epd.fb = heap_caps_malloc(EPD_FB_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    /* Allocate framebuffers */
+    s_epd.fb     = heap_caps_malloc(EPD_FB_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     s_epd.fb_old = heap_caps_malloc(EPD_FB_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
     if (!s_epd.fb || !s_epd.fb_old) {
-        ESP_LOGE(TAG, "framebuffer alloc failed (%u bytes x2)", EPD_FB_BYTES);
-        free(s_epd.fb); free(s_epd.fb_old);
-        s_epd.fb = NULL; s_epd.fb_old = NULL;
+        ESP_LOGE(TAG, "FB alloc failed");
+        free(s_epd.fb);     s_epd.fb = NULL;
+        free(s_epd.fb_old); s_epd.fb_old = NULL;
         return ESP_ERR_NO_MEM;
     }
-    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);      /* new = white */
-    memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);   /* old = white */
+    memset(s_epd.fb,     0xFF, EPD_FB_BYTES);   /* white */
+    memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);
 
-    /* ── GPIO configuration ── */
+    /* GPIO: CS, DC, (RST) as outputs */
+    uint64_t out_mask = (1ULL << s_epd.cfg.pin_cs) | (1ULL << s_epd.cfg.pin_dc);
+    if (s_epd.cfg.pin_rst >= 0) out_mask |= (1ULL << s_epd.cfg.pin_rst);
     gpio_config_t io_conf = {
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
-        .pin_bit_mask = (1ULL << s_epd.cfg.pin_cs)  |
-                        (1ULL << s_epd.cfg.pin_dc)  |
-                        ((s_epd.cfg.pin_rst >= 0) ? (1ULL << s_epd.cfg.pin_rst) : 0),
+        .pin_bit_mask = out_mask,
     };
-    esp_err_t ret = gpio_config(&io_conf); if (ret != ESP_OK) goto fail;
+    esp_err_t ret = gpio_config(&io_conf);
+    if (ret != ESP_OK) goto fail;
 
+    /* GPIO: BUSY as input. No internal pull — UC8253 drives it actively. */
     gpio_config_t busy_conf = {
         .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
         .pin_bit_mask = (1ULL << s_epd.cfg.pin_busy),
     };
-    ret = gpio_config(&busy_conf); if (ret != ESP_OK) goto fail;
+    ret = gpio_config(&busy_conf);
+    if (ret != ESP_OK) goto fail;
 
-    /* CS defaults high (SPI driver will drive it during transactions) */
     gpio_set_level(s_epd.cfg.pin_cs, 1);
 
-    /* ── SPI device ── */
+    /* SPI device — manual CS so we can frame each command/data segment */
     spi_device_interface_config_t dev_cfg = {
-        .clock_source   = SPI_CLK_SRC_DEFAULT,  /* required in ESP-IDF v6 */
-        .clock_speed_hz = s_epd.cfg.spi_clock_hz > 0
-                              ? s_epd.cfg.spi_clock_hz
-                              : 4000000,
+        .clock_source   = SPI_CLK_SRC_DEFAULT,
+        .clock_speed_hz = s_epd.cfg.spi_clock_hz > 0 ? s_epd.cfg.spi_clock_hz : 2000000,
         .mode           = 0,
-        .spics_io_num   = -1,  /* Manual CS — like GxEPD2 */
+        .spics_io_num   = -1,
         .queue_size     = 1,
     };
     ret = spi_bus_add_device(s_epd.cfg.spi_host, &dev_cfg, &s_epd.spi);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
-        free(s_epd.fb);
-        s_epd.fb = NULL;
-        return ret;
+        ESP_LOGE(TAG, "spi_bus_add_device: %s", esp_err_to_name(ret));
+        goto fail;
     }
 
-    /* ── UC8253 init sequence (from GxEPD2_310_GDEQ031T10) ── */
-    ESP_LOGI(TAG, "EPD init: CS=%d DC=%d BUSY=%d RST=%d host=%d",
+    ESP_LOGI(TAG, "UC8253 init: CS=%d DC=%d BUSY=%d RST=%d host=%d clk=%d",
              (int)s_epd.cfg.pin_cs, (int)s_epd.cfg.pin_dc,
              (int)s_epd.cfg.pin_busy, (int)s_epd.cfg.pin_rst,
-             (int)s_epd.cfg.spi_host);
+             (int)s_epd.cfg.spi_host, (int)s_epd.cfg.spi_clock_hz);
 
     epaper_hw_reset();
+    ESP_LOGI(TAG, "BUSY at start = %d (1=ready 0=busy)",
+             gpio_get_level(s_epd.cfg.pin_busy));
 
-    /* Soft reset via Panel Setting (GxEPD2 method when not hibernating) */
-    ret  = epaper_send_cmd(0x00);
-    ret |= epaper_send_data_byte(0x1E);   /* reset bit set */
-    ret |= epaper_send_data_byte(0x0D);
-    if (ret != ESP_OK) { ESP_LOGE(TAG, "Soft reset cmd failed"); goto fail; }
-    vTaskDelay(pdMS_TO_TICKS(10));
+    ret = epaper_init_display();
+    if (ret != ESP_OK) goto fail;
 
-    /* Panel setting (actual config) */
-    ret  = epaper_send_cmd(0x00);
-    ret |= epaper_send_data_byte(0x1F);   /* KW mode, BWOTP */
-    ret |= epaper_send_data_byte(0x0D);
-    if (ret != ESP_OK) { ESP_LOGE(TAG, "Panel setting failed"); goto fail; }
-
-    s_epd.initialised = true;
-    s_epd.power_on = false;
+    s_epd.initialised        = true;
     s_epd.first_refresh_done = false;
-    memset(s_epd.fb, 0xFF, EPD_FB_BYTES);      /* new = white */
-    memset(s_epd.fb_old, 0xFF, EPD_FB_BYTES);   /* old = white */
-
-    ESP_LOGI(TAG, "UC8253 initialised (%dx%d portrait)", EPD_WIDTH, EPD_HEIGHT);
+    ESP_LOGI(TAG, "UC8253 init complete (%dx%d portrait)", EPD_WIDTH, EPD_HEIGHT);
     return ESP_OK;
 
 fail:
-    spi_bus_remove_device(s_epd.spi);
-    free(s_epd.fb);
-    s_epd.fb  = NULL;
-    s_epd.spi = NULL;
+    if (s_epd.spi) { spi_bus_remove_device(s_epd.spi); s_epd.spi = NULL; }
+    free(s_epd.fb);     s_epd.fb = NULL;
+    free(s_epd.fb_old); s_epd.fb_old = NULL;
     return ret != ESP_OK ? ret : ESP_FAIL;
 }
-
-/* ── Deinit ──────────────────────────────────────────────────────────────── */
 
 static void gdeq031t10_deinit(void)
 {
     if (!s_epd.initialised) return;
-
-    /* Issue deep sleep before removing device */
+    epaper_power_off();
     epaper_send_cmd(CMD_DEEP_SLEEP);
-    epaper_send_data_byte(0xA5);   /* check code */
-
-    spi_bus_remove_device(s_epd.spi);
-    s_epd.spi = NULL;
-
-    free(s_epd.fb);
-    free(s_epd.fb_old);
-    s_epd.fb = NULL;
-    s_epd.fb_old = NULL;
-
+    epaper_send_data_byte(0xA5);
+    if (s_epd.spi) { spi_bus_remove_device(s_epd.spi); s_epd.spi = NULL; }
+    free(s_epd.fb);     s_epd.fb = NULL;
+    free(s_epd.fb_old); s_epd.fb_old = NULL;
     s_epd.initialised = false;
     ESP_LOGI(TAG, "deinit complete");
 }
 
-/* ── Flush ───────────────────────────────────────────────────────────────── */
-/*
- * flush() receives 240×320 portrait 1-bit pixel data matching the native panel.
- * Copies into the in-memory framebuffer only — no SPI/refresh here.
- */
+/* Copy a WM-supplied 1-bit packed sub-rectangle into the panel-sized
+ * framebuffer. WM bits are MSB-first within each byte; rows are packed
+ * (w + 7) / 8 bytes per row. */
 static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_data)
 {
     if (!s_epd.initialised) return ESP_ERR_INVALID_STATE;
-    if (!area || !color_data)  return ESP_ERR_INVALID_ARG;
+    if (!area || !color_data) return ESP_ERR_INVALID_ARG;
 
     uint16_t x1 = area->x1, y1 = area->y1;
     uint16_t x2 = area->x2, y2 = area->y2;
-
     if (x2 >= EPD_WIDTH)  x2 = EPD_WIDTH  - 1;
     if (y2 >= EPD_HEIGHT) y2 = EPD_HEIGHT - 1;
+    if (x1 > x2 || y1 > y2) return ESP_ERR_INVALID_ARG;
 
-    if (x1 > x2 || y1 > y2) {
-        return ESP_ERR_INVALID_ARG;
+    /* Fast path: full-width row-aligned blit. WM almost always sends the
+     * whole screen with x1=0, x2=239 — direct memcpy is ~50× faster than
+     * the per-pixel path. */
+    if (x1 == 0 && x2 == EPD_WIDTH - 1) {
+        size_t row_bytes = EPD_WIDTH / 8;
+        memcpy(s_epd.fb + (size_t)y1 * row_bytes,
+               color_data,
+               (size_t)(y2 - y1 + 1) * row_bytes);
+        return ESP_OK;
     }
 
-    /* Direct copy — no rotation. LVGL renders 240×320 portrait, matching native.
-     * This only updates the in-memory framebuffer (fast). The actual panel
-     * refresh is triggered separately via gdeq031t10_refresh(). */
+    /* Slow path: arbitrary rectangle, bit-by-bit. */
     uint16_t src_w = x2 - x1 + 1;
     for (uint16_t row = y1; row <= y2; row++) {
         for (uint16_t col = x1; col <= x2; col++) {
             uint32_t src_bit_idx = (uint32_t)(row - y1) * src_w + (col - x1);
-            uint8_t  src_byte    = color_data[src_bit_idx / 8];
-            uint8_t  src_bit     = (src_byte >> (7 - (src_bit_idx & 7))) & 1;
-
+            uint8_t  src_bit     = (color_data[src_bit_idx >> 3] >> (7 - (src_bit_idx & 7))) & 1;
             uint32_t dst_bit_idx = (uint32_t)row * EPD_WIDTH + col;
-            uint32_t dst_byte    = dst_bit_idx / 8;
             uint8_t  dst_mask    = 0x80u >> (dst_bit_idx & 7);
-
-            if (src_bit) {
-                s_epd.fb[dst_byte] |=  dst_mask;
-            } else {
-                s_epd.fb[dst_byte] &= ~dst_mask;
-            }
+            if (src_bit) s_epd.fb[dst_bit_idx >> 3] |=  dst_mask;
+            else         s_epd.fb[dst_bit_idx >> 3] &= ~dst_mask;
         }
     }
-
     return ESP_OK;
 }
 
-/* ── Refresh ─────────────────────────────────────────────────────────────── */
-/*
- * refresh() sends the in-memory framebuffer to the panel and triggers
- * a hardware display update.  Called once after the UI has settled
- * (debounced by the UI manager), NOT on every LVGL flush.
- *
- * Full-frame refresh following GxEPD2 cycle:
- * soft reset → panel setting → write data → VCOM → power on → refresh → power off
- */
 static esp_err_t gdeq031t10_refresh(void)
 {
     if (!s_epd.initialised) return ESP_ERR_INVALID_STATE;
 
-    esp_err_t err;
-    /* Use fast mode unless: first refresh, or explicitly set to FULL */
+    /* Skip refresh entirely if nothing has changed since last commit.
+     * E-paper panels should be static — this preserves both the image and
+     * the panel's lifespan. */
+    if (s_epd.first_refresh_done &&
+        memcmp(s_epd.fb, s_epd.fb_old, EPD_FB_BYTES) == 0) {
+        ESP_LOGD(TAG, "refresh: framebuffer unchanged — skipping");
+        return ESP_OK;
+    }
+
     bool fast = s_epd.first_refresh_done &&
                 s_epd.refresh_mode != HAL_DISPLAY_REFRESH_FULL;
 
-    /* Soft reset via panel setting register */
-    err  = epaper_send_cmd(0x00);
-    err |= epaper_send_data_byte(0x1E);
-    err |= epaper_send_data_byte(0x0D);
-    if (err != ESP_OK) return err;
-    vTaskDelay(pdMS_TO_TICKS(5));
+    esp_err_t ret;
 
-    /* Panel setting */
-    err  = epaper_send_cmd(0x00);
-    err |= epaper_send_data_byte(0x1F);
-    err |= epaper_send_data_byte(0x0D);
-    if (err != ESP_OK) return err;
+    /* Re-issue init if we cleared init_seq_done after the last refresh */
+    if (!s_epd.init_seq_done) {
+        ret = epaper_init_display();
+        if (ret != ESP_OK) return ret;
+    }
 
-    /* Write old framebuffer via cmd 0x10 (previous frame) */
-    err = epaper_send_cmd(0x10);
-    if (err != ESP_OK) return err;
-    err = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
-    if (err != ESP_OK) return err;
+    /* Send previous frame via 0x10 (used by partial/fast diff) */
+    ret  = epaper_send_cmd(CMD_DTM1);
+    if (ret != ESP_OK) return ret;
+    ret = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
+    if (ret != ESP_OK) return ret;
 
-    /* Write new framebuffer via cmd 0x13 (current frame) */
-    err = epaper_send_cmd(0x13);
-    if (err != ESP_OK) return err;
-    err = epaper_send_data(s_epd.fb, EPD_FB_BYTES);
-    if (err != ESP_OK) return err;
+    /* Send current frame via 0x13 */
+    ret = epaper_send_cmd(CMD_DTM2);
+    if (ret != ESP_OK) return ret;
+    ret = epaper_send_data(s_epd.fb, EPD_FB_BYTES);
+    if (ret != ESP_OK) return ret;
 
-    /* VCOM and data interval — different for full vs fast refresh
-     * Full: 0x97 (no flicker reduction), Fast: 0xD7 (partial mode) */
-    err  = epaper_send_cmd(0x50);
-    err |= epaper_send_data_byte(fast ? 0xD7 : 0x97);
-    if (err != ESP_OK) return err;
-
+    /* Fast/partial mode: cascade + force temperature (matches GxEPD2 _Update_Part) */
     if (fast) {
-        /* Fast refresh: cascade + forced temperature (from GxEPD2 _Update_Part) */
-        err  = epaper_send_cmd(0xE0);
-        err |= epaper_send_data_byte(0x02);   /* TSFIX */
-        err |= epaper_send_cmd(0xE5);
-        err |= epaper_send_data_byte(0x79);   /* temp=121°, faster LUT */
-        if (err != ESP_OK) return err;
+        ret  = epaper_send_cmd(CMD_CCSET);
+        ret |= epaper_send_data_byte(0x02);   /* TSFIX */
+        ret |= epaper_send_cmd(CMD_TSSET);
+        ret |= epaper_send_data_byte(0x79);   /* 121°C — fast LUT */
+        if (ret != ESP_OK) return ret;
     }
 
-    /* Power on */
-    err = epaper_send_cmd(CMD_POWER_ON);
-    if (err != ESP_OK) return err;
-    err = epaper_wait_busy(5000);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Power-on BUSY timeout");
-        return err;
-    }
+    /* VCOM/data interval — 0x97 for full refresh, 0xD7 for fast */
+    ret  = epaper_send_cmd(CMD_CDI);
+    ret |= epaper_send_data_byte(fast ? 0xD7 : 0x97);
+    if (ret != ESP_OK) return ret;
 
-    /* Refresh */
-    err = epaper_send_cmd(CMD_DISPLAY_REFRESH);
-    if (err != ESP_OK) return err;
-    err = epaper_wait_busy(fast ? 5000 : 15000);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Refresh BUSY timeout");
-        return err;
-    }
+    /* Power on, refresh, wait, power off */
+    ret = epaper_power_on();
+    if (ret != ESP_OK) return ret;
 
-    /* Power off */
-    err = epaper_send_cmd(CMD_POWER_OFF);
-    if (err != ESP_OK) return err;
-    epaper_wait_busy(5000);
-    s_epd.power_on = false;
+    ret = epaper_send_cmd(CMD_DRF);
+    if (ret != ESP_OK) return ret;
+    /* Full refresh ~1.1s, partial ~0.7s per GxEPD2 timing. Allow generous
+     * margin (8s) since the BUSY signal may be flaky on this board. */
+    epaper_wait_ready(fast ? 3000 : 8000, "DRF");
 
-    /* Save current frame as "old" for next differential refresh */
+    epaper_power_off();
+
+    /* Save current frame as previous; auto-switch to fast for future updates */
     memcpy(s_epd.fb_old, s_epd.fb, EPD_FB_BYTES);
-
-    if (!s_epd.first_refresh_done) {
-        s_epd.first_refresh_done = true;
-    }
-    /* After a full refresh, auto-switch back to fast for subsequent updates */
-    if (!fast) {
+    s_epd.first_refresh_done = true;
+    s_epd.init_seq_done      = false;   /* GxEPD2 forces re-init each cycle */
+    if (s_epd.refresh_mode == HAL_DISPLAY_REFRESH_FULL && !fast) {
+        /* Stay in FULL only on the first paint; later refreshes use fast.
+         * Caller can force a full clean refresh via set_refresh_mode(FULL). */
         s_epd.refresh_mode = HAL_DISPLAY_REFRESH_FAST;
     }
 
-    ESP_LOGI(TAG, "panel refresh complete");
+    ESP_LOGI(TAG, "refresh: %s done", fast ? "fast" : "full");
     return ESP_OK;
 }
-
-/* ── set_brightness ──────────────────────────────────────────────────────── */
 
 static esp_err_t gdeq031t10_set_brightness(uint8_t percent)
 {
     (void)percent;
-    /* E-paper has no backlight */
-    return ESP_ERR_NOT_SUPPORTED;
+    return ESP_ERR_NOT_SUPPORTED;   /* e-paper has no backlight */
 }
-
-/* ── sleep ───────────────────────────────────────────────────────────────── */
 
 static esp_err_t gdeq031t10_sleep(bool enter)
 {
     if (!s_epd.initialised) return ESP_ERR_INVALID_STATE;
-
     if (enter) {
-        esp_err_t ret = epaper_send_cmd(CMD_POWER_OFF);
-        if (ret != ESP_OK) return ret;
-        ret = epaper_wait_busy(3000);
-        if (ret != ESP_OK) return ret;
-
-        ret  = epaper_send_cmd(CMD_DEEP_SLEEP);
-        ret |= epaper_send_data_byte(0xA5);
-        return ret;
+        epaper_power_off();
+        epaper_send_cmd(CMD_DEEP_SLEEP);
+        epaper_send_data_byte(0xA5);
+        s_epd.init_seq_done = false;
     } else {
-        /* Wake: hardware reset + re-issue power-on */
         epaper_hw_reset();
-        esp_err_t ret = epaper_wait_busy(3000);
-        if (ret != ESP_OK) return ret;
-        ret = epaper_send_cmd(CMD_POWER_ON);
-        if (ret != ESP_OK) return ret;
-        return epaper_wait_busy(3000);
+        epaper_init_display();
     }
+    return ESP_OK;
 }
-
-/* ── set_refresh_mode ────────────────────────────────────────────────────── */
 
 static esp_err_t gdeq031t10_set_refresh_mode(hal_display_refresh_mode_t mode)
 {
@@ -493,7 +417,7 @@ static esp_err_t gdeq031t10_set_refresh_mode(hal_display_refresh_mode_t mode)
     return ESP_OK;
 }
 
-/* ── Vtable ──────────────────────────────────────────────────────────────── */
+/* ── Vtable ──────────────────────────────────────────────────────── */
 
 static const hal_display_driver_t gdeq031t10_driver = {
     .init             = gdeq031t10_init,
