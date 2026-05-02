@@ -385,17 +385,8 @@ pub extern "C" fn tk_wm_init() -> i32 {
             (None, None, None)
         }
     } else {
-        // Compact / Full layouts — show a centered welcome label until apps
-        // register their UI. Without this the e-paper panel would be entirely
-        // blank on first boot, making it impossible to tell the display is
-        // alive without an oscilloscope.
-        let root_id = tree.root();
-        let mut welcome = LabelWidget::default();
-        let _ = welcome.text.push_str("ThistleOS");
-        welcome.color = Color::Text;
-        welcome.common.width_hint = SizeHint::Percent(1.0);
-        welcome.common.height_hint = SizeHint::Percent(1.0);
-        let _ = tree.add_child(root_id, Widget::Label(welcome));
+        // Compact / Full layouts — apps build their own UI under root via
+        // thistle_ui_get_app_root(). No WM-provided chrome here.
         (None, None, None)
     };
 
@@ -422,6 +413,7 @@ pub extern "C" fn tk_wm_init() -> i32 {
         micro_right_arrow: micro_right,
         micro_app_label: micro_label,
     });
+    drop(lock);
 
     0 // ESP_OK
 }
@@ -1015,6 +1007,19 @@ pub extern "C" fn tk_wm_widget_set_radius(widget: u32, r: i32) {
     }
 }
 
+/// Attach a Rust `OnPress` callback to a Button widget.
+/// Used by built-in apps in the same crate that don't need the C
+/// callback bridge (which `tk_wm_widget_on_event` is supposed to handle
+/// but currently doesn't).
+pub fn set_button_on_press(widget_id: u32, on_press: thistle_tk::widget::OnPress) {
+    let mut lock = TK_WM.lock().unwrap();
+    if let Some(state) = lock.as_mut() {
+        if let Some(Widget::Button(b)) = state.tree.get_mut(widget_id as WidgetId) {
+            b.on_press = Some(on_press);
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_on_event(
     widget: u32,
@@ -1165,14 +1170,24 @@ pub unsafe extern "C" fn tk_wm_on_input(event: *const HalInputEvent) -> bool {
         None => return false,
     };
 
+    // Translate keyboard linefeed ('\n', 0x0A) to KEY_ENTER (0x0D) so the
+    // dispatch_key handler in thistle-tk recognises Enter from the TCA8418,
+    // whose keymap emits '\n' for the Return key.
+    let normalize_key = |code: u16| -> u32 {
+        match code as u32 {
+            0x0A => thistle_tk::input::KEY_ENTER, // 0x0D
+            other => other,
+        }
+    };
+
     // Map HAL event types to thistle-tk InputEvent
     // HAL: 0=key_down, 1=key_up, 2=touch_down, 3=touch_up, 4=touch_move
     let tk_event = match evt.event_type {
         0 => thistle_tk::input::InputEvent::KeyDown {
-            code: evt.data[0] as u32,
+            code: normalize_key(evt.data[0]),
         },
         1 => thistle_tk::input::InputEvent::KeyUp {
-            code: evt.data[0] as u32,
+            code: normalize_key(evt.data[0]),
         },
         2 => thistle_tk::input::InputEvent::TouchDown {
             x: evt.data[0] as i32,
@@ -1189,11 +1204,63 @@ pub unsafe extern "C" fn tk_wm_on_input(event: *const HalInputEvent) -> bool {
         _ => return false,
     };
 
+    // If a key arrives but nothing is focused (the launcher doesn't focus
+    // anything during on_create), auto-focus the first focusable widget so
+    // Enter / characters have somewhere to land. Without this, every key
+    // press falls through dispatch_key with no effect.
+    let auto_focused = if matches!(tk_event, thistle_tk::input::InputEvent::KeyDown { .. })
+        && state.tree.focus().is_none()
+    {
+        if let Some(first) = first_focusable(&state.tree) {
+            state.tree.set_focus(Some(first));
+            state.tree.mark_dirty(first);
+            state.dirty = true;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     let handled = thistle_tk::input::dispatch_input(&mut state.tree, &tk_event);
     if handled {
         state.dirty = true;
     }
-    handled
+    // Drop TK_WM lock before processing any deferred app launches that the
+    // press handler may have queued. Calling app_manager_launch directly
+    // from inside dispatch_input would re-enter the WM via the new app's
+    // on_create and deadlock.
+    drop(lock);
+    crate::tk_launcher::process_pending_launch();
+
+    handled || auto_focused
+}
+
+/// Find the first focusable widget by tree-walk order. Used to bootstrap
+/// focus when the active app didn't set it explicitly.
+fn first_focusable(tree: &thistle_tk::tree::UiTree) -> Option<thistle_tk::widget::WidgetId> {
+    use thistle_tk::widget::Widget;
+    let mut found: Option<thistle_tk::widget::WidgetId> = None;
+    tree.walk(tree.root(), &mut |id, w| {
+        if found.is_some() {
+            return false;
+        }
+        if matches!(
+            w,
+            Widget::Button(_)
+                | Widget::TextInput(_)
+                | Widget::Switch(_)
+                | Widget::Checkbox(_)
+                | Widget::Slider(_)
+                | Widget::Dropdown(_)
+        ) {
+            found = Some(id);
+            return false;
+        }
+        true
+    });
+    found
 }
 
 // ---------------------------------------------------------------------------

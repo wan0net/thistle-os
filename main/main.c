@@ -16,6 +16,7 @@
 #include "thistle/elf_loader.h"
 /* board_config.h not needed — WM selected by display capability */
 #include "hal/board.h"
+#include "hal/input.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
 #include "ui/toast.h"
@@ -47,6 +48,38 @@ static void run_tests(void)
 static const char *TAG = "thistle";
 
 extern void tk_wm_do_refresh(void);
+extern bool tk_wm_on_input(const hal_input_event_t *event);
+
+/* HAL → WM input dispatcher. The thistle-tk path doesn't have an equivalent
+ * to the LVGL ui_input_hal_cb wiring (components/ui/src/manager.c); without
+ * this, key/touch events sit in driver FIFOs forever. */
+static void tk_input_hal_cb(const hal_input_event_t *event, void *user_data)
+{
+    (void)user_data;
+    tk_wm_on_input(event);
+}
+
+static void tk_register_input_callbacks(void)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg) return;
+    for (int i = 0; i < reg->input_count; i++) {
+        if (reg->inputs[i] && reg->inputs[i]->register_callback) {
+            reg->inputs[i]->register_callback(tk_input_hal_cb, NULL);
+        }
+    }
+}
+
+static void tk_poll_inputs(void)
+{
+    const hal_registry_t *reg = hal_get_registry();
+    if (!reg) return;
+    for (int i = 0; i < reg->input_count; i++) {
+        if (reg->inputs[i] && reg->inputs[i]->poll) {
+            reg->inputs[i]->poll();
+        }
+    }
+}
 
 static void tk_render_task(void *arg)
 {
@@ -54,7 +87,8 @@ static void tk_render_task(void *arg)
     ESP_LOGI(TAG, "tk_render_task: started");
     /* Wait a bit to let the system settle before first render */
     vTaskDelay(pdMS_TO_TICKS(500));
-    /* Polling loop: tk_wm_render() and tk_wm_do_refresh() both internally
+    /* Polling loop: poll inputs first so any keypresses mark widgets dirty
+     * before we render. tk_wm_render() and tk_wm_do_refresh() both internally
      * gate on dirty / REFRESH_NEEDED flags, so they're cheap no-ops when
      * nothing has changed. Hardware refresh only fires after a render
      * actually touched the framebuffer — keeping the e-paper static.
@@ -62,9 +96,10 @@ static void tk_render_task(void *arg)
      * Refresh is invoked at this shallow call depth (not from inside the
      * deep render chain) to avoid Xtensa CALL8 register-window overflow. */
     for (;;) {
+        tk_poll_inputs();
         display_server_tick();
         tk_wm_do_refresh();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -182,6 +217,11 @@ void app_main(void)
     permissions_grant("com.thistle.vault",       PERM_STORAGE | PERM_SYSTEM);
 
     if (use_tk_wm) {
+        /* Wire HAL input drivers (keyboard, touch) to the thistle-tk WM.
+         * Must happen after the WM is registered but before the render task
+         * starts polling. The LVGL path does the equivalent inside ui_init. */
+        tk_register_input_callbacks();
+
         /* Launch the thistle-tk native launcher */
         app_manager_launch("com.thistle.tk_launcher");
 
