@@ -77,16 +77,75 @@ static LAUNCHER: Mutex<LauncherState> = Mutex::new(LauncherState {
     app_buttons: Vec::new(),
 });
 
+/// Deferred launch queue. on_press runs while TK_WM and the dispatch path
+/// are locked; calling app_manager_launch directly from there would deadlock
+/// when the target app's on_create acquires TK_WM. Instead the press handler
+/// just stows the app id here, and tk_wm_on_input drains it after dropping
+/// its locks.
+static PENDING_LAUNCH: Mutex<Option<CString>> = Mutex::new(None);
+
+/// Called by the WM input dispatcher after a key event has been processed
+/// and all locks have been released. Launches whichever app the most recent
+/// button press queued, if any.
+pub fn process_pending_launch() {
+    let pending = match PENDING_LAUNCH.lock() {
+        Ok(mut p) => p.take(),
+        Err(_) => return,
+    };
+    if let Some(app_id) = pending {
+        let id_str = app_id.to_str().unwrap_or("");
+        #[cfg(target_os = "espidf")]
+        unsafe {
+            esp_log_write(3, b"thistle\0".as_ptr(),
+                          b"tk_launcher: launching app id=%s\0".as_ptr(),
+                          app_id.as_ptr());
+        }
+        let rc = crate::app_manager::launch(id_str);
+        #[cfg(target_os = "espidf")]
+        unsafe {
+            esp_log_write(3, b"thistle\0".as_ptr(),
+                          b"tk_launcher: launch returned %d\0".as_ptr(), rc);
+        }
+        #[cfg(not(target_os = "espidf"))]
+        let _ = rc;
+    }
+}
+
+/// on_press handler attached to every launcher button. Looks up which app
+/// id the button corresponds to and queues it for launch.
+fn launcher_on_press(widget: thistle_tk::widget::WidgetId) {
+    let widget_u32 = widget as u32;
+    let app_id = {
+        let state = match LAUNCHER.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let idx = state.app_buttons.iter().position(|&id| id == widget_u32);
+        match idx.and_then(|i| state.app_ids.get(i)) {
+            Some(id) => id.clone(),
+            None => return,
+        }
+    };
+    if let Ok(mut pending) = PENDING_LAUNCH.lock() {
+        *pending = Some(app_id);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle callbacks
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "espidf")]
+extern "C" {
+    fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
+}
+
 /// on_create: Build the entire launcher UI
 unsafe extern "C" fn on_create() -> i32 {
+    // The thistle-tk WM uses WidgetId 0 as the tree root; 0 is a valid id
+    // here, not a sentinel. (An earlier `if root == 0 { return -1 }` check
+    // bailed on every successful call.)
     let root = thistle_ui_get_app_root();
-    if root == 0 {
-        return -1;
-    }
 
     let bg_color = thistle_ui_theme_bg();
     let text_color = thistle_ui_theme_text();
@@ -178,6 +237,10 @@ unsafe extern "C" fn on_create() -> i32 {
 
         state.app_buttons.push(btn);
         state.app_ids.push(id_cstring);
+
+        // Wire press → launch. Bypasses tk_wm_widget_on_event (which is a
+        // C-callback bridge stub) by attaching the Rust fn directly.
+        crate::tk_wm::set_button_on_press(btn, launcher_on_press);
     }
 
     ESP_OK
