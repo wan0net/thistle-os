@@ -22,14 +22,15 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust ESP toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: rust-cache
         with:
           path: |
             /root/.cargo
             /root/.rustup
-          key: rust-esp-toolchain-v2
-          restore-keys: rust-esp-toolchain-
+          key: rust-esp-toolchain-v3-espup016
+          # Don't restore from older prefixes — older caches have espup 0.17.0
+          # contents that break the build. Only match the fully-qualified key.
 
       - name: Install Rust ESP toolchain
         shell: bash
@@ -40,8 +41,10 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
           fi
           . "$HOME/.cargo/env"
-          if ! command -v espup &> /dev/null; then
-            cargo install espup
+          # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
+          # that aborts with "Unsuported file extension: 'part'" during install.
+          if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
+            cargo install espup --version 0.16.0 --force
           fi
           if ! command -v ldproxy &>/dev/null; then
             espup install
@@ -51,7 +54,7 @@ jobs:
           # adds cargo to PATH when invoking the Rust build.
 
       - name: Cache ESP-IDF + Rust builds
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             build
@@ -124,7 +127,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Rust toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin
@@ -136,7 +139,7 @@ jobs:
           restore-keys: rust-stable-${{ runner.os }}-
 
       - name: Cache Cargo build artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: components/kernel_rs/target
           key: rust-test-target-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
@@ -222,7 +225,7 @@ jobs:
           fi
 
       - name: Upload SARIF to Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: semgrep-results.sarif
@@ -264,7 +267,7 @@ jobs:
           scanners: vuln,secret,misconfig
 
       - name: Upload SARIF to Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-results.sarif
@@ -276,3 +279,67 @@ jobs:
         with:
           name: trivy-results
           path: trivy-results.sarif
+
+  recovery-build:
+    name: Build Recovery OS (Rust/esp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache Rust ESP toolchain
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo
+            ~/.rustup
+            ~/.espup
+          key: rust-esp-recovery-${{ runner.os }}-v2-espup016
+          # Don't restore from older prefixes — v1 caches contain corrupt
+          # espup 0.17.0 state that reproduces the "part" extension error.
+
+      - name: Install Rust + espup + ldproxy
+        shell: bash
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          . "$HOME/.cargo/env"
+          # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
+          # that aborts with "Unsuported file extension: 'part'" during install.
+          if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
+            cargo install espup --version 0.16.0 --force
+          fi
+          # Clear any stale .part files from prior interrupted runs so espup
+          # doesn't try to re-use them.
+          find "$HOME/.rustup" "$HOME/.espup" -name '*.part' -delete 2>/dev/null || true
+          if [ ! -f "$HOME/export-esp.sh" ]; then
+            espup install
+          fi
+          # ldproxy is the linker wrapper cargo invokes for xtensa-esp32s3-espidf.
+          # espup installs the toolchain but not ldproxy; cargo install it explicitly.
+          if ! command -v ldproxy &> /dev/null; then
+            cargo install ldproxy
+          fi
+
+      - name: Cache recovery target dir
+        uses: actions/cache@v5
+        with:
+          path: recovery/target
+          key: recovery-target-${{ runner.os }}-${{ hashFiles('recovery/Cargo.lock', 'recovery/src/**') }}
+          restore-keys: recovery-target-${{ runner.os }}-
+
+      - name: Build recovery
+        shell: bash
+        working-directory: recovery
+        run: |
+          . "$HOME/.cargo/env"
+          . "$HOME/export-esp.sh"
+          cargo build --release
+
+      - name: Upload recovery artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: thistle-recovery
+          path: recovery/target/xtensa-esp32s3-espidf/release/thistleos-recovery
