@@ -19,6 +19,7 @@
 #define W __attribute__((weak))
 W int      tk_wm_init(void) { return 0; }
 W void     tk_wm_deinit(void) {}
+W void     tk_wm_do_refresh(void) {}
 W void     tk_wm_render(void) {}
 W void     tk_wm_on_theme_changed(const char *p) { (void)p; }
 W void     tk_wm_on_app_launched(const char *id, uint32_t s) { (void)id; (void)s; }

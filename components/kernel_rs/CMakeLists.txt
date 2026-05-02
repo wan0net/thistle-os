@@ -1,7 +1,7 @@
 # ThistleOS Rust kernel component (REQUIRED)
 
 idf_component_register(
-    SRCS "stub.c"
+    SRCS "stub.c" "epaper_spi_shim.c"
     INCLUDE_DIRS "include"
     REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
              esp_wifi esp_netif esp_event bt mbedtls esp_http_client
