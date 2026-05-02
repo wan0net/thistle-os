@@ -49,19 +49,26 @@ const GPIO_NUM_NC: i32 = -1;
 
 // ── Keymap ───────────────────────────────────────────────────────────────────
 //
-// TCA8418 encodes key position as: key_code = row*10 + col + 1  (1-based)
-// Rows R0-R7 (8 rows), Cols C0-C9 (10 cols).
-// Map to ASCII / special keycodes.  0 = unmapped.
+// TCA8418 encodes key position as: key_code = row*10 + col + 1  (1-based).
+// On the T-Deck Pro the column matrix wiring is mirrored — physical col 0 is
+// reported as TCA col 9 and vice versa — so the decode path applies
+// `col = 9 - col_raw` before this lookup. With that mirror in place, KEY_MAP
+// can be written in physical (left-to-right) layout order.
 //
-// Matches the C driver's KEY_MAP exactly.
+// Row 2 layout has been updated to match the actual T-Deck Pro keyboard:
+//   physical: Alt Z X C V B N M . Enter   (Alt at col 0 sends 0/unmapped)
+// The previous "z x c v b n m , . \n" layout was wrong (no Alt slot, an
+// extra ',' that doesn't exist on this hardware).
 
 #[rustfmt::skip]
 static KEY_MAP: [[u16; 10]; 8] = [
     // C0     C1     C2     C3     C4     C5     C6     C7     C8     C9
     [  b'q' as u16, b'w' as u16, b'e' as u16, b'r' as u16, b't' as u16, b'y' as u16, b'u' as u16, b'i' as u16, b'o' as u16, b'p' as u16  ],
     [  b'a' as u16, b's' as u16, b'd' as u16, b'f' as u16, b'g' as u16, b'h' as u16, b'j' as u16, b'k' as u16, b'l' as u16, 0x08u16      ],  // 0x08 = backspace
-    [  b'z' as u16, b'x' as u16, b'c' as u16, b'v' as u16, b'b' as u16, b'n' as u16, b'm' as u16, b',' as u16, b'.' as u16, b'\n' as u16 ],
-    [  0x01u16,     0x02u16,     0x03u16,     b' ' as u16, b'1' as u16, b'2' as u16, b'3' as u16, b'4' as u16, b'5' as u16, b'6' as u16  ],  // 0x01=Fn 0x02=Sym 0x03=Shift
+    [  0,           b'z' as u16, b'x' as u16, b'c' as u16, b'v' as u16, b'b' as u16, b'n' as u16, b'm' as u16, b'.' as u16, b'\n' as u16 ],  // Alt Z X C V B N M . Enter
+    // Row 3: only 5 physical keys at TCA cols 0..4 (after mirror, c 5..9):
+    //   c=5 shift(L)  c=6 mic(unmapped)  c=7 space  c=8 sym  c=9 shift(R)
+    [  0,           0,           0,           0,           0,           0x03u16,     0,           b' ' as u16, 0x02u16,     0x03u16     ],
     [  b'7' as u16, b'8' as u16, b'9' as u16, b'0' as u16, b'-' as u16, b'=' as u16, b'[' as u16, b']' as u16, b'\\' as u16, b'\'' as u16 ],
     [  b';' as u16, b'/' as u16, b'`' as u16, 0x1Bu16,     0,          0,           0,           0,           0,           0            ],  // 0x1B = Esc
     [  0,           0,           0,           0,           0,           0,           0,           0,           0,           0            ],
@@ -510,7 +517,10 @@ unsafe extern "C" fn tca8418_poll() -> i32 {
         // key_code is 1-based: key_code = row*10 + col + 1
         let kc0 = key_code - 1; // make 0-based
         let row = (kc0 / 10) as usize;
-        let col = (kc0 % 10) as usize;
+        let col_raw = (kc0 % 10) as usize;
+        // Mirror the column index: T-Deck Pro wiring puts physical col 0 on
+        // TCA col 9 and vice versa. KEY_MAP is written in physical order.
+        let col = 9 - col_raw;
 
         let keycode: u16 = if row < 8 && col < 10 {
             KEY_MAP[row][col]
