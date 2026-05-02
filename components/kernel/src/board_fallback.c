@@ -55,25 +55,12 @@ static const i2c_pins_t I2C_PIN_COMBOS[] = {
 
 #if !defined(THISTLE_SIMULATOR)
 
-/* Probe a single I2C address — returns true if device ACKs */
+/* Probe a single I2C address — returns true if device ACKs.
+ * Uses i2c_master_probe() (added in IDF v5.1, required in v6 since
+ * zero-length i2c_master_transmit is no longer allowed). */
 static bool i2c_probe(i2c_master_bus_handle_t bus, uint8_t addr)
 {
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = addr,
-        .scl_speed_hz = 100000,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (i2c_master_bus_add_device(bus, &dev_cfg, &dev) != ESP_OK) {
-        return false;
-    }
-
-    /* Try a zero-length write (address-only transaction).
-     * ESP_OK means the device ACKed its address. */
-    uint8_t dummy = 0;
-    esp_err_t ret = i2c_master_transmit(dev, &dummy, 0, 50);
-    i2c_master_bus_rm_device(dev);
-    return (ret == ESP_OK);
+    return (i2c_master_probe(bus, addr, 50) == ESP_OK);
 }
 
 /* Scan result for a single pin combo */

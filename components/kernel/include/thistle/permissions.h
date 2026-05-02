@@ -23,8 +23,11 @@ typedef enum {
 /* Permission set is a bitmask of permission_t values */
 typedef uint32_t permission_set_t;
 
-/* Returned by permissions_check() when the app lacks the requested permission */
+/* Returned by permissions_check() when the app lacks the requested permission.
+ * ESP-IDF v6 added ESP_ERR_NOT_ALLOWED to esp_err.h; guard against redefinition. */
+#ifndef ESP_ERR_NOT_ALLOWED
 #define ESP_ERR_NOT_ALLOWED (ESP_ERR_INVALID_STATE + 0x100)
+#endif
 
 /* Initialize permissions subsystem */
 esp_err_t permissions_init(void);

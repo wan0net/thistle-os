@@ -232,6 +232,7 @@ static esp_err_t gdeq031t10_init(const void *config)
 
     /* ── SPI device ── */
     spi_device_interface_config_t dev_cfg = {
+        .clock_source   = SPI_CLK_SRC_DEFAULT,  /* required in ESP-IDF v6 */
         .clock_speed_hz = s_epd.cfg.spi_clock_hz > 0
                               ? s_epd.cfg.spi_clock_hz
                               : 4000000,

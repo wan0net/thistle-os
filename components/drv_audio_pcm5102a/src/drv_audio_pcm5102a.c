@@ -74,7 +74,7 @@ static esp_err_t pcm5102a_init(const void *config)
     s_audio.playing = false;
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(
-        (i2s_port_t)s_audio.cfg.i2s_num,
+        s_audio.cfg.i2s_num,
         I2S_ROLE_MASTER
     );
     esp_err_t ret = i2s_new_channel(&chan_cfg, &s_audio.tx_handle, NULL);

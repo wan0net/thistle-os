@@ -28,6 +28,15 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 
+// esp_ptr_in_drom became `inline static` in ESP-IDF v6 (esp_memory_utils.h),
+// which makes it not addressable for FFI. Expose a normal extern wrapper so
+// Rust callers can keep using a regular extern "C" declaration.
+#include "esp_memory_utils.h"
+bool thistle_esp_ptr_in_drom(const void *p)
+{
+    return esp_ptr_in_drom(p);
+}
+
 // Reference each symbol so the linker pulls it from the ESP-IDF archive.
 // This function is never called — it's dead code that exists only to
 // create linker references.
@@ -75,10 +84,10 @@ static void _force_link_deps(void) {
     (void)vTaskDelete;
     (void)vTaskDelay;
     // UART (called by drv_gps_mia_m10q.rs)
+    // Note: uart_set_pin is a variadic macro in ESP-IDF v6 — not addressable.
     (void)uart_driver_install;
     (void)uart_driver_delete;
     (void)uart_param_config;
-    (void)uart_set_pin;
     (void)uart_read_bytes;
     (void)uart_write_bytes;
     // GPIO (called by multiple drivers)

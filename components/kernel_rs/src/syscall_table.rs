@@ -52,8 +52,10 @@ extern "C" {
     // Pointer validation (ESP-IDF)
     #[cfg(target_os = "espidf")]
     fn esp_ptr_external_ram(ptr: *const c_void) -> bool;
+    // esp_ptr_in_drom is `inline static` in ESP-IDF v6 and not FFI-addressable;
+    // wrapper lives in components/kernel/src/link_deps.c.
     #[cfg(target_os = "espidf")]
-    fn esp_ptr_in_drom(ptr: *const c_void) -> bool;
+    fn thistle_esp_ptr_in_drom(ptr: *const c_void) -> bool;
 
     // IPC (Rust)
     fn ipc_send(msg: *const c_void) -> i32;
@@ -192,7 +194,7 @@ unsafe fn syscall_is_ptr_allowed(ptr: *const c_void) -> bool {
     {
         // Allowed regions: External RAM (PSRAM) or DROM (Flash constants).
         // Rejected: Internal SRAM (kernel stacks/globals).
-        esp_ptr_external_ram(ptr) || esp_ptr_in_drom(ptr)
+        esp_ptr_external_ram(ptr) || thistle_esp_ptr_in_drom(ptr)
     }
     #[cfg(not(target_os = "espidf"))]
     {
