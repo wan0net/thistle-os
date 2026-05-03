@@ -37,12 +37,12 @@ idf_component_register(
         "include"
         "${MESHCORE_DIR}"
         "${MESHCORE_DIR}/helpers"
-    REQUIRES thistle_hal kernel driver esp_timer
+    REQUIRES thistle_hal kernel driver esp_driver_i2c esp_driver_spi esp_driver_gpio esp_timer
 )
 
 # Suppress warnings in third-party MeshCore code
 target_compile_options(${COMPONENT_LIB} PRIVATE
-    -Wno-unused-parameter -Wno-sign-compare -Wno-reorder
+    -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare -Wno-reorder
     -Wno-missing-field-initializers -Wno-type-limits -Wno-format
     -Wno-delete-non-virtual-dtor
 )

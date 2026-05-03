@@ -2,7 +2,9 @@
 
 idf_component_register(
     SRCS "src/kernel_shims.c" "src/tk_wm_shims.c" "src/sdcard_shim.c" "src/link_deps.c" "src/board_fallback.c"
+         "src/board_builtin_drivers.c"
     INCLUDE_DIRS "include"
     REQUIRES thistle_hal kernel_rs esp_timer freertos esp_partition fatfs vfs app_update esp_wifi esp_netif esp_event bt mbedtls esp_http_client driver spiffs nvs_flash sdmmc esp_adc
-    PRIV_REQUIRES drv_crypto_mbedtls
+    PRIV_REQUIRES drv_crypto_mbedtls esp_driver_i2c esp_driver_uart esp_driver_spi esp_driver_gpio
+                  drv_epaper_gdeq031t10 drv_kbd_tca8418 drv_touch_cst328
 )

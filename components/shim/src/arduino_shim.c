@@ -265,6 +265,7 @@ static void spi_begin(void)
     if (s_spi.open) return;
 
     spi_device_interface_config_t devcfg = {
+        .clock_source   = SPI_CLK_SRC_DEFAULT,  /* required in ESP-IDF v6 */
         .clock_speed_hz = s_spi.clock_hz ? s_spi.clock_hz : SHIM_SPI_CLOCK_HZ,
         .mode           = s_spi.data_mode,
         .spics_io_num   = -1,   /* CS managed manually by Arduino apps */

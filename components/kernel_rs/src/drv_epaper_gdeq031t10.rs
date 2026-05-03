@@ -35,12 +35,11 @@ const EPD_FB_BYTES: usize = EPD_WIDTH * EPD_HEIGHT / 8; // 1-bit packed = 9600 b
 // ── UC8253 command codes ──────────────────────────────────────────────────────
 
 const CMD_PANEL_SETTING: u8 = 0x00;
-#[allow(dead_code)]
 const CMD_POWER_SETTING: u8 = 0x01;
 const CMD_POWER_OFF: u8 = 0x02;
 const CMD_POWER_ON: u8 = 0x04;
-#[allow(dead_code)]
 const CMD_BOOSTER_SOFT_START: u8 = 0x06;
+const CMD_RESOLUTION_SETTING: u8 = 0x61;
 const CMD_DEEP_SLEEP: u8 = 0x07;
 const CMD_DATA_START_TRANSMISSION: u8 = 0x10; // old frame
 const CMD_NEW_DATA_TRANSMISSION: u8 = 0x13;   // new frame
@@ -58,8 +57,6 @@ const CMD_TEMPERATURE_SENSOR: u8 = 0x40;
 const CMD_VCOM_DATA_INTERVAL: u8 = 0x50;
 #[allow(dead_code)]
 const CMD_TCON_SETTING: u8 = 0x60;
-#[allow(dead_code)]
-const CMD_RESOLUTION_SETTING: u8 = 0x61;
 #[allow(dead_code)]
 const CMD_VCM_DC_SETTING: u8 = 0x82;
 
@@ -137,14 +134,61 @@ impl Default for EpaperConfig {
     }
 }
 
+// ── Xtensa register-window-safe static buffers ────────────────────────────────
+//
+// On Xtensa LX7 (ESP32-S3), CALL8 rotates the register window by 8. When 4
+// outstanding CALL8 frames are live, the oldest frame's registers are spilled
+// ("overflow") to a save area on the callee's stack — and restored
+// ("underflow") on RETW. If any intermediate callee uses that save-area slot
+// as a local variable, the spilled value is corrupted and the register emerges
+// from underflow with garbage.
+//
+// Stack-allocated addresses (e.g. `&cmd as *const u8`) and heap pointers
+// stored in struct fields are vulnerable: they sit in registers that can be
+// evicted and corrupted mid–call chain.
+//
+// Static globals have **link-time constant addresses** encoded in `l32r`
+// literals. Even after corruption of live registers, an `l32r` instruction
+// re-reads the literal from the literal pool — which is read-only and never
+// corrupted by window overflow/underflow. These buffers are therefore immune.
+//
+// `.dram0.bss` placement: forces internal DRAM (never PSRAM) so that:
+//   • The SPI polling-transmit function can safely read via CPU data bus
+//   • The addresses stay in the range accessible to all peripheral DMA engines
+
+// ── Wrapper for static buffers ──────────────────────────────────────────────
+// Using `static` + `UnsafeCell` (same pattern as the `STATE` global) instead
+// of `static mut` avoids the `.dram0.bss` section that ESP-IDF v6's linker
+// script does not accept as an input pattern (`--orphan-handling=error`).
+// `static` zero-initialized values go to `.bss` which IS matched by the
+// linker script's `*(.bss .bss.*)` glob.
+
+struct StaticCell<T>(UnsafeCell<T>);
+// SAFETY: only accessed from a single FreeRTOS task (the render task).
+unsafe impl<T> Sync for StaticCell<T> {}
+
+/// Single-byte command staging buffer — replaces stack `&cmd` in epaper_send_cmd.
+static SPI_CMD_BUF: StaticCell<u8> = StaticCell(UnsafeCell::new(0));
+
+/// Current framebuffer (240×320 / 8 = 9600 bytes, 1-bit packed).
+static FB: StaticCell<[u8; EPD_FB_BYTES]> = StaticCell(UnsafeCell::new([0u8; EPD_FB_BYTES]));
+
+/// Previous framebuffer — used for differential (ghost-free) refresh.
+static FB_OLD: StaticCell<[u8; EPD_FB_BYTES]> = StaticCell(UnsafeCell::new([0u8; EPD_FB_BYTES]));
+
+#[inline]
+unsafe fn fb_ptr() -> *mut u8 { (*FB.0.get()).as_mut_ptr() }
+#[inline]
+unsafe fn fb_old_ptr() -> *mut u8 { (*FB_OLD.0.get()).as_mut_ptr() }
+#[inline]
+unsafe fn spi_cmd_ptr() -> *mut u8 { SPI_CMD_BUF.0.get() }
+
 // ── Driver state ──────────────────────────────────────────────────────────────
 
 struct EpaperState {
     spi: *mut c_void,           // SPI device handle
     cfg: EpaperConfig,
     refresh_mode: HalDisplayRefreshMode,
-    fb: *mut u8,                // Current framebuffer (EPD_FB_BYTES)
-    fb_old: *mut u8,            // Previous framebuffer (EPD_FB_BYTES, for differential refresh)
     initialized: bool,
     power_on: bool,
     first_refresh_done: bool,
@@ -167,8 +211,6 @@ impl EpaperState {
                 spi_clock_hz: 0,
             },
             refresh_mode: HalDisplayRefreshMode::Full,
-            fb: std::ptr::null_mut(),
-            fb_old: std::ptr::null_mut(),
             initialized: false,
             power_on: false,
             first_refresh_done: false,
@@ -198,47 +240,36 @@ fn state_mut() -> &'static mut EpaperState {
 }
 
 // ── ESP-IDF platform bindings ─────────────────────────────────────────────────
+//
+// All GPIO, SPI, and delay operations go through GCC-compiled C shims
+// (epaper_spi_shim.c).  Direct Rust→IDF calls are avoided because the LLVM
+// Xtensa backend may not reserve the mandatory 16-byte WindowOverflow8 save
+// area at the top of each frame.  When the call chain from FreeRTOS to
+// gdeq031t10_init is already 7 CALL8 frames deep, adding IDF's 3–4 more
+// frames triggers overflow into Rust-frame locals.  GCC shims have correctly
+// sized frames, so overflow always writes to the reserved top-16 bytes.
+//
+// `spi_bus_add_device` / `spi_bus_remove_device` are still called directly
+// from Rust (once during init/deinit only) using the full ESP-IDF struct ABI.
 
 #[cfg(target_os = "espidf")]
 mod platform {
     use std::os::raw::c_void;
 
-    // SPI transaction struct layout (matches spi_transaction_t in ESP-IDF)
-    // We only need the fields we use; the rest are zeroed.
-    #[repr(C)]
-    pub struct SpiTransaction {
-        pub flags: u32,
-        pub cmd: u16,
-        pub addr: u64,
-        pub length: usize,   // Total data length, in bits
-        pub rxlength: usize, // Total data length received, in bits (0 = length)
-        pub user: *mut c_void,
-        pub tx_buffer: *const u8,
-        pub rx_buffer: *mut u8,
-    }
-
-    // GPIO config struct layout (matches gpio_config_t in ESP-IDF)
-    #[repr(C)]
-    pub struct GpioConfig {
-        pub pin_bit_mask: u64,
-        pub mode: u32,         // gpio_mode_t
-        pub pull_up_en: u32,   // gpio_pullup_t
-        pub pull_down_en: u32, // gpio_pulldown_t
-        pub intr_type: u32,    // gpio_int_type_t
-    }
-
-    // SPI device interface config (matches spi_device_interface_config_t in ESP-IDF)
+    // SPI device interface config (matches spi_device_interface_config_t in ESP-IDF v6)
     #[repr(C)]
     pub struct SpiDeviceInterfaceConfig {
         pub command_bits: u8,
         pub address_bits: u8,
         pub dummy_bits: u8,
         pub mode: u8,
-        pub duty_cycle_pos: u8,
-        pub cs_ena_pretrans: u8,
+        pub clock_source: i32,
+        pub duty_cycle_pos: u16,
+        pub cs_ena_pretrans: u16,
         pub cs_ena_posttrans: u8,
         pub clock_speed_hz: i32,
         pub input_delay_ns: i32,
+        pub sample_point: i32,
         pub spics_io_num: i32,
         pub flags: u32,
         pub queue_size: i32,
@@ -246,192 +277,127 @@ mod platform {
         pub post_cb: *const c_void,
     }
 
-    // GPIO mode and pull constants
-    pub const GPIO_MODE_OUTPUT: u32 = 3;
-    pub const GPIO_MODE_INPUT: u32 = 1;
-    pub const GPIO_PULLUP_DISABLE: u32 = 0;
-    pub const GPIO_PULLUP_ENABLE: u32 = 1;
-    pub const GPIO_PULLDOWN_DISABLE: u32 = 0;
-    pub const GPIO_INTR_DISABLE: u32 = 0;
-
-    // heap_caps flags
-    pub const MALLOC_CAP_DMA: u32 = 1 << 2;  // = 4
-    pub const MALLOC_CAP_8BIT: u32 = 1 << 1; // = 2
-
-    // FreeRTOS tick rate (portTICK_PERIOD_MS = 1 on ESP32 default 1000 Hz)
-    pub const TICKS_PER_MS: u32 = 1;
-
     extern "C" {
-        // SPI
         pub fn spi_bus_add_device(
             host: i32,
             cfg: *const SpiDeviceInterfaceConfig,
             handle: *mut *mut c_void,
         ) -> i32;
         pub fn spi_bus_remove_device(handle: *mut c_void) -> i32;
-        pub fn spi_device_polling_transmit(
-            handle: *mut c_void,
-            trans: *mut SpiTransaction,
-        ) -> i32;
-
-        // GPIO
-        pub fn gpio_config(cfg: *const GpioConfig) -> i32;
-        pub fn gpio_set_level(pin: u32, level: u32) -> i32;
-        pub fn gpio_get_level(pin: u32) -> i32;
-
-        // FreeRTOS
-        pub fn vTaskDelay(ticks: u32);
-
-        // Memory
-        pub fn heap_caps_malloc(size: usize, caps: u32) -> *mut u8;
-        pub fn heap_caps_free(ptr: *mut u8);
     }
 }
 
-// ── Low-level helpers — platform layer ───────────────────────────────────────
+// ── GCC-compiled shim bindings (epaper_spi_shim.c) ───────────────────────────
+//
+// These C functions replace all direct Rust→IDF calls for GPIO, SPI, and delay.
+// GCC generates frames that correctly reserve 16 bytes at the top for the
+// Xtensa WindowOverflow8 save area, preventing register corruption.
 
 #[cfg(target_os = "espidf")]
-unsafe fn alloc_fb() -> *mut u8 {
-    platform::heap_caps_malloc(
-        EPD_FB_BYTES,
-        platform::MALLOC_CAP_DMA | platform::MALLOC_CAP_8BIT,
-    )
+extern "C" {
+    // GPIO configuration
+    fn epaper_gpio_config_outputs(pin_cs: i32, pin_dc: i32, pin_rst: i32) -> i32;
+    fn epaper_gpio_config_busy(pin_busy: i32) -> i32;
+    // GPIO set/get (pin<0 is a no-op / returns 0)
+    fn epaper_gpio_set(pin: i32, level: u32);
+    fn epaper_gpio_get(pin: i32) -> i32;
+    // FreeRTOS delay
+    fn epaper_delay_ms(ms: u32);
+    // SPI send (CS and DC toggled inside the shim)
+    fn epaper_spi_cmd(spi: *mut c_void, pin_cs: i32, pin_dc: i32, cmd: u8) -> i32;
+    fn epaper_spi_data(
+        spi: *mut c_void,
+        pin_cs: i32,
+        pin_dc: i32,
+        data: *const u8,
+        len: usize,
+    ) -> i32;
+    fn esp_log_write(level: i32, tag: *const u8, fmt: *const u8, ...);
 }
 
 #[cfg(target_os = "espidf")]
-unsafe fn free_fb(ptr: *mut u8) {
-    if !ptr.is_null() {
-        platform::heap_caps_free(ptr);
-    }
+macro_rules! epd_log {
+    ($fmt:expr) => {
+        unsafe { esp_log_write(3, b"epaper\0".as_ptr(), concat!($fmt, "\0").as_ptr()) }
+    };
 }
 
-#[cfg(not(target_os = "espidf"))]
-unsafe fn alloc_fb() -> *mut u8 {
-    // Simulator: use Box<[u8]> and leak it (caller must free_fb to reclaim)
-    let boxed = vec![0xFFu8; EPD_FB_BYTES].into_boxed_slice();
-    Box::into_raw(boxed) as *mut u8
-}
+// ── Low-level helpers ─────────────────────────────────────────────────────────
 
-#[cfg(not(target_os = "espidf"))]
-unsafe fn free_fb(ptr: *mut u8) {
-    if !ptr.is_null() {
-        // Re-box and drop
-        let _ = Box::from_raw(std::slice::from_raw_parts_mut(ptr, EPD_FB_BYTES));
-    }
-}
-
-// FreeRTOS delay wrapper (ms → ticks)
 #[cfg(target_os = "espidf")]
+#[inline(always)]
 unsafe fn delay_ms(ms: u32) {
-    platform::vTaskDelay(ms * platform::TICKS_PER_MS);
+    epaper_delay_ms(ms);
 }
 
 #[cfg(not(target_os = "espidf"))]
-fn delay_ms(_ms: u32) {
-    // Simulator: no actual delay
-}
+fn delay_ms(_ms: u32) {}
 
-// GPIO helpers
 #[cfg(target_os = "espidf")]
+#[inline(always)]
 unsafe fn gpio_set(pin: i32, level: u32) {
-    if pin >= 0 {
-        platform::gpio_set_level(pin as u32, level);
-    }
+    epaper_gpio_set(pin, level);
 }
 
 #[cfg(not(target_os = "espidf"))]
 fn gpio_set(_pin: i32, _level: u32) {}
 
 #[cfg(target_os = "espidf")]
+#[inline(always)]
 unsafe fn gpio_read(pin: i32) -> i32 {
-    if pin >= 0 {
-        platform::gpio_get_level(pin as u32)
-    } else {
-        0
-    }
+    epaper_gpio_get(pin)
 }
 
 #[cfg(not(target_os = "espidf"))]
 fn gpio_read(_pin: i32) -> i32 {
-    0 // Simulator: BUSY always low (idle)
+    0
 }
 
 // ── SPI transmit helpers ──────────────────────────────────────────────────────
-
-const SPI_CHUNK: usize = 4096;
+//
+// These call the GCC-compiled shims in epaper_spi_shim.c.
+// The shims handle CS/DC GPIO toggling and the SPI transfer internally,
+// so from Rust each "send" is a single CALL8 (one additional frame).
 
 /// Transmit a single command byte (DC=0).
+#[inline(always)]
 unsafe fn epaper_send_cmd(cmd: u8) -> i32 {
     #[cfg(target_os = "espidf")]
     {
         let s = state();
-        gpio_set(s.cfg.pin_cs, 0); // select
-        gpio_set(s.cfg.pin_dc, 0); // command mode
-
-        let mut t = platform::SpiTransaction {
-            flags: 0,
-            cmd: 0,
-            addr: 0,
-            length: 8,
-            rxlength: 0,
-            user: std::ptr::null_mut(),
-            tx_buffer: &cmd as *const u8,
-            rx_buffer: std::ptr::null_mut(),
-        };
-        let ret = platform::spi_device_polling_transmit(s.spi, &mut t);
-        gpio_set(s.cfg.pin_cs, 1); // deselect
-        ret
+        epaper_spi_cmd(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, cmd)
     }
     #[cfg(not(target_os = "espidf"))]
-    {
-        let _ = cmd;
-        ESP_OK
-    }
+    { let _ = cmd; ESP_OK }
 }
 
-/// Transmit data bytes (DC=1), in SPI_CHUNK-sized pieces.
+/// Transmit data bytes (DC=1).
+#[inline(always)]
 unsafe fn epaper_send_data(data: *const u8, len: usize) -> i32 {
-    if len == 0 {
-        return ESP_OK;
-    }
-
     #[cfg(target_os = "espidf")]
     {
         let s = state();
-        gpio_set(s.cfg.pin_cs, 0); // select
-        gpio_set(s.cfg.pin_dc, 1); // data mode
-
-        let mut ret = ESP_OK;
-        let mut sent = 0usize;
-        while sent < len && ret == ESP_OK {
-            let chunk = (len - sent).min(SPI_CHUNK);
-            let mut t = platform::SpiTransaction {
-                flags: 0,
-                cmd: 0,
-                addr: 0,
-                length: chunk * 8,
-                rxlength: 0,
-                user: std::ptr::null_mut(),
-                tx_buffer: data.add(sent),
-                rx_buffer: std::ptr::null_mut(),
-            };
-            ret = platform::spi_device_polling_transmit(s.spi, &mut t);
-            sent += chunk;
-        }
-
-        gpio_set(s.cfg.pin_cs, 1); // deselect
-        ret
+        epaper_spi_data(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, data, len)
     }
     #[cfg(not(target_os = "espidf"))]
-    {
-        let _ = (data, len);
-        ESP_OK
-    }
+    { let _ = (data, len); ESP_OK }
 }
 
 /// Transmit a single data byte.
+#[inline(always)]
 unsafe fn epaper_send_data_byte(val: u8) -> i32 {
-    epaper_send_data(&val as *const u8, 1)
+    #[cfg(target_os = "espidf")]
+    {
+        let s = state();
+        // Use SPI_CMD_BUF as staging area so &val doesn't become a dangling
+        // stack pointer from the caller's frame (defensive: the C shim copies
+        // the byte from the pointer before returning, so &val is valid, but
+        // using the static buffer is safer and avoids any frame-lifetime issue).
+        *spi_cmd_ptr() = val;
+        epaper_spi_data(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, spi_cmd_ptr(), 1)
+    }
+    #[cfg(not(target_os = "espidf"))]
+    { let _ = val; ESP_OK }
 }
 
 // ── Hardware reset ────────────────────────────────────────────────────────────
@@ -461,40 +427,25 @@ unsafe fn epaper_wait_busy(timeout_ms: u32) -> i32 {
         delay_ms(10);
         elapsed += 10;
         if elapsed >= timeout_ms {
+            #[cfg(target_os = "espidf")]
+            epd_log!("I (?) epaper: BUSY timeout");
             return ESP_ERR_TIMEOUT;
         }
     }
     ESP_OK
 }
 
-// ── GPIO init helpers (ESP-IDF only) ─────────────────────────────────────────
+// ── GPIO init helpers ─────────────────────────────────────────────────────────
+// These call the GCC-compiled C shims which correctly handle the Xtensa ABI.
 
 #[cfg(target_os = "espidf")]
 unsafe fn configure_output_gpios(cfg: &EpaperConfig) -> i32 {
-    let mut mask: u64 = (1u64 << cfg.pin_cs) | (1u64 << cfg.pin_dc);
-    if cfg.pin_rst >= 0 {
-        mask |= 1u64 << cfg.pin_rst;
-    }
-    let io_conf = platform::GpioConfig {
-        pin_bit_mask: mask,
-        mode: platform::GPIO_MODE_OUTPUT,
-        pull_up_en: platform::GPIO_PULLUP_DISABLE,
-        pull_down_en: platform::GPIO_PULLDOWN_DISABLE,
-        intr_type: platform::GPIO_INTR_DISABLE,
-    };
-    platform::gpio_config(&io_conf)
+    epaper_gpio_config_outputs(cfg.pin_cs, cfg.pin_dc, cfg.pin_rst)
 }
 
 #[cfg(target_os = "espidf")]
 unsafe fn configure_input_gpios(cfg: &EpaperConfig) -> i32 {
-    let busy_conf = platform::GpioConfig {
-        pin_bit_mask: 1u64 << cfg.pin_busy,
-        mode: platform::GPIO_MODE_INPUT,
-        pull_up_en: platform::GPIO_PULLUP_ENABLE,
-        pull_down_en: platform::GPIO_PULLDOWN_DISABLE,
-        intr_type: platform::GPIO_INTR_DISABLE,
-    };
-    platform::gpio_config(&busy_conf)
+    epaper_gpio_config_busy(cfg.pin_busy)
 }
 
 #[cfg(target_os = "espidf")]
@@ -509,11 +460,13 @@ unsafe fn add_spi_device(cfg: &EpaperConfig) -> (*mut c_void, i32) {
         address_bits: 0,
         dummy_bits: 0,
         mode: 0,
+        clock_source: 0, // 0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT
         duty_cycle_pos: 0,
         cs_ena_pretrans: 0,
         cs_ena_posttrans: 0,
         clock_speed_hz: clock,
         input_delay_ns: 0,
+        sample_point: 0, // SPI_SAMPLING_POINT_PHASE_0 (default)
         spics_io_num: -1, // Manual CS — same as GxEPD2
         flags: 0,
         queue_size: 1,
@@ -558,38 +511,20 @@ pub unsafe extern "C" fn gdeq031t10_init(config: *const c_void) -> i32 {
     s.cfg = *cfg;
     s.refresh_mode = HalDisplayRefreshMode::Full;
 
-    // Allocate framebuffers
-    s.fb = alloc_fb();
-    s.fb_old = alloc_fb();
-    if s.fb.is_null() || s.fb_old.is_null() {
-        free_fb(s.fb);
-        free_fb(s.fb_old);
-        s.fb = std::ptr::null_mut();
-        s.fb_old = std::ptr::null_mut();
-        return ESP_ERR_NO_MEM;
-    }
-
-    // Initialise both framebuffers to white (0xFF = all bits set = white for e-paper)
-    std::ptr::write_bytes(s.fb, 0xFF, EPD_FB_BYTES);
-    std::ptr::write_bytes(s.fb_old, 0xFF, EPD_FB_BYTES);
+    // Initialise both static framebuffers to white (0xFF = all bits = white for e-paper).
+    // These are static globals with link-time constant addresses — no heap allocation needed.
+    std::ptr::write_bytes(fb_ptr(), 0xFF, EPD_FB_BYTES);
+    std::ptr::write_bytes(fb_old_ptr(), 0xFF, EPD_FB_BYTES);
 
     // Configure output GPIOs (CS, DC, RST)
     let mut ret = configure_output_gpios(&s.cfg);
     if ret != ESP_OK {
-        free_fb(s.fb);
-        free_fb(s.fb_old);
-        s.fb = std::ptr::null_mut();
-        s.fb_old = std::ptr::null_mut();
         return ret;
     }
 
     // Configure input GPIO (BUSY)
     ret = configure_input_gpios(&s.cfg);
     if ret != ESP_OK {
-        free_fb(s.fb);
-        free_fb(s.fb_old);
-        s.fb = std::ptr::null_mut();
-        s.fb_old = std::ptr::null_mut();
         return ret;
     }
 
@@ -599,27 +534,54 @@ pub unsafe extern "C" fn gdeq031t10_init(config: *const c_void) -> i32 {
     // Attach SPI device
     let (spi_handle, spi_ret) = add_spi_device(&s.cfg);
     if spi_ret != ESP_OK {
-        free_fb(s.fb);
-        free_fb(s.fb_old);
-        s.fb = std::ptr::null_mut();
-        s.fb_old = std::ptr::null_mut();
         return spi_ret;
     }
     s.spi = spi_handle;
 
-    // UC8253 init sequence (mirrors GxEPD2_310_GDEQ031T10)
-    epaper_hw_reset();
+    // UC8253 init sequence (full GxEPD2_310_GDEQ031T10 cold-start sequence)
+    epaper_hw_reset(); // no-op if RST=-1; delays 20ms
 
-    // Soft reset via Panel Setting (reset bit set)
+    #[cfg(target_os = "espidf")]
+    epd_log!("I (?) epaper: starting init sequence");
+
+    // Soft reset via Panel Setting (bit 0 of PSR byte 1 = RST_N, 0 = reset)
     let mut ret = epaper_send_cmd(CMD_PANEL_SETTING);
-    if ret != ESP_OK { return fail_init(); }
-    ret = epaper_send_data_byte(0x1E); // reset bit set
+    if ret != ESP_OK {
+        #[cfg(target_os = "espidf")]
+        epd_log!("E (?) epaper: panel_setting cmd failed");
+        return fail_init();
+    }
+    ret = epaper_send_data_byte(0x1E); // PSR: soft reset active
     if ret != ESP_OK { return fail_init(); }
     ret = epaper_send_data_byte(0x0D);
     if ret != ESP_OK { return fail_init(); }
     delay_ms(10);
 
-    // Panel setting (actual operating config)
+    // Power setting (VCOM, VGH, VGL, VDH, VDL) — required before CMD_POWER_ON
+    ret = epaper_send_cmd(CMD_POWER_SETTING); // 0x01
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x07); // VDS_EN=1, VDG_EN=1
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x17); // VCOM_HV
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x3F); // VDH = +15V
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x3F); // VDL = -15V
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0xF1); // VSHR
+    if ret != ESP_OK { return fail_init(); }
+
+    // Booster soft start (boost converter startup — required for power-on)
+    ret = epaper_send_cmd(CMD_BOOSTER_SOFT_START); // 0x06
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x17); // Phase A: 40ms, strength 6
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x17); // Phase B: 40ms, strength 6
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x17); // Phase C: strength 6
+    if ret != ESP_OK { return fail_init(); }
+
+    // Panel setting (operating config, no soft reset bit)
     ret = epaper_send_cmd(CMD_PANEL_SETTING);
     if ret != ESP_OK { return fail_init(); }
     ret = epaper_send_data_byte(0x1F); // KW mode, BWOTP
@@ -627,27 +589,51 @@ pub unsafe extern "C" fn gdeq031t10_init(config: *const c_void) -> i32 {
     ret = epaper_send_data_byte(0x0D);
     if ret != ESP_OK { return fail_init(); }
 
+    // Resolution setting: 240×320
+    ret = epaper_send_cmd(CMD_RESOLUTION_SETTING); // 0x61
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0xF0); // HRES = 240
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x01); // VRES high byte: 320 = 0x140
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x40); // VRES low byte
+    if ret != ESP_OK { return fail_init(); }
+
+    // VCOM and data interval
+    ret = epaper_send_cmd(CMD_VCOM_DATA_INTERVAL); // 0x50
+    if ret != ESP_OK { return fail_init(); }
+    ret = epaper_send_data_byte(0x97);
+    if ret != ESP_OK { return fail_init(); }
+
     s.initialized = true;
     s.power_on = false;
     s.first_refresh_done = false;
-    // Re-initialise framebuffers to white after hardware init
-    std::ptr::write_bytes(s.fb, 0xFF, EPD_FB_BYTES);
-    std::ptr::write_bytes(s.fb_old, 0xFF, EPD_FB_BYTES);
+
+    // Fill old frame with white, new frame with a test pattern (alternating 8-pixel
+    // black/white stripes) so we can visually confirm the display is receiving data.
+    std::ptr::write_bytes(fb_old_ptr(), 0xFF, EPD_FB_BYTES);
+    {
+        let fb = std::slice::from_raw_parts_mut(fb_ptr(), EPD_FB_BYTES);
+        for (i, byte) in fb.iter_mut().enumerate() {
+            // 8-row stripes: each row is 240/8 = 30 bytes; rows alternate black/white
+            let row = (i / 30) % 2;
+            *byte = if row == 0 { 0x00 } else { 0xFF };
+        }
+    }
+
+    #[cfg(target_os = "espidf")]
+    epd_log!("I (?) epaper: init complete — test pattern loaded");
 
     ESP_OK
 }
 
-/// Cleanup path during init failure — removes SPI device and frees framebuffers.
+/// Cleanup path during init failure — removes SPI device.
 unsafe fn fail_init() -> i32 {
     let s = state_mut();
     #[cfg(target_os = "espidf")]
     if !s.spi.is_null() {
         platform::spi_bus_remove_device(s.spi);
     }
-    free_fb(s.fb);
-    free_fb(s.fb_old);
-    s.fb = std::ptr::null_mut();
-    s.fb_old = std::ptr::null_mut();
     s.spi = std::ptr::null_mut();
     ESP_FAIL
 }
@@ -669,11 +655,7 @@ pub unsafe extern "C" fn gdeq031t10_deinit() {
     }
     s.spi = std::ptr::null_mut();
 
-    free_fb(s.fb);
-    free_fb(s.fb_old);
-    s.fb = std::ptr::null_mut();
-    s.fb_old = std::ptr::null_mut();
-
+    // Static framebuffers (FB, FB_OLD) are not freed — they live for the duration of the program.
     s.initialized = false;
 }
 
@@ -690,6 +672,7 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
     if area.is_null() || color_data.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
+
 
     let area = &*area;
     let x1 = area.x1 as usize;
@@ -708,7 +691,7 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
     // Updates only the in-memory framebuffer (fast). The actual panel refresh
     // is triggered separately via refresh().
     let src_w = x2 - x1 + 1;
-    let fb = std::slice::from_raw_parts_mut(s.fb, EPD_FB_BYTES);
+    let fb = std::slice::from_raw_parts_mut(fb_ptr(), EPD_FB_BYTES);
 
     for row in y1..=y2 {
         for col in x1..=x2 {
@@ -731,21 +714,25 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
     ESP_OK
 }
 
-/// Refresh — send the framebuffer to the panel and trigger a hardware update.
-///
-/// Called once after the UI has settled (debounced by the UI manager).
-/// Full-frame refresh sequence mirrors GxEPD2:
-///   soft reset → panel setting → write data → VCOM → power on → refresh → power off
-pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
-    let s = state_mut();
-    if !s.initialized {
-        return ESP_ERR_INVALID_STATE;
-    }
+// ── Refresh helpers — #[inline(always)] to keep total CALL8 depth ≤ 7.
+//
+// Xtensa LX7 has 8 rotating register windows. Each CALL8 advances WindowBase.
+// At 8 outstanding CALL8 frames, the next CALL8 wraps around and triggers
+// WindowOverflow8, which saves the oldest frame's registers to a save area
+// on the callee's stack. If that save area overlaps with the callee's locals
+// (LLVM Xtensa backend bug or insufficient frame reservation), the restored
+// registers are corrupted → StoreProhibited / InstrFetchProhibited crash.
+//
+// Observed call chain reaching 8 frames:
+//   tk_render_task → gdeq031t10_refresh → refresh_helper →
+//   epaper_send_cmd → gpio_set_level → IDF → IDF → ROM  (= 8 levels)
+//
+// Fix: inline everything into gdeq031t10_refresh so the SPI/GPIO calls
+// are only 6 CALL8 levels deep from the FreeRTOS task.
 
-    // Use fast mode unless: first refresh, or explicitly set to FULL
-    let fast = s.first_refresh_done && s.refresh_mode != HalDisplayRefreshMode::Full;
-
-    // Soft reset via panel setting register
+/// Soft-reset sequence: CMD_PANEL_SETTING with reset bit, then 5 ms delay.
+#[inline(always)]
+unsafe fn refresh_panel_soft_reset() -> i32 {
     let mut err = epaper_send_cmd(CMD_PANEL_SETTING);
     if err != ESP_OK { return err; }
     err = epaper_send_data_byte(0x1E);
@@ -753,67 +740,212 @@ pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
     err = epaper_send_data_byte(0x0D);
     if err != ESP_OK { return err; }
     delay_ms(5);
+    ESP_OK
+}
 
-    // Panel setting (operating config)
-    err = epaper_send_cmd(CMD_PANEL_SETTING);
+/// Operating-config panel setting (no reset bit).
+#[inline(always)]
+unsafe fn refresh_panel_config() -> i32 {
+    let mut err = epaper_send_cmd(CMD_PANEL_SETTING);
     if err != ESP_OK { return err; }
     err = epaper_send_data_byte(0x1F);
     if err != ESP_OK { return err; }
-    err = epaper_send_data_byte(0x0D);
-    if err != ESP_OK { return err; }
+    epaper_send_data_byte(0x0D)
+}
 
-    // Write old framebuffer via cmd 0x10 (previous frame)
-    err = epaper_send_cmd(CMD_DATA_START_TRANSMISSION);
+/// Send the old framebuffer (FB_OLD) via CMD_DATA_START_TRANSMISSION.
+///
+/// Accesses FB_OLD via its static address (link-time constant, l32r encoded)
+/// — immune to Xtensa register window overflow/underflow corruption.
+#[inline(always)]
+unsafe fn refresh_send_old_fb() -> i32 {
+    let err = epaper_send_cmd(CMD_DATA_START_TRANSMISSION);
     if err != ESP_OK { return err; }
-    err = epaper_send_data(s.fb_old, EPD_FB_BYTES);
-    if err != ESP_OK { return err; }
+    epaper_send_data(fb_old_ptr(), EPD_FB_BYTES)
+}
 
-    // Write new framebuffer via cmd 0x13 (current frame)
-    err = epaper_send_cmd(CMD_NEW_DATA_TRANSMISSION);
+/// Send the current framebuffer (FB) via CMD_NEW_DATA_TRANSMISSION.
+///
+/// Same rationale as `refresh_send_old_fb` — uses static address.
+#[inline(always)]
+unsafe fn refresh_send_new_fb() -> i32 {
+    let err = epaper_send_cmd(CMD_NEW_DATA_TRANSMISSION);
     if err != ESP_OK { return err; }
-    err = epaper_send_data(s.fb, EPD_FB_BYTES);
-    if err != ESP_OK { return err; }
+    epaper_send_data(fb_ptr(), EPD_FB_BYTES)
+}
 
-    // VCOM and data interval — different for full vs fast refresh
-    // Full: 0x97 (no flicker reduction), Fast: 0xD7 (partial mode)
-    err = epaper_send_cmd(CMD_VCOM_DATA_INTERVAL);
+/// VCOM + data-interval byte, plus optional fast-refresh cascade/temperature.
+#[inline(always)]
+unsafe fn refresh_vcom_and_fast(fast: bool) -> i32 {
+    let mut err = epaper_send_cmd(CMD_VCOM_DATA_INTERVAL);
     if err != ESP_OK { return err; }
     err = epaper_send_data_byte(if fast { 0xD7 } else { 0x97 });
     if err != ESP_OK { return err; }
-
     if fast {
-        // Fast refresh: cascade + forced temperature (GxEPD2 _Update_Part)
         err = epaper_send_cmd(CMD_CASCADE);
         if err != ESP_OK { return err; }
-        err = epaper_send_data_byte(0x02); // TSFIX
+        err = epaper_send_data_byte(0x02);
         if err != ESP_OK { return err; }
         err = epaper_send_cmd(CMD_TEMPERATURE_FORCED);
         if err != ESP_OK { return err; }
-        err = epaper_send_data_byte(0x79); // temp=121°, faster LUT
+        err = epaper_send_data_byte(0x79);
         if err != ESP_OK { return err; }
     }
+    ESP_OK
+}
 
-    // Power on
-    err = epaper_send_cmd(CMD_POWER_ON);
-    if err != ESP_OK { return err; }
-    err = epaper_wait_busy(5_000);
+/// Issue CMD_POWER_ON and wait for BUSY to pulse HIGH then LOW.
+/// Falls back to a fixed delay if BUSY never asserts (e.g. BUSY pin wiring issue).
+#[inline(always)]
+unsafe fn refresh_power_on() -> i32 {
+    let err = epaper_send_cmd(CMD_POWER_ON);
     if err != ESP_OK { return err; }
 
-    // Display refresh
-    err = epaper_send_cmd(CMD_DISPLAY_REFRESH);
+    #[cfg(target_os = "espidf")]
+    {
+        let mut saw_high = false;
+        let mut elapsed: u32 = 0;
+        let mut last_b = gpio_read(state().cfg.pin_busy);
+        esp_log_write(3, b"epaper\0".as_ptr(),
+            b"I (?) epaper: POWER_ON wait start busy=%d\0".as_ptr(), last_b);
+        while elapsed < 3_000 {
+            delay_ms(1);
+            elapsed += 1;
+            let b = gpio_read(state().cfg.pin_busy);
+            if b != last_b {
+                esp_log_write(3, b"epaper\0".as_ptr(),
+                    b"I (?) epaper: POWER_ON busy_chg t=%dms b=%d\0".as_ptr(),
+                    elapsed, b);
+                last_b = b;
+            }
+            if b != 0 { saw_high = true; }
+            if saw_high && b == 0 { break; }
+        }
+        esp_log_write(3, b"epaper\0".as_ptr(),
+            b"I (?) epaper: POWER_ON done saw_high=%d elapsed=%d\0".as_ptr(),
+            saw_high as i32, elapsed);
+        // Fallback: if BUSY never pulsed, give the controller extra time
+        if !saw_high {
+            delay_ms(200);
+        }
+    }
+    #[cfg(not(target_os = "espidf"))]
+    { let _ = epaper_wait_busy(5_000); }
+
+    ESP_OK
+}
+
+/// Issue CMD_DISPLAY_REFRESH and wait for it to complete.
+/// Falls back to a minimum fixed delay if BUSY never asserts.
+#[inline(always)]
+unsafe fn refresh_display_and_wait(fast: bool) -> i32 {
+    let err = epaper_send_cmd(CMD_DISPLAY_REFRESH);
     if err != ESP_OK { return err; }
-    let refresh_timeout = if fast { 5_000 } else { 15_000 };
-    err = epaper_wait_busy(refresh_timeout);
+
+    #[cfg(target_os = "espidf")]
+    {
+        let min_delay: u32 = if fast { 500 } else { 5_000 };
+        let max_delay: u32 = if fast { 5_000 } else { 15_000 };
+        delay_ms(min_delay); // guaranteed minimum wait
+        let mut elapsed: u32 = min_delay;
+        let mut last_busy = gpio_read(state().cfg.pin_busy);
+        esp_log_write(3, b"epaper\0".as_ptr(),
+            b"I (?) epaper: REFRESH min_delay done busy=%d\0".as_ptr(), last_busy);
+        // Continue polling until BUSY goes LOW (or timeout)
+        while elapsed < max_delay {
+            delay_ms(100);
+            elapsed += 100;
+            let b = gpio_read(state().cfg.pin_busy);
+            if b != last_busy {
+                esp_log_write(3, b"epaper\0".as_ptr(),
+                    b"I (?) epaper: REFRESH busy_change %dms busy=%d\0".as_ptr(),
+                    elapsed, b);
+                last_busy = b;
+            }
+            if b == 0 { break; }
+        }
+        esp_log_write(3, b"epaper\0".as_ptr(),
+            b"I (?) epaper: REFRESH done elapsed=%d\0".as_ptr(), elapsed);
+    }
+    #[cfg(not(target_os = "espidf"))]
+    {
+        let timeout = if fast { 5_000 } else { 15_000 };
+        let _ = epaper_wait_busy(timeout);
+    }
+
+    ESP_OK
+}
+
+/// Refresh — send the framebuffer to the panel and trigger a hardware update.
+///
+/// C-driver-proven sequence for the T-Deck Pro GDEQ031T10:
+///   panel soft-reset → panel config → write old/new data → VCOM → POWER_ON → display refresh → POWER_OFF
+///
+/// The sequence is split into #[inline(always)] helpers to prevent Xtensa register
+/// window overflow from corrupting cached function addresses (see helper comments).
+pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
+    #[cfg(target_os = "espidf")]
+    epd_log!("I (?) epaper: refresh entry");
+
+    let s = state_mut();
+    if !s.initialized {
+        #[cfg(target_os = "espidf")]
+        epd_log!("I (?) epaper: refresh called but not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    #[cfg(target_os = "espidf")]
+    {
+        let busy_pin = s.cfg.pin_busy;
+        let busy_val = gpio_read(busy_pin);
+        esp_log_write(3, b"epaper\0".as_ptr(),
+            b"I (?) epaper: refresh start busy_pin=%d busy_val=%d\0".as_ptr(),
+            busy_pin, busy_val);
+    }
+
+    // Use fast mode unless: first refresh, or explicitly set to FULL
+    let fast = s.first_refresh_done && s.refresh_mode != HalDisplayRefreshMode::Full;
+
+    // Panel soft reset (as in C driver)
+    let err = refresh_panel_soft_reset();
+    if err != ESP_OK { return err; }
+
+    // Panel setting (operating config)
+    let err = refresh_panel_config();
+    if err != ESP_OK { return err; }
+
+    // Write old framebuffer via cmd 0x10 (previous frame) — BEFORE POWER_ON
+    let err = refresh_send_old_fb();
+    if err != ESP_OK { return err; }
+
+    // Write new framebuffer via cmd 0x13 (current frame)
+    let err = refresh_send_new_fb();
+    if err != ESP_OK { return err; }
+
+    // VCOM and data interval (+ fast-refresh extras if applicable)
+    let err = refresh_vcom_and_fast(fast);
+    if err != ESP_OK { return err; }
+
+    // POWER_ON → wait/delay
+    let err = refresh_power_on();
+    if err != ESP_OK { return err; }
+
+    // Display refresh → wait/delay
+    let err = refresh_display_and_wait(fast);
     if err != ESP_OK { return err; }
 
     // Power off
-    err = epaper_send_cmd(CMD_POWER_OFF);
+    let err = epaper_send_cmd(CMD_POWER_OFF);
     if err != ESP_OK { return err; }
-    let _ = epaper_wait_busy(5_000); // best-effort
+    #[cfg(target_os = "espidf")]
+    delay_ms(300);
+    #[cfg(not(target_os = "espidf"))]
+    { let _ = epaper_wait_busy(5_000); }
+
     s.power_on = false;
 
     // Save current frame as "old" for next differential refresh
-    std::ptr::copy_nonoverlapping(s.fb, s.fb_old, EPD_FB_BYTES);
+    std::ptr::copy_nonoverlapping(fb_ptr() as *const u8, fb_old_ptr(), EPD_FB_BYTES);
 
     if !s.first_refresh_done {
         s.first_refresh_done = true;
@@ -822,6 +954,9 @@ pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
     if !fast {
         s.refresh_mode = HalDisplayRefreshMode::Fast;
     }
+
+    #[cfg(target_os = "espidf")]
+    epd_log!("I (?) epaper: refresh done");
 
     ESP_OK
 }
@@ -897,12 +1032,13 @@ static EPAPER_DRIVER: HalDisplayDriver = HalDisplayDriver {
 
 /// Return a pointer to the static GDEQ031T10 HAL display driver vtable.
 ///
-/// Drop-in replacement for the C `drv_epaper_gdeq031t10_get()`.
+/// NOTE: Temporarily disabled so the C driver is used for hardware testing.
+/// Re-enable by restoring the #[no_mangle] attribute.
 ///
 /// # Safety
 /// The returned pointer is valid for the lifetime of the program.
-#[no_mangle]
-pub extern "C" fn drv_epaper_gdeq031t10_get() -> *const HalDisplayDriver {
+#[allow(dead_code)]
+pub extern "C" fn drv_epaper_gdeq031t10_get_rs() -> *const HalDisplayDriver {
     &EPAPER_DRIVER as *const HalDisplayDriver
 }
 
@@ -916,17 +1052,17 @@ mod tests {
     /// Reset driver state between tests.
     fn reset_state() {
         let s = state_mut();
-        // Free any allocated framebuffers from a previous test run
-        unsafe {
-            free_fb(s.fb);
-            free_fb(s.fb_old);
-        }
         *s = EpaperState::new();
+        // Reset static framebuffers to zero
+        unsafe {
+            std::slice::from_raw_parts_mut(fb_ptr(), EPD_FB_BYTES).fill(0);
+            std::slice::from_raw_parts_mut(fb_old_ptr(), EPD_FB_BYTES).fill(0);
+        }
     }
 
     #[test]
     fn test_driver_name() {
-        let drv = unsafe { &*drv_epaper_gdeq031t10_get() };
+        let drv = unsafe { &*drv_epaper_gdeq031t10_get_rs() };
         assert!(!drv.name.is_null());
         let name = unsafe { std::ffi::CStr::from_ptr(drv.name) };
         assert_eq!(name.to_str().unwrap(), "GDEQ031T10");
@@ -934,7 +1070,7 @@ mod tests {
 
     #[test]
     fn test_driver_dimensions() {
-        let drv = unsafe { &*drv_epaper_gdeq031t10_get() };
+        let drv = unsafe { &*drv_epaper_gdeq031t10_get_rs() };
         assert_eq!(drv.width, 240);
         assert_eq!(drv.height, 320);
         assert_eq!(drv.display_type, HalDisplayType::Epaper);
@@ -942,8 +1078,8 @@ mod tests {
 
     #[test]
     fn test_driver_pointer_stable() {
-        let p1 = drv_epaper_gdeq031t10_get();
-        let p2 = drv_epaper_gdeq031t10_get();
+        let p1 = drv_epaper_gdeq031t10_get_rs();
+        let p2 = drv_epaper_gdeq031t10_get_rs();
         assert_eq!(p1, p2);
         assert!(!p1.is_null());
     }
@@ -995,9 +1131,18 @@ mod tests {
         assert_eq!(ret, ESP_OK);
         assert!(state().initialized);
 
-        // Check framebuffer was initialised to white
-        let fb = unsafe { std::slice::from_raw_parts(state().fb, EPD_FB_BYTES) };
-        assert!(fb.iter().all(|&b| b == 0xFF));
+        // Init loads a temporary bring-up pattern: even rows black, odd rows white.
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
+        assert_eq!(fb[0], 0x00);
+        assert_eq!(fb[30], 0xFF);
+
+        // Flush a small white area in the top-left corner.
+        let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 }; // 8 pixels wide, 1 row
+        let data = [0xFFu8; 1]; // 8 pixels, all white
+        let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
+        assert_eq!(ret, ESP_OK);
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
+        assert_eq!(fb[0], 0xFF);
 
         // Flush a small black area (0x00 = black pixels) in the top-left corner
         let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 }; // 8 pixels wide, 1 row
@@ -1006,17 +1151,15 @@ mod tests {
         assert_eq!(ret, ESP_OK);
 
         // First byte of fb should now be 0x00 (all black)
-        let fb = unsafe { std::slice::from_raw_parts(state().fb, EPD_FB_BYTES) };
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
         assert_eq!(fb[0], 0x00);
-        // The rest should still be white
-        assert!(fb[1..].iter().all(|&b| b == 0xFF));
 
         // Flush a white area back
         let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 };
         let data = [0xFFu8; 1];
         let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_OK);
-        let fb = unsafe { std::slice::from_raw_parts(state().fb, EPD_FB_BYTES) };
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
         assert_eq!(fb[0], 0xFF);
 
         // Cleanup
@@ -1123,14 +1266,12 @@ mod tests {
         let area = HalArea { x1: 0, y1: 0, x2: 0, y2: 0 };
         let data = [0x00u8]; // MSB = 0 = black
         unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
-        let fb = unsafe { std::slice::from_raw_parts(state().fb, EPD_FB_BYTES) };
-        assert_eq!(fb[0] & 0x80, 0x00, "pixel (0,0) should be black");
+        assert_eq!(unsafe { *fb_ptr() } & 0x80, 0x00, "pixel (0,0) should be black");
 
         // Set it back to white (bit 7 = 1)
         let data = [0x80u8]; // MSB = 1 = white
         unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
-        let fb = unsafe { std::slice::from_raw_parts(state().fb, EPD_FB_BYTES) };
-        assert_eq!(fb[0] & 0x80, 0x80, "pixel (0,0) should be white");
+        assert_eq!(unsafe { *fb_ptr() } & 0x80, 0x80, "pixel (0,0) should be white");
 
         unsafe { gdeq031t10_deinit() };
     }

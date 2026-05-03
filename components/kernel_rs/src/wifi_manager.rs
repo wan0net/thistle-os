@@ -89,7 +89,7 @@ extern "C" {
     fn esp_event_loop_create_default() -> i32;
     fn esp_netif_get_handle_from_ifkey(key: *const c_char) -> *mut c_void;
     fn esp_netif_create_default_wifi_sta() -> *mut c_void;
-    fn esp_wifi_init(cfg: *const c_void) -> i32;
+    fn thistle_wifi_init() -> i32;  // C shim: WIFI_INIT_CONFIG_DEFAULT + esp_wifi_init
     fn esp_event_handler_register(
         base: *const c_char,
         id: i32,
@@ -213,10 +213,9 @@ pub extern "C" fn wifi_manager_init() -> i32 {
                 esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"netif create sta failed\0".as_ptr());
                 return -1;
             }
-            // WIFI_INIT_CONFIG_DEFAULT is a macro in C; pass a zeroed buffer (512 bytes)
-            // larger than wifi_init_config_t so ESP-IDF fills in magic values.
-            let cfg = [0u8; 512];
-            let ret = esp_wifi_init(cfg.as_ptr() as *const c_void);
+            // Use the C shim: WIFI_INIT_CONFIG_DEFAULT is a macro that can't be
+            // called from Rust. The shim sets the magic field required by v6.
+            let ret = thistle_wifi_init();
             if ret != ESP_OK {
                 esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_init failed: %d\0".as_ptr(), ret);
                 return ret;
