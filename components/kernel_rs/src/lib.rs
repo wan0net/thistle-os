@@ -4,6 +4,18 @@
 // This crate implements kernel subsystems in Rust, exposing a C-compatible FFI
 // for integration with the existing C codebase. Modules are migrated incrementally.
 
+#![allow(
+    clashing_extern_declarations,
+    dead_code,
+    non_snake_case,
+    private_interfaces,
+    static_mut_refs,
+    unused_imports,
+    unused_mut,
+    unused_unsafe,
+    unused_variables
+)]
+
 pub mod app_manager;
 pub mod event;
 pub mod ipc;

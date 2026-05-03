@@ -8,6 +8,8 @@
 // 4. Downloads full bundle from app store (firmware + drivers + WM) → flashes / installs
 // 5. Falls back to UART console for manual recovery
 
+#![allow(dead_code)]
+
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::peripherals::Peripherals;
