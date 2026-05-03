@@ -18,7 +18,7 @@ use std::os::raw::c_char;
 use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::{Sha256, Digest};
-use aes::cipher::{BlockEncrypt, BlockDecrypt, KeyInit as AesKeyInit, generic_array::GenericArray};
+use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt};
 use ed25519_dalek::{Signer, Verifier};
 
 const ESP_OK: i32 = 0;
@@ -60,23 +60,23 @@ fn sw_hmac_sha256(key: &[u8], data: &[u8], mac_out: &mut [u8; 32]) {
 }
 
 fn sw_aes256_cbc_encrypt(key: &[u8; 32], iv: &[u8; 16], pt: &[u8], ct: &mut [u8]) {
-    let cipher = aes::Aes256::new(GenericArray::from_slice(key));
+    let cipher = aes::Aes256::new(&(*key).into());
     let mut prev = *iv;
     for i in (0..pt.len()).step_by(16) {
         let mut block = [0u8; 16];
         for j in 0..16 { block[j] = pt[i + j] ^ prev[j]; }
-        let mut ga = GenericArray::clone_from_slice(&block);
+        let mut ga = aes::Block::from(block);
         cipher.encrypt_block(&mut ga);
-        ct[i..i+16].copy_from_slice(ga.as_slice());
+        ct[i..i+16].copy_from_slice(&ga);
         prev.copy_from_slice(&ct[i..i+16]);
     }
 }
 
 fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]) {
-    let cipher = aes::Aes256::new(GenericArray::from_slice(key));
+    let cipher = aes::Aes256::new(&(*key).into());
     let mut prev = *iv;
     for i in (0..ct.len()).step_by(16) {
-        let mut ga = GenericArray::clone_from_slice(&ct[i..i+16]);
+        let mut ga: aes::Block = <[u8; 16]>::try_from(&ct[i..i + 16]).unwrap().into();
         cipher.decrypt_block(&mut ga);
         for j in 0..16 { pt[i + j] = ga[j] ^ prev[j]; }
         prev.copy_from_slice(&ct[i..i+16]);
@@ -88,17 +88,17 @@ fn sw_random(buf: &mut [u8]) -> bool {
 }
 
 fn sw_aes128_ecb_encrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
-    let cipher = aes::Aes128::new(GenericArray::from_slice(key));
-    let mut ga = GenericArray::clone_from_slice(block_in);
+    let cipher = aes::Aes128::new(&(*key).into());
+    let mut ga = aes::Block::from(*block_in);
     cipher.encrypt_block(&mut ga);
-    block_out.copy_from_slice(ga.as_slice());
+    block_out.copy_from_slice(&ga);
 }
 
 fn sw_aes128_ecb_decrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
-    let cipher = aes::Aes128::new(GenericArray::from_slice(key));
-    let mut ga = GenericArray::clone_from_slice(block_in);
+    let cipher = aes::Aes128::new(&(*key).into());
+    let mut ga = aes::Block::from(*block_in);
     cipher.decrypt_block(&mut ga);
-    block_out.copy_from_slice(ga.as_slice());
+    block_out.copy_from_slice(&ga);
 }
 
 // ── FFI exports (dispatch: hardware first, software fallback) ───────

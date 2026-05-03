@@ -12,8 +12,8 @@
 
 use std::sync::Mutex;
 
-use aes::cipher::{BlockEncrypt, KeyInit as AesKeyInit, generic_array::GenericArray};
-use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
+use aes::cipher::{BlockCipherEncrypt, KeyInit as AesKeyInit};
+use hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 
@@ -148,13 +148,13 @@ fn increment_counter(counter: &mut [u8; 16]) {
 
 /// AES-256-CTR encrypt/decrypt (same operation — XOR with keystream).
 fn aes256_ctr_process(key: &[u8; 32], nonce: &[u8; 16], input: &[u8], output: &mut [u8]) {
-    let cipher = aes::Aes256::new(GenericArray::from_slice(key));
+    let cipher = aes::Aes256::new(&(*key).into());
     let mut counter = [0u8; 16];
     counter.copy_from_slice(nonce);
 
     for (block_idx, chunk) in input.chunks(16).enumerate() {
         // Encrypt counter block to produce keystream
-        let mut keystream = GenericArray::clone_from_slice(&counter);
+        let mut keystream = aes::Block::from(counter);
         cipher.encrypt_block(&mut keystream);
 
         // XOR input with keystream
