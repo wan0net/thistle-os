@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Recovery OTA — check/flash firmware from SD card or HTTP
 
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_sys::*;
 use log::*;
@@ -76,6 +77,19 @@ pub fn catalog_entry_arch_matches(obj: &str, chip: &str) -> bool {
 
 const SD_FIRMWARE_PATH: &str = "/sdcard/update/thistle_os.bin";
 const MAX_FIRMWARE_SIZE: usize = 4 * 1024 * 1024; // 4MB
+const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
+
+#[cfg(not(debug_assertions))]
+const RECOVERY_SIGNING_KEY: [u8; 32] = [
+    0xeb, 0x7b, 0xc6, 0x5c, 0x1e, 0x3f, 0xfc, 0x49, 0x96, 0x1c, 0xa8, 0x15, 0xdb, 0x34, 0x37, 0x58,
+    0x34, 0x6d, 0xbe, 0x80, 0x50, 0x38, 0xbc, 0xd4, 0x49, 0x5a, 0x7a, 0x01, 0x66, 0x5e, 0x60, 0x89,
+];
+
+#[cfg(debug_assertions)]
+const RECOVERY_SIGNING_KEY: [u8; 32] = [
+    0xa1, 0x3e, 0x7b, 0x54, 0x02, 0xd8, 0xf1, 0x6c, 0x89, 0x45, 0xbb, 0x0a, 0xe7, 0x33, 0x9d, 0x5f,
+    0x12, 0xc4, 0x68, 0xae, 0x7d, 0x01, 0xf5, 0x92, 0xb6, 0x3a, 0xde, 0x84, 0x50, 0xc7, 0x1b, 0xe9,
+];
 
 /// Global progress counter (0-100) for the active bundle download.
 /// Updated by `recovery_download_board_bundle_for`; read by the web handler.
@@ -140,6 +154,9 @@ pub fn apply_sd_firmware() -> anyhow::Result<()> {
     if data.is_empty() || data.len() > MAX_FIRMWARE_SIZE {
         anyhow::bail!("Invalid firmware size: {} bytes", data.len());
     }
+    let sig = std::fs::read(format!("{}.sig", SD_FIRMWARE_PATH))
+        .map_err(|_| anyhow::anyhow!("Missing SD firmware signature"))?;
+    verify_ed25519(&data, &sig)?;
 
     flash_to_ota1(&data)?;
     Ok(())
@@ -159,12 +176,18 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Firmware entry missing url"))?;
     let expected_sha = json_extract_string(fw_entry, "sha256")
         .ok_or_else(|| anyhow::anyhow!("Firmware entry missing sha256"))?;
+    let sig_url = json_extract_string(fw_entry, "sig_url");
 
     info!("Downloading firmware: {}", fw_url);
     println!("Downloading: {}", fw_url);
 
     // Download and verify firmware binary before writing ota_1.
-    let firmware_data = download_verified_bytes(&fw_url, &expected_sha)?;
+    let (firmware_data, _) = download_catalog_entry_bytes(
+        &fw_url,
+        Some(&expected_sha),
+        sig_url.as_deref(),
+        REQUIRE_EXECUTABLE_SIGNATURES,
+    )?;
     info!("Downloaded {} bytes", firmware_data.len());
     println!("Downloaded {} bytes. Flashing...", firmware_data.len());
 
@@ -1025,25 +1048,51 @@ impl<'a> Iterator for JsonObjects<'a> {
     }
 }
 
-/// Download a single file via HTTP GET and write it to `dest_path`.
-fn download_file(url: &str, expected_sha256: Option<&str>, dest_path: &str) -> anyhow::Result<()> {
-    let data = match expected_sha256 {
-        Some(expected) if !expected.is_empty() => download_verified_bytes(url, expected)?,
-        _ => http_get_bytes(url)?,
-    };
+/// Download a single catalog entry, verify it, and write it to `dest_path`.
+fn download_file(
+    url: &str,
+    expected_sha256: Option<&str>,
+    sig_url: Option<&str>,
+    require_signature: bool,
+    dest_path: &str,
+) -> anyhow::Result<()> {
+    let (data, sig) =
+        download_catalog_entry_bytes(url, expected_sha256, sig_url, require_signature)?;
     std::fs::create_dir_all(
         std::path::Path::new(dest_path)
             .parent()
             .unwrap_or(std::path::Path::new("/")),
     )?;
     std::fs::write(dest_path, &data)?;
+    if let Some(sig_bytes) = sig {
+        std::fs::write(format!("{}.sig", dest_path), &sig_bytes)?;
+    }
     Ok(())
 }
 
-fn download_verified_bytes(url: &str, expected_sha256: &str) -> anyhow::Result<Vec<u8>> {
+fn download_catalog_entry_bytes(
+    url: &str,
+    expected_sha256: Option<&str>,
+    sig_url: Option<&str>,
+    require_signature: bool,
+) -> anyhow::Result<(Vec<u8>, Option<Vec<u8>>)> {
     let data = http_get_bytes(url)?;
-    verify_sha256(&data, expected_sha256)?;
-    Ok(data)
+    match expected_sha256.filter(|s| !s.trim().is_empty()) {
+        Some(expected) => verify_sha256(&data, expected)?,
+        None => anyhow::bail!("Catalog entry missing sha256 for {}", url),
+    }
+
+    let sig = match sig_url.filter(|s| !s.trim().is_empty()) {
+        Some(sig_url) => {
+            let sig = http_get_bytes(sig_url)?;
+            verify_ed25519(&data, &sig)?;
+            Some(sig)
+        }
+        None if require_signature => anyhow::bail!("Catalog entry missing sig_url for {}", url),
+        None => None,
+    };
+
+    Ok((data, sig))
 }
 
 fn verify_sha256(data: &[u8], expected_sha256: &str) -> anyhow::Result<()> {
@@ -1078,6 +1127,23 @@ fn hex_lower(bytes: &[u8]) -> String {
     out
 }
 
+fn verify_ed25519(data: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+    if signature.len() != 64 {
+        anyhow::bail!("Invalid Ed25519 signature size: {} bytes", signature.len());
+    }
+
+    let verifying_key = VerifyingKey::from_bytes(&RECOVERY_SIGNING_KEY)
+        .map_err(|_| anyhow::anyhow!("Invalid recovery signing public key"))?;
+    let sig_bytes: [u8; 64] = signature
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
+    let signature = Signature::from_bytes(&sig_bytes);
+
+    verifying_key
+        .verify(data, &signature)
+        .map_err(|_| anyhow::anyhow!("Ed25519 signature verification failed"))
+}
+
 /// Download all drivers, WM entries, and the firmware image that are
 /// compatible with the current board (read from board.json).
 ///
@@ -1106,7 +1172,7 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 ///    - board    → /sdcard/config/boards/<id>.json and /sdcard/config/board.json
 ///    - driver   → /sdcard/drivers/<id>.drv.elf
 ///    - wm       → /sdcard/wm/<id>.wm.elf
-/// 4. Download matching .sig files alongside non-firmware bundle files.
+/// 4. Verify and store matching .sig files alongside non-firmware bundle files.
 ///
 /// Returns the number of items successfully downloaded.
 pub fn recovery_download_board_bundle_for(
@@ -1192,7 +1258,13 @@ pub fn recovery_download_board_bundle_for(
             };
             info!("Downloading firmware {} -> ota_1", name);
             println!("  {} [firmware -> ota_1]", name);
-            match download_verified_bytes(&url, expected_sha).and_then(|data| flash_to_ota1(&data))
+            match download_catalog_entry_bytes(
+                &url,
+                Some(expected_sha),
+                sig_url.as_deref(),
+                REQUIRE_EXECUTABLE_SIGNATURES,
+            )
+            .and_then(|(data, _)| flash_to_ota1(&data))
             {
                 Ok(()) => {
                     downloaded += 1;
@@ -1213,7 +1285,15 @@ pub fn recovery_download_board_bundle_for(
         info!("Downloading {} -> {}", name, dest_path);
         println!("  {} [{}]", name, entry_type);
 
-        if let Err(e) = download_file(&url, expected_sha.as_deref(), &dest_path) {
+        let require_signature =
+            matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
+        if let Err(e) = download_file(
+            &url,
+            expected_sha.as_deref(),
+            sig_url.as_deref(),
+            require_signature,
+            &dest_path,
+        ) {
             error!("Failed to download '{}': {}", name, e);
             errors += 1;
             continue;
@@ -1224,20 +1304,7 @@ pub fn recovery_download_board_bundle_for(
             let _ = std::fs::copy(&dest_path, "/sdcard/config/board.json");
         }
 
-        // Download signature companion if sig_url is present.
-        if let Some(sig_url_str) = sig_url {
-            let sig_path = format!("{}.sig", dest_path);
-            if let Err(e) = download_file(&sig_url_str, None, &sig_path) {
-                error!(
-                    "Failed to download sig for '{}': {} — skipping install",
-                    name, e
-                );
-                let _ = std::fs::remove_file(&dest_path);
-                errors += 1;
-                continue;
-            }
-            // Signature bytes are verified by the kernel after boot; recovery
-            // only downloads them so the kernel can verify on first launch.
+        if !sig_url.as_deref().unwrap_or_default().is_empty() {
             info!("Signature downloaded for '{}'", name);
         }
 

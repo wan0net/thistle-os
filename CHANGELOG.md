@@ -1,5 +1,14 @@
 # ThistleOS Changelog
 
+## v0.5.2 - 2026-05-03
+
+Recovery trust-root hardening release.
+
+- Removed the blocking UART console from the minimal recovery control loop so web-triggered WiFi and bundle installs run without serial input.
+- Made board catalog/config selection authoritative for recovery bundle matching; generic board pin probing is disabled in recovery.
+- Recovery now verifies catalog SHA-256 hashes and Ed25519 signatures before flashing firmware, installing executable drivers/window managers, or applying SD-card firmware updates.
+- Bundle firmware entries now flash directly to `ota_1` and set the boot partition during install instead of staging an update file on SD.
+
 ## v0.5.1 - 2026-05-03
 
 Patch release from the watch compatibility and build-stabilisation work.
