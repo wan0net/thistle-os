@@ -84,7 +84,7 @@ fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]
 }
 
 fn sw_random(buf: &mut [u8]) -> bool {
-    getrandom::getrandom(buf).is_ok()
+    getrandom::fill(buf).is_ok()
 }
 
 fn sw_aes128_ecb_encrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
