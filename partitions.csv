@@ -1,14 +1,14 @@
 # Name,    Type, SubType, Offset,   Size,     Flags
 # 16MB flash layout for ThistleOS
 # factory: ThistleOS firmware for initial flash (idf.py flash)
-# ota_0: Recovery OS (Rust, ~500KB) — used after Recovery is flashed
+# ota_0: Recovery OS (Rust, WiFi/captive portal/HTTPS bundle installer)
 # ota_1: OTA update target
 # storage: SPIFFS for app data, drivers, apps
 nvs,       data, nvs,     0x9000,   0x6000,
 otadata,   data, ota,     0xf000,   0x2000,
 phy_init,  data, phy,     0x11000,  0x1000,
 factory,   app,  factory, 0x20000,  0x480000,
-ota_0,     app,  ota_0,   0x4A0000, 0x100000,
-ota_1,     app,  ota_1,   0x5A0000, 0x480000,
-storage,   data, spiffs,  0xA20000, 0x5D0000,
+ota_0,     app,  ota_0,   0x4A0000, 0x280000,
+ota_1,     app,  ota_1,   0x720000, 0x480000,
+storage,   data, spiffs,  0xBA0000, 0x450000,
 coredump,  data, coredump,0xFF0000, 0x10000,

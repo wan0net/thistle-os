@@ -1,0 +1,87 @@
+{
+    "board": {
+        "name": "CYD ESP32-2432S028R",
+        "arch": "esp32",
+        "board_id": "cyd-2432s028",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 1,
+                "mosi": 13,
+                "miso": 12,
+                "sclk": 14,
+                "max_transfer_bytes": 4096
+            },
+            {
+                "host": 2,
+                "mosi": 32,
+                "miso": 39,
+                "sclk": 25,
+                "max_transfer_bytes": 4096
+            },
+            {
+                "host": 2,
+                "mosi": 23,
+                "miso": 19,
+                "sclk": 18,
+                "max_transfer_bytes": 4096
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.lcd-ili9341",
+            "hal": "display",
+            "entry": "lcd-ili9341.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "spi_host": 1,
+                "pin_cs": 15,
+                "pin_dc": 2,
+                "pin_rst": -1,
+                "pin_bl": 21,
+                "spi_clock_hz": 26000000,
+                "width": 320,
+                "height": 240
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-xpt2046",
+            "hal": "input",
+            "entry": "touch-xpt2046.drv.elf",
+            "config": {
+                "spi_host": 2,
+                "pin_cs": 33,
+                "pin_irq": 36,
+                "pin_mosi": 32,
+                "pin_miso": 39,
+                "pin_sclk": 25,
+                "max_x": 320,
+                "max_y": 240,
+                "cal_x_min": 300,
+                "cal_x_max": 3800,
+                "cal_y_min": 200,
+                "cal_y_max": 3700,
+                "pressure_threshold": 100,
+                "swap_xy": false,
+                "invert_x": false,
+                "invert_y": false
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_host": 2,
+                "spi_mosi": 23,
+                "spi_miso": 19,
+                "spi_sclk": 18,
+                "pin_cs": 5,
+                "mount_point": "/sdcard"
+            }
+        }
+    ]
+}

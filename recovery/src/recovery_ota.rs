@@ -729,6 +729,7 @@ const FALLBACK_BOARD:   &str = "tdeck-pro";
 const SD_DRIVERS_DIR:   &str = "/sdcard/drivers";
 const SD_WM_DIR:        &str = "/sdcard/wm";
 const SD_UPDATE_DIR:    &str = "/sdcard/update";
+const SD_BOARDS_DIR:    &str = "/sdcard/config/boards";
 
 /// Read the board name from /spiffs/config/board.json, falling back to a
 /// hardcoded default when the file is absent or unparseable.
@@ -904,6 +905,72 @@ fn json_hex_or_int_u16(json: &str, key: &str) -> u16 {
     }
 }
 
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Fetch board metadata from a catalog and return web-ready JSON objects.
+pub fn catalog_board_options_json(catalog_url: &str, chip: &str) -> anyhow::Result<String> {
+    let catalog_json = http_get_string(catalog_url)?;
+    let mut boards: Vec<String> = Vec::new();
+
+    for obj in iter_json_objects(&catalog_json) {
+        if json_extract_string(obj, "type").as_deref() != Some("board") {
+            continue;
+        }
+        if !catalog_entry_arch_matches(obj, chip) {
+            continue;
+        }
+
+        let id = json_extract_string(obj, "board_id")
+            .or_else(|| json_extract_string(obj, "id"))
+            .unwrap_or_default();
+        if id.is_empty() {
+            continue;
+        }
+
+        let label = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
+        let arch = json_extract_string(obj, "arch").unwrap_or_default();
+        boards.push(format!(
+            r#"{{"id":"{}","label":"{}","arch":"{}"}}"#,
+            json_escape(&id),
+            json_escape(&label),
+            json_escape(&arch)
+        ));
+    }
+
+    Ok(boards.join(","))
+}
+
+/// Return true if `board_id` is present in the catalog board list for this chip.
+pub fn catalog_contains_board(catalog_url: &str, chip: &str, board_id: &str) -> bool {
+    if board_id.is_empty() {
+        return false;
+    }
+
+    let catalog_json = match http_get_string(catalog_url) {
+        Ok(json) => json,
+        Err(_) => return false,
+    };
+
+    for obj in iter_json_objects(&catalog_json) {
+        if json_extract_string(obj, "type").as_deref() != Some("board") {
+            continue;
+        }
+        if !catalog_entry_arch_matches(obj, chip) {
+            continue;
+        }
+        let id = json_extract_string(obj, "board_id")
+            .or_else(|| json_extract_string(obj, "id"))
+            .unwrap_or_default();
+        if id == board_id {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Iterate top-level `{...}` objects in a JSON array and yield each as a `&str` slice.
 fn iter_json_objects(json: &str) -> impl Iterator<Item = &str> {
     JsonObjects { src: json }
@@ -964,7 +1031,7 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
     recovery_download_board_bundle_for(catalog_url, &board_name)
 }
 
-/// Download all drivers, WM entries, and the firmware image that are
+/// Download all drivers, board config, WM entries, and the firmware image that are
 /// compatible with `board_name` or matched via hardware detection probing.
 ///
 /// Progress is reported via `BUNDLE_PROGRESS` (0-100) so the web UI can poll
@@ -972,6 +1039,7 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 ///
 /// Matching rules (applied per catalog entry):
 ///   - firmware/wm entries: matched by `compatible_boards` (unchanged).
+///   - board entries: matched by `id`/`board_id`.
 ///   - driver entries with a `detection` object: matched if any detected
 ///     component's bus+address matches the entry's `detection.bus`+`detection.address`.
 ///   - driver entries without `detection`: fall back to `compatible_boards`.
@@ -982,6 +1050,7 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 /// 3. Count compatible entries to compute per-item progress increments.
 /// 4. For each compatible catalog entry:
 ///    - firmware → /sdcard/update/thistle_os.bin
+///    - board    → /sdcard/config/boards/<id>.json and /sdcard/config/board.json
 ///    - driver   → /sdcard/drivers/<id>.drv.elf
 ///    - wm       → /sdcard/wm/<id>.wm.elf
 /// 5. Download matching .sig files alongside each item.
@@ -1039,6 +1108,12 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
                 }
             }
             "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
+            "board" => {
+                let id = json_extract_string(obj, "board_id")
+                    .or_else(|| json_extract_string(obj, "id"))
+                    .unwrap_or_default();
+                id == board_name
+            }
             _ => false,
         }
     };
@@ -1070,6 +1145,7 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
 
         let dest_path = match entry_type.as_str() {
             "firmware" => format!("{}/thistle_os.bin", SD_UPDATE_DIR),
+            "board"    => format!("{}/{}.json", SD_BOARDS_DIR, id),
             "driver"   => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
             "wm"       => format!("{}/{}.wm.elf", SD_WM_DIR, id),
             other      => {
@@ -1085,6 +1161,11 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
             error!("Failed to download '{}': {}", name, e);
             errors += 1;
             continue;
+        }
+
+        if entry_type == "board" {
+            let _ = std::fs::create_dir_all("/sdcard/config");
+            let _ = std::fs::copy(&dest_path, "/sdcard/config/board.json");
         }
 
         // Download and verify signature if sig_url is present

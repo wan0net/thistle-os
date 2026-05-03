@@ -1,0 +1,31 @@
+{
+    "board": {
+        "name": "ESP32-C3 Mini",
+        "arch": "esp32c3",
+        "board_id": "c3-mini",
+        "version": "1.0"
+    },
+    "buses": {
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 8,
+                "scl": 9,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.oled-ssd1306",
+            "hal": "display",
+            "entry": "oled-ssd1306.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x3C",
+                "pin_rst": -1,
+                "pin_vext": -1
+            }
+        }
+    ]
+}
