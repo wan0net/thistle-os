@@ -136,7 +136,7 @@ int esp_http_client_fetch_headers(void *c) { (void)c; return -1; }
 int esp_http_client_read(void *c, char *b, int l) { (void)c;(void)b;(void)l; return -1; }
 int esp_http_client_get_status_code(void *c) { (void)c; return 0; }
 int esp_http_client_close(void *c) { (void)c; return 0; }
-void esp_http_client_cleanup(void *c) { (void)c; }
+int esp_http_client_cleanup(void *c) { (void)c; return 0; }
 
 /* ── sim_http stubs (backing for simulator/platform/esp_http_client.h inlines) */
 #include "sim_http.h"
@@ -176,6 +176,20 @@ int gpio_set_direction(int pin, int mode) { (void)pin; (void)mode; return 0; }
 int gpio_set_pull_mode(int pin, int mode) { (void)pin; (void)mode; return 0; }
 int gpio_set_intr_type(int pin, int type) { (void)pin; (void)type; return 0; }
 int gpio_intr_enable(int pin) { (void)pin; return 0; }
+void gpio_deep_sleep_hold_dis(void) {}
+
+/* ── Board config helpers ─────────────────────────────────────────── */
+int board_detect_and_write(void) { return -1; }
+int board_gpio_set_output(int pin, int level, int delay_ms) { (void)pin; (void)level; (void)delay_ms; return 0; }
+int board_bus_init_spi(int host, int mosi, int miso, int sclk, int max_transfer_bytes) {
+    (void)host; (void)mosi; (void)miso; (void)sclk; (void)max_transfer_bytes; return 0;
+}
+int board_bus_init_i2c(int port, int sda, int scl, int freq_hz) {
+    (void)port; (void)sda; (void)scl; (void)freq_hz; return 0;
+}
+int board_builtin_driver_init(const char *id, const char *hal_type, const char *config_json) {
+    (void)id; (void)hal_type; (void)config_json; return -1;
+}
 
 /* ── UART stubs ───────────────────────────────────────────────────── */
 int uart_param_config(int num, const void *cfg) { (void)num; (void)cfg; return 0; }

@@ -10,6 +10,7 @@
     non_snake_case,
     private_interfaces,
     static_mut_refs,
+    unreachable_code,
     unused_imports,
     unused_mut,
     unused_unsafe,

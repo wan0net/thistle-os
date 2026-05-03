@@ -372,6 +372,28 @@ esp_err_t gpio_set_direction(gpio_num_t pin, gpio_mode_t mode) { (void)pin; (voi
 esp_err_t gpio_set_pull_mode(gpio_num_t pin, int mode) { (void)pin; (void)mode; return 0; }
 esp_err_t gpio_set_intr_type(gpio_num_t pin, gpio_intr_type_t type) { (void)pin; (void)type; return 0; }
 esp_err_t gpio_intr_enable(gpio_num_t pin) { (void)pin; return 0; }
+void gpio_deep_sleep_hold_dis(void) {}
+
+/* ── Board config helpers ─────────────────────────────────────────── */
+int board_gpio_set_output(int pin, int level, int delay_ms) {
+    (void)delay_ms;
+    return gpio_set_level((gpio_num_t)pin, (uint32_t)level);
+}
+
+int board_bus_init_spi(int host, int mosi, int miso, int sclk, int max_transfer_bytes) {
+    (void)host; (void)mosi; (void)miso; (void)sclk; (void)max_transfer_bytes;
+    return ESP_OK;
+}
+
+int board_bus_init_i2c(int port, int sda, int scl, int freq_hz) {
+    (void)port; (void)sda; (void)scl; (void)freq_hz;
+    return ESP_OK;
+}
+
+int board_builtin_driver_init(const char *id, const char *hal_type, const char *config_json) {
+    (void)id; (void)hal_type; (void)config_json;
+    return ESP_ERR_NOT_SUPPORTED;
+}
 
 /* ── Shell command stubs (thistle_shell.rs FFI) ───────────────────── */
 /* esp_restart and esp_get_free_heap_size are static inline in esp_system.h,
