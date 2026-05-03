@@ -68,14 +68,15 @@
     </div>
 
     <h2>Purpose and design</h2>
-    <p>The Recovery OS occupies the <code>ota_0</code> partition — a 128 KB slot that the ESP-IDF bootloader can always fall back to. Its job is simple: make sure there is a working ThistleOS in <code>ota_1</code>. If there is not, it provides a way to install one.</p>
+    <p>The Recovery OS occupies the <code>ota_0</code> partition, which is <code>0x280000</code> bytes in the current 16 MB layout. The ESP-IDF bootloader can fall back to it when the main OS in <code>ota_1</code> is missing or invalid. Its job is simple: make sure there is a working ThistleOS in <code>ota_1</code>. If there is not, it provides a way to install one.</p>
 
     <p>Key design choices:</p>
     <ul>
       <li><strong>Rust + esp-rs</strong> — smaller binary than equivalent C code, and memory safety means fewer panic-class bugs in the one piece of code that must always work.</li>
       <li><strong>Hardware auto-detection</strong> — Recovery detects the chip variant (ESP32/S3/C3/etc.), then scans I2C buses (0x08–0x77), probes SPI device CS pins, and listens on UART for GPS NMEA / modem AT responses. Component matches are looked up in the catalog.</li>
       <li><strong>Multi-arch chip detection</strong> — a single Recovery binary identifies whether it is running on Xtensa or RISC-V and selects the correct firmware architecture from the catalog.</li>
-      <li><strong>Full bundle download</strong> — Recovery downloads firmware binary, matching drivers, and the appropriate window manager in one provisioning flow. The device boots fully configured with no manual SD card setup.</li>
+      <li><strong>Downloadable board list</strong> — after WiFi connects, the web UI fetches the latest board catalog from <code>https://wan0net.github.io/thistle-os/catalog.json</code> and keeps the built-in list as the offline fallback.</li>
+      <li><strong>Full bundle download</strong> — Recovery downloads firmware binary, matching drivers, board config, and the appropriate window manager in one provisioning flow. The device boots fully configured with no manual SD card setup.</li>
       <li><strong>No LVGL</strong> — the recovery UI is a captive portal web page served over WiFi, viewable on any phone or laptop. The e-paper display shows status messages via raw framebuffer writes.</li>
       <li><strong>No SD card required</strong> — if the SD card is missing or corrupt, recovery can still download firmware over WiFi.</li>
       <li><strong>UART console as fallback</strong> — if WiFi is not available, a serial console provides the same commands.</li>
@@ -116,7 +117,7 @@
                      &#x25BC;
           [Step 4] Start WiFi AP "ThistleOS-Recovery"
           [Step 5] Start HTTP captive portal (192.168.4.1)
-                     — 3-step flow: WiFi, Download, Reboot
+                     — WiFi, board list download, dry-run plan, install, reboot
           [Step 6] Start UART console loop
                      &#x2502;
                      &#x25BC; (user action via web or UART)
@@ -129,7 +130,8 @@
     <p>The portal provides a 3-step guided flow:</p>
     <ol>
       <li><strong>Step 1 — WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP). Recovery shows detected hardware components on this screen.</li>
-      <li><strong>Step 2 — Download &amp; Install</strong> — fetches the firmware binary, matching drivers, and window manager from the official catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>), filtered to the detected chip architecture. Streams the bundle to flash and the SD card.</li>
+      <li><strong>Step 2 — Board Select</strong> — downloads the latest board list after WiFi connects, filters it by detected chip architecture, and keeps the built-in list available offline.</li>
+      <li><strong>Step 3 — Dry Run &amp; Install</strong> — dry-runs the selected board against the bundle catalog, then fetches the firmware binary, matching drivers, board config, and window manager from the official bundle catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>). Streams the bundle to flash and the SD card.</li>
       <li><strong>Step 3 — Reboot</strong> — confirms installation; reboots the device into a fully provisioned ThistleOS.</li>
     </ol>
 
@@ -151,7 +153,9 @@
           <tr><td><code>status</code></td><td>Recovery version, WiFi state, ota_1 state, SD firmware presence</td></tr>
           <tr><td><code>scan</code></td><td>Scan for WiFi networks and list up to 15 results with RSSI and channel</td></tr>
           <tr><td><code>connect SSID,PASS</code></td><td>Connect to a WiFi network (WPA2). No spaces in SSID or password.</td></tr>
-          <tr><td><code>download</code></td><td>Download and install ThistleOS from the app store catalog (requires WiFi)</td></tr>
+          <tr><td><code>board</code></td><td>Show detected/selected board and known offline board IDs</td></tr>
+          <tr><td><code>board &lt;id&gt;</code></td><td>Select a board manually before bundle download</td></tr>
+          <tr><td><code>download</code></td><td>Download and install ThistleOS from the bundle catalog (requires WiFi)</td></tr>
           <tr><td><code>reboot</code></td><td>Restart the device</td></tr>
         </tbody>
       </table>
@@ -177,8 +181,8 @@ Connected!
 IP: 192.168.1.42
 
 recovery> download
-Downloading firmware from https://wan0net.github.io/thistle-apps/catalog.json...
-Firmware installed! Rebooting...</code></pre>
+Downloading full bundle for board 'tdeck-pro' from https://wan0net.github.io/thistle-apps/catalog.json...
+Bundle installed (4 items). Rebooting...</code></pre>
 
     <h2>REST API endpoints</h2>
     <p>The captive portal web server also exposes a small REST API for scripted recovery:</p>
@@ -189,8 +193,11 @@ Firmware installed! Rebooting...</code></pre>
         <tbody>
           <tr><td><code>GET</code></td><td><code>/</code></td><td>Captive portal HTML page</td></tr>
           <tr><td><code>GET</code></td><td><code>/api/status</code></td><td>JSON: version, mode, ota1 state, sd_firmware</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/boards</code></td><td>JSON: board list from the downloadable board catalog, or the built-in fallback list when offline</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/board/select</code></td><td>Body: <code>{"board":"tdeck-pro"}</code>. Stores the board selection.</td></tr>
+          <tr><td><code>GET</code></td><td><code>/api/bundle/plan</code></td><td>Dry-run JSON plan for the selected board using the bundle catalog. Does not write flash or SD card.</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/wifi/connect</code></td><td>Body: <code>{"ssid":"...","password":"..."}</code>. Returns <code>{"ok":true,"ip":"..."}</code></td></tr>
-          <tr><td><code>POST</code></td><td><code>/api/ota/download</code></td><td>Triggers firmware download from catalog. Returns <code>{"ok":true}</code> then reboots.</td></tr>
+          <tr><td><code>POST</code></td><td><code>/api/bundle/download</code></td><td>Triggers full bundle download for the selected board. Returns <code>{"ok":true}</code> and exposes progress through <code>/api/bundle/status</code>.</td></tr>
           <tr><td><code>POST</code></td><td><code>/api/reboot</code></td><td>Reboots the device after 1 second.</td></tr>
         </tbody>
       </table>
@@ -217,7 +224,7 @@ cargo build --release
 <span class="tok-comment"># Flash to ota_0 partition specifically</span>
 espflash flash --partition-table partitions.csv \
     --partition ota_0 \
-    target/xtensa-esp32s3-espidf/release/thistleos-recovery</code></pre>
+    target/xtensa-esp32s3-espidf/release/thistle-recovery</code></pre>
 
     <div class="callout warn">
       <div class="callout-title">Toolchain</div>

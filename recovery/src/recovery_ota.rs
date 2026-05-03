@@ -29,17 +29,22 @@ pub fn detect_chip() -> &'static str {
             fn esp_chip_info(info: *mut EspChipInfo);
         }
 
-        let mut info = EspChipInfo { model: 0, features: 0, revision: 0, cores: 0 };
+        let mut info = EspChipInfo {
+            model: 0,
+            features: 0,
+            revision: 0,
+            cores: 0,
+        };
         esp_chip_info(&mut info);
 
         match info.model {
-            1  => "esp32",    // CHIP_ESP32
-            2  => "esp32s2",  // CHIP_ESP32S2
-            9  => "esp32s3",  // CHIP_ESP32S3
-            5  => "esp32c3",  // CHIP_ESP32C3
-            13 => "esp32c6",  // CHIP_ESP32C6
-            16 => "esp32h2",  // CHIP_ESP32H2
-            _  => "unknown",
+            1 => "esp32",    // CHIP_ESP32
+            2 => "esp32s2",  // CHIP_ESP32S2
+            9 => "esp32s3",  // CHIP_ESP32S3
+            5 => "esp32c3",  // CHIP_ESP32C3
+            13 => "esp32c6", // CHIP_ESP32C6
+            16 => "esp32h2", // CHIP_ESP32H2
+            _ => "unknown",
         }
     }
 }
@@ -101,9 +106,7 @@ pub fn check_ota1() -> Ota1State {
 
         match state {
             x if x == esp_ota_img_states_t_ESP_OTA_IMG_VALID => Ota1State::Valid,
-            x if x == esp_ota_img_states_t_ESP_OTA_IMG_PENDING_VERIFY => {
-                Ota1State::PendingVerify
-            }
+            x if x == esp_ota_img_states_t_ESP_OTA_IMG_PENDING_VERIFY => Ota1State::PendingVerify,
             _ => Ota1State::Invalid,
         }
     }
@@ -188,7 +191,11 @@ fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
         let mut written = 0;
         while written < total {
             let end = std::cmp::min(written + chunk_size, total);
-            let ret = esp_ota_write(handle, data[written..end].as_ptr() as *const _, end - written);
+            let ret = esp_ota_write(
+                handle,
+                data[written..end].as_ptr() as *const _,
+                end - written,
+            );
             if ret != ESP_OK as i32 {
                 esp_ota_abort(handle);
                 anyhow::bail!("esp_ota_write failed at offset {}: {}", written, ret);
@@ -246,23 +253,23 @@ const PROBE_I2C_SCL: i32 = 14;
 const PROBE_1V8_EN: u32 = 38;
 
 /// E-paper display (GDEQ031T10)
-const PROBE_EPAPER_CS:   u32 = 34;
+const PROBE_EPAPER_CS: u32 = 34;
 const PROBE_EPAPER_BUSY: u32 = 37; // active LOW when panel is busy
-// RST is not connected on T-Deck Pro (BOARD_EPAPER_RST = -1)
+                                   // RST is not connected on T-Deck Pro (BOARD_EPAPER_RST = -1)
 
 /// SX1262 LoRa radio
-const PROBE_LORA_CS:   u32 = 3;
-const PROBE_LORA_BUSY: u32 = 6;  // BUSY pin, active HIGH when radio is busy
-const PROBE_LORA_EN:   u32 = 46; // power enable for LoRa
+const PROBE_LORA_CS: u32 = 3;
+const PROBE_LORA_BUSY: u32 = 6; // BUSY pin, active HIGH when radio is busy
+const PROBE_LORA_EN: u32 = 46; // power enable for LoRa
 
 /// SD card
 const PROBE_SD_CS: u32 = 48;
 
 /// GPS (MIA-M10Q) — UART_NUM_2, TX=43, RX=44
 const PROBE_GPS_UART: i32 = 2; // UART_NUM_2
-const PROBE_GPS_TX:   i32 = 43;
-const PROBE_GPS_RX:   i32 = 44;
-const PROBE_GPS_EN:   u32 = 39; // power enable for GPS
+const PROBE_GPS_TX: i32 = 43;
+const PROBE_GPS_RX: i32 = 44;
+const PROBE_GPS_EN: u32 = 39; // power enable for GPS
 
 /// Modem (A7682E) — not present in T-Deck Pro board header; no UART defined.
 /// Modem detection is omitted as there is no canonical UART assignment.
@@ -279,7 +286,7 @@ const KNOWN_I2C_DEVICES: &[(u8, &str)] = &[
     (0x23, "LTR-553 Light Sensor"),
     (0x18, "LIS3DH Accelerometer"),
     (0x51, "PCF8563 RTC"),
-    (0x55, "PCF8563 RTC"),      // alternate address (T-Deck Pro)
+    (0x55, "PCF8563 RTC"), // alternate address (T-Deck Pro)
     (0x6A, "QMI8658C Accel/Gyro"),
     (0x6B, "QMI8658C Accel/Gyro"),
     (0x76, "BMP280 Pressure"),
@@ -288,38 +295,47 @@ const KNOWN_I2C_DEVICES: &[(u8, &str)] = &[
 
 /// Human-readable names for SPI devices, keyed by CS GPIO pin number.
 const KNOWN_SPI_DEVICES: &[(u8, &str)] = &[
-    (34, "GDEQ031T10 E-Paper"),   // CS = GPIO 34
-    (3,  "SX1262 LoRa Radio"),    // CS = GPIO 3
-    (48, "SD Card"),              // CS = GPIO 48
+    (34, "GDEQ031T10 E-Paper"), // CS = GPIO 34
+    (3, "SX1262 LoRa Radio"),   // CS = GPIO 3
+    (48, "SD Card"),            // CS = GPIO 48
 ];
 
 /// Human-readable names for UART devices, keyed by UART port number.
 const KNOWN_UART_DEVICES: &[(u8, &str)] = &[
-    (2, "MIA-M10Q GPS"),          // UART_NUM_2
+    (2, "MIA-M10Q GPS"), // UART_NUM_2
 ];
 
 /// Return the display name for a known I2C address, or None.
 pub fn i2c_device_name(addr: u8) -> Option<&'static str> {
-    KNOWN_I2C_DEVICES.iter().find(|(a, _)| *a == addr).map(|(_, n)| *n)
+    KNOWN_I2C_DEVICES
+        .iter()
+        .find(|(a, _)| *a == addr)
+        .map(|(_, n)| *n)
 }
 
 /// Return the display name for a known SPI device by CS pin, or None.
 pub fn spi_device_name(cs_pin: u8) -> Option<&'static str> {
-    KNOWN_SPI_DEVICES.iter().find(|(p, _)| *p == cs_pin).map(|(_, n)| *n)
+    KNOWN_SPI_DEVICES
+        .iter()
+        .find(|(p, _)| *p == cs_pin)
+        .map(|(_, n)| *n)
 }
 
 /// Return the display name for a known UART device by port number, or None.
 pub fn uart_device_name(port: u8) -> Option<&'static str> {
-    KNOWN_UART_DEVICES.iter().find(|(p, _)| *p == port).map(|(_, n)| *n)
+    KNOWN_UART_DEVICES
+        .iter()
+        .find(|(p, _)| *p == port)
+        .map(|(_, n)| *n)
 }
 
 /// Return the display name for any detected component regardless of bus type.
 pub fn component_device_name(c: &DetectedComponent) -> &'static str {
     match c.bus.as_str() {
-        "i2c"  => i2c_device_name(c.address as u8).unwrap_or("Unknown Device"),
-        "spi"  => spi_device_name(c.address as u8).unwrap_or("Unknown SPI Device"),
+        "i2c" => i2c_device_name(c.address as u8).unwrap_or("Unknown Device"),
+        "spi" => spi_device_name(c.address as u8).unwrap_or("Unknown SPI Device"),
         "uart" => uart_device_name(c.address as u8).unwrap_or("Unknown UART Device"),
-        _      => "Unknown Device",
+        _ => "Unknown Device",
     }
 }
 
@@ -340,8 +356,8 @@ pub fn scan_hardware() -> Vec<DetectedComponent> {
     unsafe {
         // Enable 1.8V power rail (GPIO 38) — I2C and SPI peripherals need this.
         gpio_set_direction(PROBE_1V8_EN, 2); // GPIO_MODE_OUTPUT = 2
-        gpio_set_level(PROBE_1V8_EN, 1);     // HIGH = enable
-        // Brief delay for power rail stabilisation (~100 ms at 100 Hz FreeRTOS tick)
+        gpio_set_level(PROBE_1V8_EN, 1); // HIGH = enable
+                                         // Brief delay for power rail stabilisation (~100 ms at 100 Hz FreeRTOS tick)
         vTaskDelay(10);
     }
 
@@ -379,14 +395,14 @@ fn scan_i2c(found: &mut Vec<DetectedComponent>) {
         }
 
         let cfg = I2cMasterBusConfig {
-            i2c_port: 0,                 // I2C_NUM_0
-            sda_io_num: PROBE_I2C_SDA,   // GPIO 13
-            scl_io_num: PROBE_I2C_SCL,   // GPIO 14
-            clk_source: 11,              // SOC_MOD_CLK_XTAL = I2C_CLK_SRC_DEFAULT on ESP32-S3
+            i2c_port: 0,               // I2C_NUM_0
+            sda_io_num: PROBE_I2C_SDA, // GPIO 13
+            scl_io_num: PROBE_I2C_SCL, // GPIO 14
+            clk_source: 11,            // SOC_MOD_CLK_XTAL = I2C_CLK_SRC_DEFAULT on ESP32-S3
             glitch_ignore_cnt: 7,
             intr_priority: 0,
             trans_queue_depth: 0,
-            flags: 0x01,                 // enable_internal_pullup
+            flags: 0x01, // enable_internal_pullup
         };
 
         let mut bus_handle: *mut core::ffi::c_void = core::ptr::null_mut();
@@ -452,9 +468,9 @@ fn scan_spi(found: &mut Vec<DetectedComponent>) {
         gpio_set_direction(PROBE_EPAPER_BUSY, 1); // GPIO_MODE_INPUT = 1
         gpio_set_pull_mode(PROBE_EPAPER_BUSY, 1); // GPIO_PULLUP_ONLY = 1
         vTaskDelay(1); // let pull-up settle
-        // Configure CS as output — if it configures cleanly the GPIO is wired
+                       // Configure CS as output — if it configures cleanly the GPIO is wired
         gpio_set_direction(PROBE_EPAPER_CS, 2); // GPIO_MODE_OUTPUT = 2
-        gpio_set_level(PROBE_EPAPER_CS, 1);      // deassert (CS active LOW)
+        gpio_set_level(PROBE_EPAPER_CS, 1); // deassert (CS active LOW)
         let busy_level = gpio_get_level(PROBE_EPAPER_BUSY);
         // BUSY HIGH = panel idle (expected after power-on).
         // Restore BUSY to input floating to avoid interfering with the kernel driver.
@@ -477,8 +493,8 @@ fn scan_spi(found: &mut Vec<DetectedComponent>) {
     // After power-on the radio briefly asserts BUSY HIGH then releases it.
     let lora_detected = unsafe {
         gpio_set_direction(PROBE_LORA_EN, 2); // GPIO_MODE_OUTPUT = 2
-        gpio_set_level(PROBE_LORA_EN, 1);     // enable LoRa power
-        vTaskDelay(5);                        // allow radio to power up (~5 ms)
+        gpio_set_level(PROBE_LORA_EN, 1); // enable LoRa power
+        vTaskDelay(5); // allow radio to power up (~5 ms)
         gpio_set_direction(PROBE_LORA_BUSY, 1); // GPIO_MODE_INPUT = 1
         gpio_set_pull_mode(PROBE_LORA_BUSY, 2); // GPIO_PULLDOWN_ONLY = 2
         vTaskDelay(1);
@@ -529,13 +545,13 @@ fn scan_spi(found: &mut Vec<DetectedComponent>) {
 /// Only the fields we need are set; the rest are zeroed (safe defaults).
 #[repr(C)]
 struct UartConfig {
-    baud_rate:      i32,
-    data_bits:      u32, // UART_DATA_8_BITS = 3
-    parity:         u32, // UART_PARITY_DISABLE = 0
-    stop_bits:      u32, // UART_STOP_BITS_1 = 1
-    flow_ctrl:      u32, // UART_HW_FLOWCTRL_DISABLE = 0
+    baud_rate: i32,
+    data_bits: u32, // UART_DATA_8_BITS = 3
+    parity: u32,    // UART_PARITY_DISABLE = 0
+    stop_bits: u32, // UART_STOP_BITS_1 = 1
+    flow_ctrl: u32, // UART_HW_FLOWCTRL_DISABLE = 0
     rx_flow_ctrl_thresh: u8,
-    source_clk:     u32, // UART_SCLK_DEFAULT = 0
+    source_clk: u32, // UART_SCLK_DEFAULT = 0
 }
 
 /// Probe UART devices by listening briefly for known data patterns.
@@ -554,13 +570,13 @@ fn scan_uart(found: &mut Vec<DetectedComponent>) {
     let gps_detected = unsafe {
         // Enable GPS power rail
         gpio_set_direction(PROBE_GPS_EN, 2); // GPIO_MODE_OUTPUT = 2
-        gpio_set_level(PROBE_GPS_EN, 1);     // HIGH = enable
-        vTaskDelay(10);                      // allow GPS module to power up
+        gpio_set_level(PROBE_GPS_EN, 1); // HIGH = enable
+        vTaskDelay(10); // allow GPS module to power up
 
         let cfg = UartConfig {
             baud_rate: 9600,
             data_bits: 3, // UART_DATA_8_BITS
-            parity:    0, // UART_PARITY_DISABLE
+            parity: 0,    // UART_PARITY_DISABLE
             stop_bits: 1, // UART_STOP_BITS_1
             flow_ctrl: 0, // UART_HW_FLOWCTRL_DISABLE
             rx_flow_ctrl_thresh: 0,
@@ -579,14 +595,7 @@ fn scan_uart(found: &mut Vec<DetectedComponent>) {
             -1,           // CTS not used
         );
         // RX buffer 512 bytes; no TX buffer, no queue, no ISR flags
-        let ret_drv = uart_driver_install(
-            PROBE_GPS_UART,
-            512,
-            0,
-            0,
-            core::ptr::null_mut(),
-            0,
-        );
+        let ret_drv = uart_driver_install(PROBE_GPS_UART, 512, 0, 0, core::ptr::null_mut(), 0);
 
         let mut detected = false;
         if ret_cfg == 0 && ret_pin == 0 && ret_drv == 0 {
@@ -599,12 +608,7 @@ fn scan_uart(found: &mut Vec<DetectedComponent>) {
 
             'outer: while ticks_waited < deadline_ticks {
                 // timeout = 2 ticks per read attempt (~20 ms)
-                let n = uart_read_bytes(
-                    PROBE_GPS_UART,
-                    buf.as_mut_ptr(),
-                    buf.len() as u32,
-                    2,
-                );
+                let n = uart_read_bytes(PROBE_GPS_UART, buf.as_mut_ptr(), buf.len() as u32, 2);
                 if n > 0 {
                     // Check for '$' (NMEA sentence start) in received bytes
                     for &b in &buf[..n as usize] {
@@ -661,10 +665,18 @@ pub fn autodetect_board() -> Option<String> {
     }
 
     let components = scan_hardware();
-    let has_tca8418  = components.iter().any(|c| c.bus == "i2c" && c.address == 0x34);
-    let has_bhi260   = components.iter().any(|c| c.bus == "i2c" && c.address == 0x28);
-    let has_cst816   = components.iter().any(|c| c.bus == "i2c" && c.address == 0x15);
-    let has_ssd1306  = components.iter().any(|c| c.bus == "i2c" && c.address == 0x3C);
+    let has_tca8418 = components
+        .iter()
+        .any(|c| c.bus == "i2c" && c.address == 0x34);
+    let has_bhi260 = components
+        .iter()
+        .any(|c| c.bus == "i2c" && c.address == 0x28);
+    let has_cst816 = components
+        .iter()
+        .any(|c| c.bus == "i2c" && c.address == 0x15);
+    let has_ssd1306 = components
+        .iter()
+        .any(|c| c.bus == "i2c" && c.address == 0x3C);
     let has_lora_spi = components.iter().any(|c| c.bus == "spi");
 
     if has_tca8418 {
@@ -699,7 +711,10 @@ unsafe fn i2c_probe(bus: *mut core::ffi::c_void, addr: u8) -> bool {
 
 extern "C" {
     // I2C (ESP-IDF v5 master API)
-    fn i2c_new_master_bus(cfg: *const core::ffi::c_void, handle: *mut *mut core::ffi::c_void) -> i32;
+    fn i2c_new_master_bus(
+        cfg: *const core::ffi::c_void,
+        handle: *mut *mut core::ffi::c_void,
+    ) -> i32;
     fn i2c_del_master_bus(handle: *mut core::ffi::c_void) -> i32;
     fn i2c_master_probe(bus: *mut core::ffi::c_void, address: u16, timeout_ms: i32) -> i32;
 
@@ -712,7 +727,14 @@ extern "C" {
     // UART
     fn uart_param_config(port: i32, cfg: *const core::ffi::c_void) -> i32;
     fn uart_set_pin(port: i32, tx: i32, rx: i32, rts: i32, cts: i32) -> i32;
-    fn uart_driver_install(port: i32, rx_buf: i32, tx_buf: i32, queue_size: i32, queue: *mut *mut core::ffi::c_void, flags: i32) -> i32;
+    fn uart_driver_install(
+        port: i32,
+        rx_buf: i32,
+        tx_buf: i32,
+        queue_size: i32,
+        queue: *mut *mut core::ffi::c_void,
+        flags: i32,
+    ) -> i32;
     fn uart_driver_delete(port: i32) -> i32;
     fn uart_read_bytes(port: i32, buf: *mut u8, len: u32, timeout_ticks: u32) -> i32;
 
@@ -724,12 +746,12 @@ extern "C" {
 // Board-aware bundle download
 // ---------------------------------------------------------------------------
 
-const BOARD_JSON_PATH:  &str = "/spiffs/config/board.json";
-const FALLBACK_BOARD:   &str = "tdeck-pro";
-const SD_DRIVERS_DIR:   &str = "/sdcard/drivers";
-const SD_WM_DIR:        &str = "/sdcard/wm";
-const SD_UPDATE_DIR:    &str = "/sdcard/update";
-const SD_BOARDS_DIR:    &str = "/sdcard/config/boards";
+const BOARD_JSON_PATH: &str = "/spiffs/config/board.json";
+const FALLBACK_BOARD: &str = "tdeck-pro";
+const SD_DRIVERS_DIR: &str = "/sdcard/drivers";
+const SD_WM_DIR: &str = "/sdcard/wm";
+const SD_UPDATE_DIR: &str = "/sdcard/update";
+const SD_BOARDS_DIR: &str = "/sdcard/config/boards";
 
 /// Read the board name from /spiffs/config/board.json, falling back to a
 /// hardcoded default when the file is absent or unparseable.
@@ -747,7 +769,10 @@ fn read_board_name() -> String {
             return board_name_to_slug(&name);
         }
     }
-    info!("board.json not found or missing name — using fallback '{}'", FALLBACK_BOARD);
+    info!(
+        "board.json not found or missing name — using fallback '{}'",
+        FALLBACK_BOARD
+    );
     FALLBACK_BOARD.to_string()
 }
 
@@ -759,7 +784,10 @@ fn board_name_to_slug(name: &str) -> String {
     if lower.contains("t-deck pro") || lower.contains("tdeck pro") || lower.contains("t-deck-pro") {
         return "tdeck-pro".to_string();
     }
-    if lower.contains("t-display-s3") || lower.contains("tdisplay-s3") || lower.contains("t display s3") {
+    if lower.contains("t-display-s3")
+        || lower.contains("tdisplay-s3")
+        || lower.contains("t display s3")
+    {
         return "tdisplay-s3".to_string();
     }
     if lower.contains("t3-s3") || lower.contains("t3 s3") {
@@ -771,7 +799,13 @@ fn board_name_to_slug(name: &str) -> String {
     // Generic slug: keep alphanumeric and hyphens
     lower
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -804,7 +838,9 @@ pub fn json_extract_string(json: &str, key: &str) -> Option<String> {
     let after = &json[pos + search.len()..];
     let colon = after.find(':')? + 1;
     let rest = after[colon..].trim_start();
-    if !rest.starts_with('"') { return None; }
+    if !rest.starts_with('"') {
+        return None;
+    }
     let inner = &rest[1..];
     let end = inner.find('"')?;
     Some(inner[..end].to_string())
@@ -836,10 +872,18 @@ fn catalog_entry_board_matches(entry_json: &str, board_name: &str) -> bool {
     // Walk quoted strings
     let mut rem = *inner;
     loop {
-        let q1 = match rem.find('"') { Some(i) => i, None => break };
+        let q1 = match rem.find('"') {
+            Some(i) => i,
+            None => break,
+        };
         let val = &rem[q1 + 1..];
-        let q2 = match val.find('"') { Some(i) => i, None => break };
-        if &val[..q2] == board_name { return true; }
+        let q2 = match val.find('"') {
+            Some(i) => i,
+            None => break,
+        };
+        if &val[..q2] == board_name {
+            return true;
+        }
         rem = &val[q2 + 1..];
     }
     false
@@ -868,9 +912,15 @@ fn catalog_extract_detection_u16(obj_json: &str, key: &str) -> u16 {
         None => return 0,
     };
     let after = &obj_json[pos + det_key.len()..];
-    let brace = match after.find('{') { Some(i) => i + 1, None => return 0 };
+    let brace = match after.find('{') {
+        Some(i) => i + 1,
+        None => return 0,
+    };
     let inner_start = &after[brace..];
-    let brace_end = match inner_start.find('}') { Some(i) => i, None => return 0 };
+    let brace_end = match inner_start.find('}') {
+        Some(i) => i,
+        None => return 0,
+    };
     let inner = &inner_start[..brace_end];
     json_hex_or_int_u16(inner, key)
 }
@@ -890,7 +940,10 @@ fn json_hex_or_int_u16(json: &str, key: &str) -> u16 {
 
     if after_colon.starts_with('"') {
         let inner = &after_colon[1..];
-        let end = match inner.find('"') { Some(i) => i, None => return 0 };
+        let end = match inner.find('"') {
+            Some(i) => i,
+            None => return 0,
+        };
         let s = inner[..end].trim();
         if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
             u16::from_str_radix(hex, 16).unwrap_or(0)
@@ -991,11 +1044,23 @@ impl<'a> Iterator for JsonObjects<'a> {
         let mut in_str = false;
         let mut escape = false;
         let end = self.src.char_indices().find(|(_, c)| {
-            if escape { escape = false; return false; }
+            if escape {
+                escape = false;
+                return false;
+            }
             match c {
-                '\\' if in_str => { escape = true; false }
-                '"' => { in_str = !in_str; false }
-                '{' if !in_str => { depth += 1; false }
+                '\\' if in_str => {
+                    escape = true;
+                    false
+                }
+                '"' => {
+                    in_str = !in_str;
+                    false
+                }
+                '{' if !in_str => {
+                    depth += 1;
+                    false
+                }
                 '}' if !in_str => {
                     depth -= 1;
                     depth == 0
@@ -1056,7 +1121,10 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 /// 5. Download matching .sig files alongside each item.
 ///
 /// Returns the number of items successfully downloaded.
-pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -> anyhow::Result<u32> {
+pub fn recovery_download_board_bundle_for(
+    catalog_url: &str,
+    board_name: &str,
+) -> anyhow::Result<u32> {
     info!("Board: {}", board_name);
     println!("Board: {}", board_name);
 
@@ -1098,10 +1166,9 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
                 if let Some(det_bus) = catalog_extract_detection_str(obj, "bus") {
                     let det_addr = catalog_extract_detection_u16(obj, "address");
                     // Match against any detected component
-                    components.iter().any(|c| {
-                        c.bus == det_bus
-                            && (det_addr == 0 || c.address == det_addr)
-                    })
+                    components
+                        .iter()
+                        .any(|c| c.bus == det_bus && (det_addr == 0 || c.address == det_addr))
                 } else {
                     // No detection info — fall back to compatible_boards
                     catalog_entry_board_matches(obj, board_name)
@@ -1124,7 +1191,7 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
         .count() as u32;
 
     let mut downloaded = 0u32;
-    let mut errors    = 0u32;
+    let mut errors = 0u32;
 
     for obj in iter_json_objects(&catalog_json) {
         if !entry_should_download(obj) {
@@ -1132,7 +1199,7 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
         }
 
         let entry_type = json_extract_string(obj, "type").unwrap_or_default();
-        let id         = match json_extract_string(obj, "id") {
+        let id = match json_extract_string(obj, "id") {
             Some(v) => v,
             None => continue,
         };
@@ -1140,15 +1207,15 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
             Some(v) => v,
             None => continue,
         };
-        let sig_url   = json_extract_string(obj, "sig_url");
-        let name      = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
+        let sig_url = json_extract_string(obj, "sig_url");
+        let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
 
         let dest_path = match entry_type.as_str() {
             "firmware" => format!("{}/thistle_os.bin", SD_UPDATE_DIR),
-            "board"    => format!("{}/{}.json", SD_BOARDS_DIR, id),
-            "driver"   => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
-            "wm"       => format!("{}/{}.wm.elf", SD_WM_DIR, id),
-            other      => {
+            "board" => format!("{}/{}.json", SD_BOARDS_DIR, id),
+            "driver" => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
+            "wm" => format!("{}/{}.wm.elf", SD_WM_DIR, id),
+            other => {
                 info!("Skipping '{}' (type={})", id, other);
                 continue;
             }
@@ -1172,7 +1239,10 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
         if let Some(sig_url_str) = sig_url {
             let sig_path = format!("{}.sig", dest_path);
             if let Err(e) = download_file(&sig_url_str, &sig_path) {
-                error!("Failed to download sig for '{}': {} — skipping install", name, e);
+                error!(
+                    "Failed to download sig for '{}': {} — skipping install",
+                    name, e
+                );
                 let _ = std::fs::remove_file(&dest_path);
                 errors += 1;
                 continue;
@@ -1195,14 +1265,77 @@ pub fn recovery_download_board_bundle_for(catalog_url: &str, board_name: &str) -
     if errors > 0 {
         anyhow::bail!(
             "Bundle download completed with {} error(s) ({} succeeded)",
-            errors, downloaded
+            errors,
+            downloaded
         );
     }
 
     BUNDLE_PROGRESS.store(100, Ordering::Relaxed);
-    info!("Bundle download complete: {} item(s) installed for board '{}'", downloaded, board_name);
+    info!(
+        "Bundle download complete: {} item(s) installed for board '{}'",
+        downloaded, board_name
+    );
     println!("Bundle complete: {} items installed", downloaded);
     Ok(downloaded)
+}
+
+/// Build a dry-run JSON plan for the bundle entries recovery would download.
+///
+/// This uses the same catalog, chip, board, and component matching rules as the
+/// installer, but does not write to flash or SD card.
+pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow::Result<String> {
+    let components = scan_hardware();
+    let catalog_json = http_get_string(catalog_url)?;
+    let chip = detect_chip();
+    let mut entries: Vec<String> = Vec::new();
+
+    for obj in iter_json_objects(&catalog_json) {
+        if !catalog_entry_arch_matches(obj, chip) {
+            continue;
+        }
+
+        let entry_type = json_extract_string(obj, "type").unwrap_or_default();
+        let matches = match entry_type.as_str() {
+            "driver" => {
+                if let Some(det_bus) = catalog_extract_detection_str(obj, "bus") {
+                    let det_addr = catalog_extract_detection_u16(obj, "address");
+                    components
+                        .iter()
+                        .any(|c| c.bus == det_bus && (det_addr == 0 || c.address == det_addr))
+                } else {
+                    catalog_entry_board_matches(obj, board_name)
+                }
+            }
+            "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
+            "board" => {
+                let id = json_extract_string(obj, "board_id")
+                    .or_else(|| json_extract_string(obj, "id"))
+                    .unwrap_or_default();
+                id == board_name
+            }
+            _ => false,
+        };
+
+        if !matches {
+            continue;
+        }
+
+        let id = json_extract_string(obj, "id").unwrap_or_default();
+        let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
+        entries.push(format!(
+            r#"{{"id":"{}","type":"{}","name":"{}"}}"#,
+            id, entry_type, name
+        ));
+    }
+
+    Ok(format!(
+        r#"{{"ok":true,"board":"{}","chip":"{}","catalog_source":"{}","count":{},"entries":[{}]}}"#,
+        board_name,
+        chip,
+        catalog_url,
+        entries.len(),
+        entries.join(",")
+    ))
 }
 
 /// Simple JSON extraction — find "url" value for the first "firmware" type entry
@@ -1216,7 +1349,9 @@ fn extract_firmware_url(json: &str) -> Option<String> {
     // Extract "url" value
     let url_key = obj.find("\"url\"")?;
     let colon = obj[url_key..].find(':')?;
-    let quote_start = obj[url_key + colon..].find('"').map(|p| url_key + colon + p + 1)?;
+    let quote_start = obj[url_key + colon..]
+        .find('"')
+        .map(|p| url_key + colon + p + 1)?;
     let quote_end = obj[quote_start..].find('"').map(|p| quote_start + p)?;
 
     Some(obj[quote_start..quote_end].to_string())

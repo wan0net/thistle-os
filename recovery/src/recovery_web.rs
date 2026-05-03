@@ -35,6 +35,7 @@ pub struct RecoveryState {
     /// 0-100
     pub bundle_progress: u8,
     pub catalog_url: String,
+    pub board_catalog_url: String,
     /// Chip slug detected at boot, e.g. "esp32s3", "esp32c3".
     pub chip: String,
 }
@@ -51,6 +52,7 @@ impl RecoveryState {
             bundle_status: String::new(),
             bundle_progress: 0,
             catalog_url: String::new(),
+            board_catalog_url: String::new(),
             chip: String::new(),
         }
     }
@@ -68,19 +70,47 @@ pub static STATE: Mutex<RecoveryState> = Mutex::new(RecoveryState::new());
 /// the board entry is shown regardless of the detected chip (reserved for
 /// future universal boards or boards with ambiguous chip identification).
 const KNOWN_BOARDS: &[(&str, &str, &str)] = &[
-    ("tdeck-pro",    "LilyGo T-Deck Pro (E-Paper, Keyboard, LoRa, GPS)", "esp32s3"),
-    ("tdeck-plus",   "LilyGo T-Deck Plus (LCD, Keyboard, LoRa, GPS, Power Mgmt)", "esp32s3"),
-    ("tdeck",        "LilyGo T-Deck (LCD, Keyboard, LoRa, GPS)",         "esp32s3"),
-    ("tdisplay-s3",  "LilyGo T-Display-S3 (LCD, Touch)",                 "esp32s3"),
-    ("t3-s3",        "LilyGo T3-S3 (OLED, LoRa)",                        "esp32s3"),
-    ("heltec-v3",    "Heltec WiFi LoRa 32 V3 (OLED, LoRa)",              "esp32s3"),
-    ("cardputer",    "M5Stack Cardputer (LCD, Keyboard)",                 "esp32s3"),
-    ("rak3312",      "RAK WisBlock RAK3312",                              "esp32s3"),
-    ("twatch-ultra", "LilyGo T-Watch Ultra (AMOLED, Touch)",              "esp32s3"),
-    ("waveshare-esp32-s3-touch-amoled-2.06", "Waveshare ESP32-S3 Touch AMOLED 2.06", "esp32s3"),
-    ("cyd-2432s022", "CYD ESP32-2432S022 (I80 LCD, Touch)",               "esp32"),
-    ("cyd-2432s028", "CYD ESP32-2432S028 (LCD, Touch)",                   "esp32"),
-    ("c3-mini",      "ESP32-C3 SuperMini (OLED)",                         "esp32c3"),
+    (
+        "tdeck-pro",
+        "LilyGo T-Deck Pro (E-Paper, Keyboard, LoRa, GPS)",
+        "esp32s3",
+    ),
+    (
+        "tdeck-plus",
+        "LilyGo T-Deck Plus (LCD, Keyboard, LoRa, GPS, Power Mgmt)",
+        "esp32s3",
+    ),
+    (
+        "tdeck",
+        "LilyGo T-Deck (LCD, Keyboard, LoRa, GPS)",
+        "esp32s3",
+    ),
+    ("tdisplay-s3", "LilyGo T-Display-S3 (LCD, Touch)", "esp32s3"),
+    ("t3-s3", "LilyGo T3-S3 (OLED, LoRa)", "esp32s3"),
+    (
+        "heltec-v3",
+        "Heltec WiFi LoRa 32 V3 (OLED, LoRa)",
+        "esp32s3",
+    ),
+    ("cardputer", "M5Stack Cardputer (LCD, Keyboard)", "esp32s3"),
+    ("rak3312", "RAK WisBlock RAK3312", "esp32s3"),
+    (
+        "twatch-ultra",
+        "LilyGo T-Watch Ultra (AMOLED, Touch)",
+        "esp32s3",
+    ),
+    (
+        "waveshare-esp32-s3-touch-amoled-2.06",
+        "Waveshare ESP32-S3 Touch AMOLED 2.06",
+        "esp32s3",
+    ),
+    (
+        "cyd-2432s022",
+        "CYD ESP32-2432S022 (I80 LCD, Touch)",
+        "esp32",
+    ),
+    ("cyd-2432s028", "CYD ESP32-2432S028 (LCD, Touch)", "esp32"),
+    ("c3-mini", "ESP32-C3 SuperMini (OLED)", "esp32c3"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -157,6 +187,7 @@ input:focus { border-color: #2563eb; outline: none; }
   <div id="board-list" style="margin-top:8px"></div>
   <button class="btn" id="board-refresh-btn" onclick="refreshBoards()" style="margin-top:8px">Download Board List</button>
   <button class="btn" id="board-btn" onclick="selectBoard()" disabled style="margin-top:8px">Confirm Selection</button>
+  <button class="btn" id="plan-btn" onclick="planInstall()" disabled style="margin-top:8px">Dry Run Install</button>
   <div id="board-status" class="status-box"></div>
 </div>
 
@@ -265,6 +296,7 @@ function initBoards() {
       // Enable confirm button if board is pre-selected
       if (d.detected) {
         document.getElementById('board-btn').disabled = false;
+        document.getElementById('plan-btn').disabled = false;
         fetch('/api/board/select', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
@@ -411,6 +443,7 @@ function pickBoard(id) {
     if (radio) { radio.checked = match; }
   }
   document.getElementById('board-btn').disabled = false;
+  document.getElementById('plan-btn').disabled = false;
 }
 
 function selectBoard() {
@@ -441,9 +474,33 @@ function selectBoard() {
   });
 }
 
+function planInstall() {
+  if (!boardSelected) { return; }
+  var st = document.getElementById('board-status');
+  showStatus(st, 'Checking install plan...', 'info');
+  fetch('/api/board/select', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({board: boardSelected})
+  })
+    .then(function() { return fetch('/api/bundle/plan'); })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        showStatus(st, 'Plan: ' + d.count + ' item(s) from ' + d.catalog_source, '');
+      } else {
+        showStatus(st, 'Plan error: ' + (d.error || 'unknown'), 'error');
+      }
+    })
+    .catch(function(err) {
+      showStatus(st, 'Plan error: ' + err.message, 'error');
+    });
+}
+
 function setBoardDone(name) {
   document.getElementById('step2-num').classList.add('done');
   document.getElementById('board-btn').disabled = true;
+  document.getElementById('plan-btn').disabled = false;
   showCard('card-install');
   document.getElementById('step3-num').classList.remove('locked');
 }
@@ -563,19 +620,27 @@ function showStatus(el, msg, type) {
 
 pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     // Serve the main recovery page
-    server.fn_handler("/", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
-        let mut resp = req.into_response(200, None, &[("Content-Type", "text/html")])?;
-        resp.write(RECOVERY_HTML.as_bytes())?;
-        Ok(())
-    })?;
+    server.fn_handler(
+        "/",
+        esp_idf_svc::http::Method::Get,
+        |req| -> anyhow::Result<()> {
+            let mut resp = req.into_response(200, None, &[("Content-Type", "text/html")])?;
+            resp.write(RECOVERY_HTML.as_bytes())?;
+            Ok(())
+        },
+    )?;
 
     // Captive portal redirect — iOS/Android check these
     for path in &["/generate_204", "/hotspot-detect.html", "/connecttest.txt"] {
-        server.fn_handler(path, esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
-            let mut resp = req.into_response(302, None, &[("Location", "/")])?;
-            resp.write(b"Redirecting to recovery portal...")?;
-            Ok(())
-        })?;
+        server.fn_handler(
+            path,
+            esp_idf_svc::http::Method::Get,
+            |req| -> anyhow::Result<()> {
+                let mut resp = req.into_response(302, None, &[("Location", "/")])?;
+                resp.write(b"Redirecting to recovery portal...")?;
+                Ok(())
+            },
+        )?;
     }
 
     // GET /api/status — overall recovery state
@@ -639,226 +704,313 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     })?;
 
     // GET /api/boards — list of known boards filtered by chip + detected hardware components
-    server.fn_handler("/api/boards", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
-        let (detected_board, components, chip, wifi_connected, catalog_url) = {
-            let st = STATE.lock().unwrap();
-            (
-                st.board_name.clone(),
-                st.detected_components.clone(),
-                st.chip.clone(),
-                st.wifi_connected,
-                st.catalog_url.clone(),
-            )
-        };
+    server.fn_handler(
+        "/api/boards",
+        esp_idf_svc::http::Method::Get,
+        |req| -> anyhow::Result<()> {
+            let (detected_board, components, chip, wifi_connected, board_catalog_url) = {
+                let st = STATE.lock().unwrap();
+                (
+                    st.board_name.clone(),
+                    st.detected_components.clone(),
+                    st.chip.clone(),
+                    st.wifi_connected,
+                    st.board_catalog_url.clone(),
+                )
+            };
 
-        // Fall back to runtime detection if chip wasn't stored at boot yet.
-        let chip_slug = if chip.is_empty() {
-            crate::recovery_ota::detect_chip().to_string()
-        } else {
-            chip
-        };
+            // Fall back to runtime detection if chip wasn't stored at boot yet.
+            let chip_slug = if chip.is_empty() {
+                crate::recovery_ota::detect_chip().to_string()
+            } else {
+                chip
+            };
 
-        let mut fallback_board_parts: Vec<String> = Vec::new();
-        for (id, label, arch) in KNOWN_BOARDS {
-            if arch.is_empty() || *arch == chip_slug.as_str() {
-                fallback_board_parts.push(format!(r#"{{"id":"{}","label":"{}","arch":"{}"}}"#, id, label, arch));
+            let mut fallback_board_parts: Vec<String> = Vec::new();
+            for (id, label, arch) in KNOWN_BOARDS {
+                if arch.is_empty() || *arch == chip_slug.as_str() {
+                    fallback_board_parts.push(format!(
+                        r#"{{"id":"{}","label":"{}","arch":"{}"}}"#,
+                        id, label, arch
+                    ));
+                }
             }
-        }
-        let fallback_boards = fallback_board_parts.join(",");
+            let fallback_boards = fallback_board_parts.join(",");
 
-        // Once STA WiFi is connected, prefer the catalog board list. Recovery
-        // keeps the built-in list as an offline fallback.
-        let (boards_json, source) = if wifi_connected && !catalog_url.is_empty() {
-            match crate::recovery_ota::catalog_board_options_json(&catalog_url, &chip_slug) {
-                Ok(downloaded) if !downloaded.is_empty() => (downloaded, "catalog"),
-                _ => (fallback_boards, "builtin"),
+            // Once STA WiFi is connected, prefer the catalog board list. Recovery
+            // keeps the built-in list as an offline fallback.
+            let (boards_json, source) = if wifi_connected && !board_catalog_url.is_empty() {
+                match crate::recovery_ota::catalog_board_options_json(
+                    &board_catalog_url,
+                    &chip_slug,
+                ) {
+                    Ok(downloaded) if !downloaded.is_empty() => (downloaded, "catalog"),
+                    _ => (fallback_boards, "builtin"),
+                }
+            } else {
+                (fallback_boards, "builtin")
+            };
+
+            let detected_json = match &detected_board {
+                Some(d) => format!(r#""{}""#, d),
+                None => "null".to_string(),
+            };
+
+            // Detected hardware components for driver auto-matching
+            let mut comp_parts: Vec<String> = Vec::new();
+            for (bus, addr, name) in &components {
+                comp_parts.push(format!(
+                    r#"{{"bus":"{}","address":{},"name":"{}"}}"#,
+                    bus, addr, name
+                ));
             }
-        } else {
-            (fallback_boards, "builtin")
-        };
 
-        let detected_json = match &detected_board {
-            Some(d) => format!(r#""{}""#, d),
-            None => "null".to_string(),
-        };
+            let json = format!(
+                r#"{{"boards":[{}],"source":"{}","detected":{},"components":[{}]}}"#,
+                boards_json,
+                source,
+                detected_json,
+                comp_parts.join(","),
+            );
 
-        // Detected hardware components for driver auto-matching
-        let mut comp_parts: Vec<String> = Vec::new();
-        for (bus, addr, name) in &components {
-            comp_parts.push(format!(
-                r#"{{"bus":"{}","address":{},"name":"{}"}}"#,
-                bus, addr, name
-            ));
-        }
-
-        let json = format!(
-            r#"{{"boards":[{}],"source":"{}","detected":{},"components":[{}]}}"#,
-            boards_json,
-            source,
-            detected_json,
-            comp_parts.join(","),
-        );
-
-        let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-        resp.write(json.as_bytes())?;
-        Ok(())
-    })?;
+            let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
+            resp.write(json.as_bytes())?;
+            Ok(())
+        },
+    )?;
 
     // POST /api/wifi/connect — store credentials; main.rs picks them up
-    server.fn_handler("/api/wifi/connect", esp_idf_svc::http::Method::Post, |mut req| -> anyhow::Result<()> {
-        let mut body = Vec::new();
-        let mut buf = [0u8; 256];
-        loop {
-            match req.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => body.extend_from_slice(&buf[..n]),
-            }
-        }
-
-        let body_str = String::from_utf8_lossy(&body);
-        let ssid = crate::recovery_ota::json_extract_string(&body_str, "ssid");
-        let pass = crate::recovery_ota::json_extract_string(&body_str, "password");
-
-        match (ssid, pass) {
-            (Some(s), Some(p)) if !s.is_empty() => {
-                {
-                    let mut st = STATE.lock().unwrap();
-                    st.wifi_request = Some((s, p));
-                    st.wifi_connected = false;
-                    st.wifi_ip.clear();
+    server.fn_handler(
+        "/api/wifi/connect",
+        esp_idf_svc::http::Method::Post,
+        |mut req| -> anyhow::Result<()> {
+            let mut body = Vec::new();
+            let mut buf = [0u8; 256];
+            loop {
+                match req.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => body.extend_from_slice(&buf[..n]),
                 }
-                let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-                resp.write(b"{\"ok\":true}")?;
             }
-            _ => {
-                let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
-                resp.write(b"{\"ok\":false,\"error\":\"missing ssid or password\"}")?;
+
+            let body_str = String::from_utf8_lossy(&body);
+            let ssid = crate::recovery_ota::json_extract_string(&body_str, "ssid");
+            let pass = crate::recovery_ota::json_extract_string(&body_str, "password");
+
+            match (ssid, pass) {
+                (Some(s), Some(p)) if !s.is_empty() => {
+                    {
+                        let mut st = STATE.lock().unwrap();
+                        st.wifi_request = Some((s, p));
+                        st.wifi_connected = false;
+                        st.wifi_ip.clear();
+                    }
+                    let mut resp =
+                        req.into_response(200, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":true}")?;
+                }
+                _ => {
+                    let mut resp =
+                        req.into_response(400, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"missing ssid or password\"}")?;
+                }
             }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
 
     // POST /api/board/select — set the board name
-    server.fn_handler("/api/board/select", esp_idf_svc::http::Method::Post, |mut req| -> anyhow::Result<()> {
-        let mut body = Vec::new();
-        let mut buf = [0u8; 128];
-        loop {
-            match req.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => body.extend_from_slice(&buf[..n]),
-            }
-        }
-
-        let body_str = String::from_utf8_lossy(&body);
-        let board = crate::recovery_ota::json_extract_string(&body_str, "board");
-
-        let (chip, wifi_connected, catalog_url) = {
-            let st = STATE.lock().unwrap();
-            (st.chip.clone(), st.wifi_connected, st.catalog_url.clone())
-        };
-        let chip_slug = if chip.is_empty() {
-            crate::recovery_ota::detect_chip().to_string()
-        } else {
-            chip
-        };
-
-        match board {
-            Some(b) if board_is_selectable(&b, &chip_slug, wifi_connected, &catalog_url) => {
-                {
-                    let mut st = STATE.lock().unwrap();
-                    st.board_name = Some(b);
+    server.fn_handler(
+        "/api/board/select",
+        esp_idf_svc::http::Method::Post,
+        |mut req| -> anyhow::Result<()> {
+            let mut body = Vec::new();
+            let mut buf = [0u8; 128];
+            loop {
+                match req.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => body.extend_from_slice(&buf[..n]),
                 }
-                let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-                resp.write(b"{\"ok\":true}")?;
             }
-            Some(_) => {
-                let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
-                resp.write(b"{\"ok\":false,\"error\":\"unknown board\"}")?;
+
+            let body_str = String::from_utf8_lossy(&body);
+            let board = crate::recovery_ota::json_extract_string(&body_str, "board");
+
+            let (chip, wifi_connected, board_catalog_url) = {
+                let st = STATE.lock().unwrap();
+                (
+                    st.chip.clone(),
+                    st.wifi_connected,
+                    st.board_catalog_url.clone(),
+                )
+            };
+            let chip_slug = if chip.is_empty() {
+                crate::recovery_ota::detect_chip().to_string()
+            } else {
+                chip
+            };
+
+            match board {
+                Some(b)
+                    if board_is_selectable(&b, &chip_slug, wifi_connected, &board_catalog_url) =>
+                {
+                    {
+                        let mut st = STATE.lock().unwrap();
+                        st.board_name = Some(b);
+                    }
+                    let mut resp =
+                        req.into_response(200, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":true}")?;
+                }
+                Some(_) => {
+                    let mut resp =
+                        req.into_response(400, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"unknown board\"}")?;
+                }
+                None => {
+                    let mut resp =
+                        req.into_response(400, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"missing board field\"}")?;
+                }
             }
-            None => {
-                let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
-                resp.write(b"{\"ok\":false,\"error\":\"missing board field\"}")?;
+            Ok(())
+        },
+    )?;
+
+    // GET /api/bundle/plan — dry-run the bundle download without writing files
+    server.fn_handler(
+        "/api/bundle/plan",
+        esp_idf_svc::http::Method::Get,
+        |req| -> anyhow::Result<()> {
+            let (board_name, catalog_url) = {
+                let st = STATE.lock().unwrap();
+                (st.board_name.clone(), st.catalog_url.clone())
+            };
+
+            let Some(board) = board_name else {
+                let mut resp =
+                    req.into_response(400, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"no board selected\"}")?;
+                return Ok(());
+            };
+
+            match crate::recovery_ota::recovery_bundle_plan_json(&catalog_url, &board) {
+                Ok(json) => {
+                    let mut resp =
+                        req.into_response(200, None, &[("Content-Type", "application/json")])?;
+                    resp.write(json.as_bytes())?;
+                }
+                Err(e) => {
+                    let body = format!(r#"{{"ok":false,"error":"{}"}}"#, e);
+                    let mut resp =
+                        req.into_response(502, None, &[("Content-Type", "application/json")])?;
+                    resp.write(body.as_bytes())?;
+                }
             }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
 
     // POST /api/bundle/download — signal main.rs to start the bundle download
-    server.fn_handler("/api/bundle/download", esp_idf_svc::http::Method::Post, |req| -> anyhow::Result<()> {
-        let (has_board, already_downloading) = {
-            let st = STATE.lock().unwrap();
-            (st.board_name.is_some(), st.bundle_status == "downloading")
-        };
+    server.fn_handler(
+        "/api/bundle/download",
+        esp_idf_svc::http::Method::Post,
+        |req| -> anyhow::Result<()> {
+            let (has_board, already_downloading) = {
+                let st = STATE.lock().unwrap();
+                (st.board_name.is_some(), st.bundle_status == "downloading")
+            };
 
-        if !has_board {
-            let mut resp = req.into_response(400, None, &[("Content-Type", "application/json")])?;
-            resp.write(b"{\"ok\":false,\"error\":\"no board selected\"}")?;
-            return Ok(());
-        }
-        if already_downloading {
-            let mut resp = req.into_response(409, None, &[("Content-Type", "application/json")])?;
-            resp.write(b"{\"ok\":false,\"error\":\"download already in progress\"}")?;
-            return Ok(());
-        }
+            if !has_board {
+                let mut resp =
+                    req.into_response(400, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"no board selected\"}")?;
+                return Ok(());
+            }
+            if already_downloading {
+                let mut resp =
+                    req.into_response(409, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"download already in progress\"}")?;
+                return Ok(());
+            }
 
-        {
-            let mut st = STATE.lock().unwrap();
-            st.bundle_request = true;
-            st.bundle_status = "downloading".to_string();
-            st.bundle_progress = 0;
-        }
-        crate::recovery_ota::BUNDLE_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
+            {
+                let mut st = STATE.lock().unwrap();
+                st.bundle_request = true;
+                st.bundle_status = "downloading".to_string();
+                st.bundle_progress = 0;
+            }
+            crate::recovery_ota::BUNDLE_PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
 
-        let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-        resp.write(b"{\"ok\":true,\"status\":\"downloading\"}")?;
-        Ok(())
-    })?;
+            let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
+            resp.write(b"{\"ok\":true,\"status\":\"downloading\"}")?;
+            Ok(())
+        },
+    )?;
 
     // GET /api/bundle/status — poll download progress
-    server.fn_handler("/api/bundle/status", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
-        let (status, _stored_progress) = {
-            let st = STATE.lock().unwrap();
-            (st.bundle_status.clone(), st.bundle_progress)
-        };
+    server.fn_handler(
+        "/api/bundle/status",
+        esp_idf_svc::http::Method::Get,
+        |req| -> anyhow::Result<()> {
+            let (status, _stored_progress) = {
+                let st = STATE.lock().unwrap();
+                (st.bundle_status.clone(), st.bundle_progress)
+            };
 
-        let status_str = if status.is_empty() { "idle".to_string() } else { status };
+            let status_str = if status.is_empty() {
+                "idle".to_string()
+            } else {
+                status
+            };
 
-        // Always read fresh progress from the atomic (updated by download loop)
-        let live = crate::recovery_ota::BUNDLE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed);
+            // Always read fresh progress from the atomic (updated by download loop)
+            let live =
+                crate::recovery_ota::BUNDLE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed);
 
-        let items_field = if status_str == "complete" {
-            format!(",\"items\":{}", live)
-        } else {
-            String::new()
-        };
+            let items_field = if status_str == "complete" {
+                format!(",\"items\":{}", live)
+            } else {
+                String::new()
+            };
 
-        let json = format!(
-            r#"{{"status":"{}","progress":{}{}}}"#,
-            status_str, live, items_field
-        );
+            let json = format!(
+                r#"{{"status":"{}","progress":{}{}}}"#,
+                status_str, live, items_field
+            );
 
-        let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-        resp.write(json.as_bytes())?;
-        Ok(())
-    })?;
+            let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
+            resp.write(json.as_bytes())?;
+            Ok(())
+        },
+    )?;
 
     // POST /api/reboot
-    server.fn_handler("/api/reboot", esp_idf_svc::http::Method::Post, |req| -> anyhow::Result<()> {
-        let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
-        resp.write(b"{\"ok\":true}")?;
-        info!("Reboot requested via web UI");
-        std::thread::spawn(|| {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            unsafe { esp_idf_sys::esp_restart() };
-        });
-        Ok(())
-    })?;
+    server.fn_handler(
+        "/api/reboot",
+        esp_idf_svc::http::Method::Post,
+        |req| -> anyhow::Result<()> {
+            let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
+            resp.write(b"{\"ok\":true}")?;
+            info!("Reboot requested via web UI");
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                unsafe { esp_idf_sys::esp_restart() };
+            });
+            Ok(())
+        },
+    )?;
 
     info!("Web UI handlers registered (captive portal active)");
     Ok(())
 }
 
-fn board_is_selectable(board_id: &str, chip: &str, wifi_connected: bool, catalog_url: &str) -> bool {
+fn board_is_selectable(
+    board_id: &str,
+    chip: &str,
+    wifi_connected: bool,
+    catalog_url: &str,
+) -> bool {
     if KNOWN_BOARDS
         .iter()
         .any(|(id, _, arch)| *id == board_id && (arch.is_empty() || *arch == chip))

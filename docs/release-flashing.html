@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Release Flashing — ThistleOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="/thistle-os/" class="top-nav-brand">ThistleOS</a>
+    <div class="top-nav-links">
+      <a href="/thistle-os/docs/">Docs</a>
+      <a href="/thistle-os/docs/devices.html">Devices</a>
+      <a href="/thistle-os/docs/drivers.html">Drivers</a>
+      <a href="/thistle-os/docs/recovery.html">Recovery</a>
+      <a href="https://github.com/wan0net/thistle-os">GitHub</a>
+    </div>
+  </div>
+</nav>
+<div class="site-wrapper">
+  <nav class="sidebar">
+    <div class="sidebar-inner">
+      <a href="index.html" class="sidebar-logo">
+        <img src="thistle-logo.svg" alt="ThistleOS">
+        <div>
+          <div class="sidebar-logo-text">ThistleOS</div>
+          <div class="sidebar-logo-sub">Documentation</div>
+        </div>
+      </a>
+      <div class="sidebar-nav">
+        <div class="nav-label">Getting Started</div>
+        <a href="index.html">Overview</a>
+        <a href="architecture.html">Architecture</a>
+        <a href="release-flashing.html" class="active">Release Flashing</a>
+        <div class="nav-label">System</div>
+        <a href="recovery.html">Recovery OS</a>
+        <a href="security.html">Security &amp; Signing</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="page-header">
+      <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Release Flashing</div>
+      <h1>Release Flashing</h1>
+      <p class="lead">How to install a tagged ThistleOS release from GitHub assets, verify checksums, and choose the correct image for firmware versus recovery.</p>
+      <a href="https://github.com/wan0net/thistle-os/releases" class="edit-link">GitHub Releases</a>
+    </div>
+
+    <h2>Release assets</h2>
+    <p>A release should include these downloadable assets:</p>
+    <ul>
+      <li><code>thistle_os-&lt;version&gt;.bin</code> — main ThistleOS firmware for the <code>ota_1</code> slot.</li>
+      <li><code>thistle_os-&lt;version&gt;.bin.sig</code> — Ed25519 signature for the firmware.</li>
+      <li><code>thistle_os-&lt;version&gt;.bin.pub</code> — public key used to verify the signature.</li>
+      <li><code>thistle-recovery-&lt;version&gt;</code> — recovery firmware for the <code>ota_0</code> slot.</li>
+      <li><code>SHA256SUMS</code> — checksums for every release asset.</li>
+    </ul>
+
+    <h2>Verify downloads</h2>
+    <pre><code>sha256sum -c SHA256SUMS</code></pre>
+    <p>On macOS, install GNU coreutils or compare individual files with <code>shasum -a 256 &lt;file&gt;</code>.</p>
+
+    <h2>Initial flash</h2>
+    <p>For development boards, the normal first install is still an ESP-IDF flash from source because it writes the bootloader, partition table, and factory app together:</p>
+    <pre><code>. "$IDF_PATH/export.sh"
+idf.py set-target esp32s3
+idf.py build
+idf.py flash monitor</code></pre>
+
+    <h2>Updating main firmware</h2>
+    <p>Once recovery is installed, prefer the recovery web UI. Connect to <code>ThistleOS-Recovery</code>, connect the device to WiFi, choose the board, run the dry-run plan, then download and install.</p>
+    <p>For manual serial flashing, write the main firmware to <code>ota_1</code> using the offsets in <code>partitions.csv</code>. In the current 16 MB layout, <code>ota_1</code> starts at <code>0x720000</code>.</p>
+    <pre><code>esptool.py --chip esp32s3 write_flash 0x720000 thistle_os-&lt;version&gt;.bin</code></pre>
+
+    <h2>Updating recovery</h2>
+    <p>Recovery lives in <code>ota_0</code>. In the current 16 MB layout, <code>ota_0</code> starts at <code>0x4A0000</code> and has <code>0x280000</code> bytes available.</p>
+    <pre><code>esptool.py --chip esp32s3 write_flash 0x4A0000 thistle-recovery-&lt;version&gt;</code></pre>
+
+    <div class="callout warning">
+      <div class="callout-title">Do not cross-flash slots</div>
+      The main firmware and recovery firmware are different binaries. Flashing either one into the wrong app slot can leave the board unable to boot without a serial reflash.
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -15,6 +15,13 @@ Patch release from the watch compatibility and build-stabilisation work.
 
 (Tracking changes from the autonomous development loop.)
 
+### Release hardening — 2026-05-03
+- Added release flashing docs with checksum verification and slot offsets.
+- Added a Pages-published recovery board catalog and CI validation for board configs.
+- Split recovery board-list catalog from bundle catalog and added a dry-run install plan endpoint.
+- Added partition-size checks for firmware and recovery artifacts.
+- Added a manual release workflow that publishes versioned assets and `SHA256SUMS`.
+
 ### Iteration 1 — 2026-03-26
 - **Added:** `gps_track` kernel module (`components/kernel_rs/src/gps_track.rs`)
   - GPS track recording with point and waypoint management

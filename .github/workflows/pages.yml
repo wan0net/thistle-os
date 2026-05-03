@@ -101,6 +101,14 @@ jobs:
           mkdir -p _site/apps
           cp simulator/sdcard/appstore/catalog.json _site/apps/ 2>/dev/null || true
 
+          # Recovery board catalog
+          mkdir -p _site/config/boards
+          cp sdcard_layout/config/boards/*.json _site/config/boards/
+          python3 tools/build_board_catalog.py \
+            sdcard_layout/config/boards \
+            --base-url "https://wan0net.github.io/thistle-os/config/boards" \
+            --output _site/catalog.json
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
 

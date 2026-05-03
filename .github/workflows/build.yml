@@ -75,19 +75,9 @@ jobs:
       - name: Check firmware size
         shell: bash
         run: |
-          BIN_PATH="build/thistle_os.bin"
-          if [ ! -f "$BIN_PATH" ]; then
-            echo "::error::Firmware binary not found"
-            exit 1
-          fi
-          SIZE=$(stat -c%s "$BIN_PATH" 2>/dev/null || stat -f%z "$BIN_PATH")
-          echo "Firmware size: $SIZE bytes"
-          MAX_SIZE=4718592
-          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
-            echo "::error::Firmware too large: $SIZE > $MAX_SIZE bytes (OTA partition limit)"
-            exit 1
-          fi
-          echo "Firmware size OK: $SIZE / $MAX_SIZE bytes"
+          python3 tools/check_partition_sizes.py \
+            --partition-table partitions.csv \
+            --firmware build/thistle_os.bin
 
       - name: Sign firmware
         if: env.THISTLE_SIGNING_KEY != ''
@@ -340,6 +330,12 @@ jobs:
           . "$HOME/.cargo/env"
           . "$HOME/export-esp.sh"
           cargo build --release
+
+      - name: Check recovery size
+        run: |
+          python3 tools/check_partition_sizes.py \
+            --partition-table partitions.csv \
+            --recovery recovery/target/xtensa-esp32s3-espidf/release/thistle-recovery
 
       - name: Upload recovery artifact
         uses: actions/upload-artifact@v7

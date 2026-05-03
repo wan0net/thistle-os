@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  board-catalog-validation:
+    name: Board Catalog Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build recovery board catalog
+        run: |
+          python3 tools/build_board_catalog.py \
+            sdcard_layout/config/boards \
+            --base-url "https://wan0net.github.io/thistle-os/config/boards" \
+            --output /tmp/thistle-board-catalog.json
+
+      - name: Validate board configs and catalog
+        run: |
+          python3 tools/validate_board_catalog.py \
+            --repo . \
+            --catalog /tmp/thistle-board-catalog.json
+
   unit-tests:
     name: Unit Tests (Host)
     runs-on: ubuntu-latest
