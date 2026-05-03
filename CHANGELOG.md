@@ -1,5 +1,16 @@
 # ThistleOS Changelog
 
+## v0.5.1 - 2026-05-03
+
+Patch release from the watch compatibility and build-stabilisation work.
+
+- Added recovery board catalog support so board lists can be served through the recovery web interface.
+- Integrated watch compatibility and e-paper bring-up work, including Waveshare 2.06 Watch and T-Watch Ultra board data.
+- Integrated PR #24 e-paper bring-up and input/launcher fixes.
+- Fixed online simulator and WASM builds with missing platform and board helper stubs.
+- Quieted residual firmware build warnings and removed stale LTO sdkconfig noise.
+- Verified GitHub Actions for firmware, recovery, Rust kernel tests, security scans, and Pages/WASM simulator.
+
 ## Unreleased
 
 (Tracking changes from the autonomous development loop.)
