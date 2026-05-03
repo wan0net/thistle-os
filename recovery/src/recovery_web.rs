@@ -73,6 +73,12 @@ const KNOWN_BOARDS: &[(&str, &str, &str)] = &[
     ("tdeck",        "LilyGo T-Deck (LCD, Keyboard, LoRa, GPS)",         "esp32s3"),
     ("tdisplay-s3",  "LilyGo T-Display-S3 (LCD, Touch)",                 "esp32s3"),
     ("t3-s3",        "LilyGo T3-S3 (OLED, LoRa)",                        "esp32s3"),
+    ("heltec-v3",    "Heltec WiFi LoRa 32 V3 (OLED, LoRa)",              "esp32s3"),
+    ("cardputer",    "M5Stack Cardputer (LCD, Keyboard)",                 "esp32s3"),
+    ("rak3312",      "RAK WisBlock RAK3312",                              "esp32s3"),
+    ("twatch-ultra", "LilyGo T-Watch Ultra (AMOLED, Touch)",              "esp32s3"),
+    ("waveshare-esp32-s3-touch-amoled-2.06", "Waveshare ESP32-S3 Touch AMOLED 2.06", "esp32s3"),
+    ("cyd-2432s022", "CYD ESP32-2432S022 (I80 LCD, Touch)",               "esp32"),
     ("cyd-2432s028", "CYD ESP32-2432S028 (LCD, Touch)",                   "esp32"),
     ("c3-mini",      "ESP32-C3 SuperMini (OLED)",                         "esp32c3"),
 ];
@@ -149,6 +155,7 @@ input:focus { border-color: #2563eb; outline: none; }
   <hr class="divider" id="board-divider" style="display:none">
   <p class="info-text" id="board-select-label" style="display:none">Select board for firmware &amp; window manager:</p>
   <div id="board-list" style="margin-top:8px"></div>
+  <button class="btn" id="board-refresh-btn" onclick="refreshBoards()" style="margin-top:8px">Download Board List</button>
   <button class="btn" id="board-btn" onclick="selectBoard()" disabled style="margin-top:8px">Confirm Selection</button>
   <div id="board-status" class="status-box"></div>
 </div>
@@ -159,6 +166,7 @@ input:focus { border-color: #2563eb; outline: none; }
   <p class="info-text">The following will be downloaded and installed for your board:</p>
   <div class="bundle-items" id="bundle-items">
     <div class="bundle-item">Kernel firmware (ota_1)</div>
+    <div class="bundle-item">Board profile (.json)</div>
     <div class="bundle-item">Hardware drivers (.drv.elf)</div>
     <div class="bundle-item">Window manager (.wm.elf)</div>
     <div class="bundle-item">Signatures for verification</div>
@@ -187,7 +195,7 @@ var bundlePollTimer = null;
 // ---------------------------------------------------------------------------
 // Initialise board list and detected components from /api/boards
 // ---------------------------------------------------------------------------
-(function initBoards() {
+function initBoards() {
   fetch('/api/boards')
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -272,7 +280,15 @@ var bundlePollTimer = null;
 
   // Check if already connected (page reload case)
   checkInitialStatus();
-})();
+}
+
+initBoards();
+
+function refreshBoards() {
+  var st = document.getElementById('board-status');
+  showStatus(st, 'Downloading board list...', 'info');
+  initBoards();
+}
 
 function checkInitialStatus() {
   fetch('/api/status')
@@ -374,6 +390,7 @@ function setWifiDone(ip) {
   for (var i = 0; i < fields.length; i++) { fields[i].disabled = true; }
   showCard('card-board');
   document.getElementById('step2-num').classList.remove('locked');
+  refreshBoards();
 }
 
 // ---------------------------------------------------------------------------
@@ -623,9 +640,15 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
 
     // GET /api/boards — list of known boards filtered by chip + detected hardware components
     server.fn_handler("/api/boards", esp_idf_svc::http::Method::Get, |req| -> anyhow::Result<()> {
-        let (detected_board, components, chip) = {
+        let (detected_board, components, chip, wifi_connected, catalog_url) = {
             let st = STATE.lock().unwrap();
-            (st.board_name.clone(), st.detected_components.clone(), st.chip.clone())
+            (
+                st.board_name.clone(),
+                st.detected_components.clone(),
+                st.chip.clone(),
+                st.wifi_connected,
+                st.catalog_url.clone(),
+            )
         };
 
         // Fall back to runtime detection if chip wasn't stored at boot yet.
@@ -635,14 +658,24 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
             chip
         };
 
-        // Board list filtered to only show boards matching the detected chip.
-        // A board with an empty arch string is always shown (universal).
-        let mut board_parts: Vec<String> = Vec::new();
+        let mut fallback_board_parts: Vec<String> = Vec::new();
         for (id, label, arch) in KNOWN_BOARDS {
             if arch.is_empty() || *arch == chip_slug.as_str() {
-                board_parts.push(format!(r#"{{"id":"{}","label":"{}","arch":"{}"}}"#, id, label, arch));
+                fallback_board_parts.push(format!(r#"{{"id":"{}","label":"{}","arch":"{}"}}"#, id, label, arch));
             }
         }
+        let fallback_boards = fallback_board_parts.join(",");
+
+        // Once STA WiFi is connected, prefer the catalog board list. Recovery
+        // keeps the built-in list as an offline fallback.
+        let (boards_json, source) = if wifi_connected && !catalog_url.is_empty() {
+            match crate::recovery_ota::catalog_board_options_json(&catalog_url, &chip_slug) {
+                Ok(downloaded) if !downloaded.is_empty() => (downloaded, "catalog"),
+                _ => (fallback_boards, "builtin"),
+            }
+        } else {
+            (fallback_boards, "builtin")
+        };
 
         let detected_json = match &detected_board {
             Some(d) => format!(r#""{}""#, d),
@@ -659,8 +692,9 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         }
 
         let json = format!(
-            r#"{{"boards":[{}],"detected":{},"components":[{}]}}"#,
-            board_parts.join(","),
+            r#"{{"boards":[{}],"source":"{}","detected":{},"components":[{}]}}"#,
+            boards_json,
+            source,
             detected_json,
             comp_parts.join(","),
         );
@@ -718,8 +752,18 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         let body_str = String::from_utf8_lossy(&body);
         let board = crate::recovery_ota::json_extract_string(&body_str, "board");
 
+        let (chip, wifi_connected, catalog_url) = {
+            let st = STATE.lock().unwrap();
+            (st.chip.clone(), st.wifi_connected, st.catalog_url.clone())
+        };
+        let chip_slug = if chip.is_empty() {
+            crate::recovery_ota::detect_chip().to_string()
+        } else {
+            chip
+        };
+
         match board {
-            Some(b) if KNOWN_BOARDS.iter().any(|(id, _, _)| *id == b.as_str()) => {
+            Some(b) if board_is_selectable(&b, &chip_slug, wifi_connected, &catalog_url) => {
                 {
                     let mut st = STATE.lock().unwrap();
                     st.board_name = Some(b);
@@ -812,4 +856,17 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
 
     info!("Web UI handlers registered (captive portal active)");
     Ok(())
+}
+
+fn board_is_selectable(board_id: &str, chip: &str, wifi_connected: bool, catalog_url: &str) -> bool {
+    if KNOWN_BOARDS
+        .iter()
+        .any(|(id, _, arch)| *id == board_id && (arch.is_empty() || *arch == chip))
+    {
+        return true;
+    }
+
+    wifi_connected
+        && !catalog_url.is_empty()
+        && crate::recovery_ota::catalog_contains_board(catalog_url, chip, board_id)
 }

@@ -328,10 +328,8 @@ fn apply_mode(s: &mut FlashlightState, new_mode: FlashMode) {
 
 /// on_create: Build the flashlight UI widget tree.
 unsafe extern "C" fn on_create() -> i32 {
+    // WidgetId 0 is the legitimate tree root; not a failure sentinel.
     let root = thistle_ui_get_app_root();
-    if root == 0 {
-        return -1;
-    }
 
     let bg_color = thistle_ui_theme_bg();
     let text_color = thistle_ui_theme_text();

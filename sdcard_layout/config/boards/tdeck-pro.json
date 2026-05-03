@@ -5,6 +5,13 @@
         "board_id": "tdeck-pro",
         "version": "1.0"
     },
+    "gpio_outputs": [
+        {"gpio": 38, "level": 1, "delay_ms": 100},
+        {"gpio": 39, "level": 1, "delay_ms": 0},
+        {"gpio": 41, "level": 1, "delay_ms": 0},
+        {"gpio": 46, "level": 1, "delay_ms": 0},
+        {"gpio": 2,  "level": 0, "delay_ms": 0}
+    ],
     "buses": {
         "spi": [
             {

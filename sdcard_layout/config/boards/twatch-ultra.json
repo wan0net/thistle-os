@@ -1,0 +1,146 @@
+{
+    "board": {
+        "name": "LilyGo T-Watch Ultra",
+        "arch": "esp32s3",
+        "board_id": "twatch-ultra",
+        "version": "0.1"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": 34,
+                "miso": 33,
+                "sclk": 35,
+                "max_transfer_bytes": 41164
+            },
+            {
+                "host": 3,
+                "mosi": 38,
+                "miso": 39,
+                "sclk": 40,
+                "max_transfer_bytes": 41164
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 3,
+                "scl": 2,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.display-co5300",
+            "hal": "display",
+            "entry": "display-co5300.drv.elf",
+            "config": {
+                "spi_bus": 1,
+                "cs": 41,
+                "sclk": 40,
+                "sdio0": 38,
+                "sdio1": 39,
+                "sdio2": 42,
+                "sdio3": 45,
+                "rst": 37,
+                "te": 6,
+                "power_expander": {
+                    "driver": "xl9555",
+                    "pin": 7
+                },
+                "spi_clock_hz": 40000000,
+                "width": 410,
+                "height": 502
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-cst9217",
+            "hal": "input",
+            "entry": "touch-cst9217.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x5A",
+                "pin_rst_expander": {
+                    "driver": "xl9555",
+                    "pin": 10
+                },
+                "max_x": 410,
+                "max_y": 502
+            }
+        },
+        {
+            "id": "com.thistle.drv.radio-sx1262",
+            "hal": "radio",
+            "entry": "radio-sx1262.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "cs": 36,
+                "dio1": 14,
+                "rst": 47,
+                "busy": 48
+            }
+        },
+        {
+            "id": "com.thistle.drv.gps-mia-m10q",
+            "hal": "gps",
+            "entry": "gps-mia-m10q.drv.elf",
+            "config": {
+                "uart_num": 1,
+                "tx": 43,
+                "rx": 44,
+                "baud_rate": 9600,
+                "pps": 13
+            }
+        },
+        {
+            "id": "com.thistle.drv.imu-bhi260ap",
+            "hal": "imu",
+            "entry": "imu-bhi260ap.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x28",
+                "pin_int": 8
+            }
+        },
+        {
+            "id": "com.thistle.drv.audio-pcm5102a",
+            "hal": "audio",
+            "entry": "audio-pcm5102a.drv.elf",
+            "config": {
+                "i2s_bck": 9,
+                "i2s_ws": 10,
+                "i2s_data": 11
+            }
+        },
+        {
+            "id": "com.thistle.drv.rtc-pcf8563",
+            "hal": "rtc",
+            "entry": "pcf8563.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x51",
+                "pin_int": 1
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "pin_cs": 21,
+                "pin_detect_expander": {
+                    "driver": "xl9555",
+                    "pin": 12
+                },
+                "mount_point": "/sdcard"
+            }
+        }
+    ],
+    "notes": {
+        "status": "bringup",
+        "variant": "SX1262 radio revision. SX1280/CC1101/LR1121/SI4432 revisions need matching radio drivers."
+    }
+}

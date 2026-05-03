@@ -1,7 +1,7 @@
 # ThistleOS Rust kernel component (REQUIRED)
 
 idf_component_register(
-    SRCS "stub.c"
+    SRCS "stub.c" "epaper_spi_shim.c"
     INCLUDE_DIRS "include"
     REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
              esp_wifi esp_netif esp_event bt mbedtls esp_http_client
@@ -17,9 +17,16 @@ set(RUST_LIB "${RUST_BUILD_DIR}/libthistle_kernel.a")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_rust.sh"
 "#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\nif [ -f \"$ENV{HOME}/export-esp.sh\" ]; then . \"$ENV{HOME}/export-esp.sh\" 2>/dev/null; fi\ncd \"${CMAKE_CURRENT_SOURCE_DIR}\"\ncargo +esp build --release --target ${RUST_TARGET} -Zbuild-std=std,panic_abort\n")
 
+file(GLOB_RECURSE RUST_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs")
+
 add_custom_command(
     OUTPUT ${RUST_LIB}
+    DEPENDS ${RUST_SRCS} "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
     COMMAND bash "${CMAKE_CURRENT_BINARY_DIR}/build_rust.sh"
+    # Touch stub.c so CMake rebuilds the component lib and triggers the
+    # POST_BUILD merge of Rust objects. Without this, the component archive
+    # is never updated after an incremental Rust build.
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_SOURCE_DIR}/stub.c"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Building Rust kernel (thistle-kernel)"
 )

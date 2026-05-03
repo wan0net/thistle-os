@@ -28,11 +28,12 @@ extern "C" {
     fn board_detect_and_write() -> i32;
 }
 
-// SPI/I2C init — only on real hardware
+// Bus init + builtin driver init — only on real hardware (not in unit tests)
 #[cfg(not(test))]
 extern "C" {
-    fn spi_bus_initialize(host: i32, config: *const std::os::raw::c_void, dma: i32) -> i32;
-    fn i2c_new_master_bus(config: *const std::os::raw::c_void, handle: *mut *mut std::os::raw::c_void) -> i32;
+    fn board_bus_init_spi(host: i32, mosi: i32, miso: i32, sclk: i32, max_transfer_bytes: i32) -> i32;
+    fn board_bus_init_i2c(port: i32, sda: i32, scl: i32, freq_hz: i32) -> i32;
+    fn board_builtin_driver_init(id: *const c_char, hal_type: *const c_char, config_json: *const c_char) -> i32;
 }
 
 // Reuse manifest JSON helpers
@@ -50,7 +51,7 @@ fn set_board_name(name: &str) {
 // This function does the main work but requires ESP-IDF APIs for bus init.
 // On the simulator, it falls back to compiled board_init().
 fn load_config(config_path: &str) -> i32 {
-    let json = match fs::read_to_string(config_path) {
+    let mut json = match fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(_) => {
             // No board.json — try I2C auto-detection to create one
@@ -83,6 +84,17 @@ fn load_config(config_path: &str) -> i32 {
 
     let mut board_arch = String::new();
 
+    // If the cached board.json is missing the buses section (written by an older
+    // version of the firmware), force re-detection to get a fresh copy.
+    if extract_object(&json, "buses").is_none() {
+        let _ = unsafe { board_detect_and_write() };
+        if let Ok(fresh) = fs::read_to_string(config_path) {
+            if fresh.len() <= MAX_CONFIG_SIZE {
+                json = fresh;
+            }
+        }
+    }
+
     // Parse board metadata
     if let Some(board_section) = extract_object(&json, "board") {
         if let Some(name) = json_get_string(&board_section, "name") {
@@ -96,17 +108,77 @@ fn load_config(config_path: &str) -> i32 {
         }
     }
 
-    // Bus initialization would happen here on real hardware
-    // For now, the C board_config.c handles this
+    // Disable deep sleep GPIO hold before configuring any pins.
+    // Required when recovering from deep sleep — otherwise GPIO levels set
+    // during sleep persist and prevent normal output configuration.
+    // (Mirrors board_tdeck_pro.c::gpio_deep_sleep_hold_dis() on boot.)
+    #[cfg(not(test))]
+    {
+        extern "C" { fn gpio_deep_sleep_hold_dis(); }
+        unsafe { gpio_deep_sleep_hold_dis(); }
+    }
+
+    // Configure board-level GPIO outputs (power enables, etc.) before bus init
+    #[cfg(not(test))]
+    if let Some(gpio_arr) = find_array(&json, "gpio_outputs") {
+        extern "C" {
+            fn board_gpio_set_output(pin: i32, level: i32, delay_ms: i32) -> i32;
+        }
+        for i in 0..16 {
+            if let Some(entry) = nth_object(&gpio_arr, i) {
+                let gpio     = json_get_int(&entry, "gpio").unwrap_or(-1) as i32;
+                let level    = json_get_int(&entry, "level").unwrap_or(0) as i32;
+                let delay_ms = json_get_int(&entry, "delay_ms").unwrap_or(0) as i32;
+                if gpio >= 0 {
+                    unsafe { board_gpio_set_output(gpio, level, delay_ms); }
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Initialize SPI and I2C buses from board.json
+    #[cfg(not(test))]
+    if let Some(buses_obj) = extract_object(&json, "buses") {
+        if let Some(spi_arr) = find_array(&buses_obj, "spi") {
+            for i in 0..4 {
+                if let Some(bus) = nth_object(&spi_arr, i) {
+                    let host      = json_get_int(&bus, "host").unwrap_or(1) as i32;
+                    let mosi      = json_get_int(&bus, "mosi").unwrap_or(-1) as i32;
+                    let miso      = json_get_int(&bus, "miso").unwrap_or(-1) as i32;
+                    let sclk      = json_get_int(&bus, "sclk").unwrap_or(-1) as i32;
+                    let max_bytes = json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
+                    unsafe { board_bus_init_spi(host, mosi, miso, sclk, max_bytes); }
+                } else {
+                    break;
+                }
+            }
+        }
+        if let Some(i2c_arr) = find_array(&buses_obj, "i2c") {
+            for i in 0..4 {
+                if let Some(bus) = nth_object(&i2c_arr, i) {
+                    let port    = json_get_int(&bus, "port").unwrap_or(0) as i32;
+                    let sda     = json_get_int(&bus, "sda").unwrap_or(-1) as i32;
+                    let scl     = json_get_int(&bus, "scl").unwrap_or(-1) as i32;
+                    let freq_hz = json_get_int(&bus, "freq_hz").unwrap_or(400000) as i32;
+                    unsafe { board_bus_init_i2c(port, sda, scl, freq_hz); }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
 
     // Load drivers from config
     unsafe { driver_loader_init(); }
 
     if let Some(drivers_arr) = find_array(&json, "drivers") {
-        for i in 0..8 {
+        for i in 0..16 {
             if let Some(drv) = nth_object(&drivers_arr, i) {
-                let entry = json_get_string(&drv, "entry").unwrap_or_default();
+                let entry     = json_get_string(&drv, "entry").unwrap_or_default();
                 let driver_id = json_get_string(&drv, "id").unwrap_or_default();
+                let hal_type  = json_get_string(&drv, "hal").unwrap_or_default();
 
                 if entry.is_empty() { continue; }
 
@@ -139,11 +211,28 @@ fn load_config(config_path: &str) -> i32 {
                 }
 
                 if !found {
-                    // Driver not found on disk — skip
+                    // ELF not on disk — fall back to compiled-in driver
+                    #[cfg(not(test))]
+                    if !driver_id.is_empty() && !hal_type.is_empty() {
+                        if let (Ok(cid), Ok(chal), Ok(cconfig)) = (
+                            CString::new(driver_id.as_str()),
+                            CString::new(hal_type.as_str()),
+                            CString::new(config.as_str()),
+                        ) {
+                            unsafe {
+                                board_builtin_driver_init(cid.as_ptr(), chal.as_ptr(), cconfig.as_ptr());
+                            }
+                        }
+                    }
                 }
+            } else {
+                break;
             }
         }
     }
+
+    // Start all registered drivers (display, inputs, radio, GPS, audio, power, IMU, storage)
+    unsafe { crate::driver_manager::driver_manager_start_all(); }
 
     ESP_OK
 }

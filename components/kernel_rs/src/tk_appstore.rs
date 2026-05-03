@@ -720,10 +720,8 @@ unsafe fn build_rate_dialog(root: u32, entry_id: &str, selected: u8) -> Vec<CStr
 
 /// on_create: build the loading screen, then fetch catalog.
 unsafe extern "C" fn on_create() -> i32 {
+    // WidgetId 0 is the legitimate tree root; not a failure sentinel.
     let root = thistle_ui_get_app_root();
-    if root == 0 {
-        return -1;
-    }
 
     let bg   = thistle_ui_theme_bg();
     let text = thistle_ui_theme_text();

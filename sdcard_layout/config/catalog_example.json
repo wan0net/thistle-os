@@ -1,5 +1,109 @@
 [
     {
+        "id": "tdeck-pro",
+        "type": "board",
+        "name": "LilyGo T-Deck Pro",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/tdeck-pro.json",
+        "sig_url": "https://example.com/boards/tdeck-pro.json.sig"
+    },
+    {
+        "id": "tdeck-plus",
+        "type": "board",
+        "name": "LilyGo T-Deck Plus",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/tdeck-plus.json",
+        "sig_url": "https://example.com/boards/tdeck-plus.json.sig"
+    },
+    {
+        "id": "tdeck",
+        "type": "board",
+        "name": "LilyGo T-Deck",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/tdeck.json",
+        "sig_url": "https://example.com/boards/tdeck.json.sig"
+    },
+    {
+        "id": "tdisplay-s3",
+        "type": "board",
+        "name": "LilyGo T-Display-S3",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/tdisplay-s3.json",
+        "sig_url": "https://example.com/boards/tdisplay-s3.json.sig"
+    },
+    {
+        "id": "t3-s3",
+        "type": "board",
+        "name": "LilyGo T3-S3 LoRa",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/t3-s3.json",
+        "sig_url": "https://example.com/boards/t3-s3.json.sig"
+    },
+    {
+        "id": "heltec-v3",
+        "type": "board",
+        "name": "Heltec WiFi LoRa 32 V3",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/heltec-v3.json",
+        "sig_url": "https://example.com/boards/heltec-v3.json.sig"
+    },
+    {
+        "id": "cardputer",
+        "type": "board",
+        "name": "M5Stack Cardputer",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/cardputer.json",
+        "sig_url": "https://example.com/boards/cardputer.json.sig"
+    },
+    {
+        "id": "rak3312",
+        "type": "board",
+        "name": "RAK WisBlock RAK3312",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/rak3312.json",
+        "sig_url": "https://example.com/boards/rak3312.json.sig"
+    },
+    {
+        "id": "twatch-ultra",
+        "type": "board",
+        "name": "LilyGo T-Watch Ultra",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/twatch-ultra.json",
+        "sig_url": "https://example.com/boards/twatch-ultra.json.sig"
+    },
+    {
+        "id": "waveshare-esp32-s3-touch-amoled-2.06",
+        "type": "board",
+        "name": "Waveshare ESP32-S3 Touch AMOLED 2.06",
+        "arch": "esp32s3",
+        "url": "https://example.com/boards/waveshare-esp32-s3-touch-amoled-2.06.json",
+        "sig_url": "https://example.com/boards/waveshare-esp32-s3-touch-amoled-2.06.json.sig"
+    },
+    {
+        "id": "cyd-2432s022",
+        "type": "board",
+        "name": "CYD ESP32-2432S022C",
+        "arch": "esp32",
+        "url": "https://example.com/boards/cyd-2432s022.json",
+        "sig_url": "https://example.com/boards/cyd-2432s022.json.sig"
+    },
+    {
+        "id": "cyd-2432s028",
+        "type": "board",
+        "name": "CYD ESP32-2432S028R",
+        "arch": "esp32",
+        "url": "https://example.com/boards/cyd-2432s028.json",
+        "sig_url": "https://example.com/boards/cyd-2432s028.json.sig"
+    },
+    {
+        "id": "c3-mini",
+        "type": "board",
+        "name": "ESP32-C3 Mini",
+        "arch": "esp32c3",
+        "url": "https://example.com/boards/c3-mini.json",
+        "sig_url": "https://example.com/boards/c3-mini.json.sig"
+    },
+    {
         "id": "com.thistle.messenger",
         "type": "app",
         "name": "Messenger",

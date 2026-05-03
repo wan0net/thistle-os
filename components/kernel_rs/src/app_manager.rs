@@ -722,6 +722,12 @@ impl AppManager {
 
 static APP_MANAGER: Mutex<AppManager> = Mutex::new(AppManager::new());
 
+/// Mirror of registered manifest pointers, kept on a separate mutex from
+/// APP_MANAGER so `app_manager_list_apps` can be called from inside an
+/// app's lifecycle callback (which runs while APP_MANAGER itself is locked
+/// by the surrounding launch). Stored as `usize` to satisfy Send/Sync.
+static REGISTERED_MANIFESTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
 // ---------------------------------------------------------------------------
 // Public Rust API (thin wrappers over the locked manager)
 // ---------------------------------------------------------------------------
@@ -740,10 +746,22 @@ pub fn init() -> i32 {
 /// # Safety
 /// `entry` must point to a valid, static `CAppEntry`.
 pub unsafe fn register(entry: *const CAppEntry) -> i32 {
-    match APP_MANAGER.lock() {
+    let rc = match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.register(entry),
         Err(_)      => ESP_ERR_INVALID_STATE,
+    };
+    if rc == ESP_OK && !entry.is_null() {
+        let manifest = (*entry).manifest;
+        if !manifest.is_null() {
+            if let Ok(mut list) = REGISTERED_MANIFESTS.lock() {
+                let p = manifest as usize;
+                if !list.iter().any(|&q| q == p) {
+                    list.push(p);
+                }
+            }
+        }
     }
+    rc
 }
 
 /// Bring the app with the given ID to the foreground.
@@ -925,21 +943,20 @@ pub unsafe extern "C" fn app_manager_list_apps(
     if out.is_null() || max_count <= 0 {
         return 0;
     }
-    let mgr = match APP_MANAGER.lock() {
-        Ok(m) => m,
+    // Use the dedicated manifest registry — APP_MANAGER may already be
+    // locked by the caller's enclosing launch().
+    let list = match REGISTERED_MANIFESTS.lock() {
+        Ok(l) => l,
         Err(_) => return 0,
     };
     let mut count = 0i32;
-    for slot in mgr.slots.iter() {
+    for &p in list.iter() {
         if count >= max_count {
             break;
         }
-        if !slot.entry.is_null() {
-            let entry = &*slot.entry;
-            if !entry.manifest.is_null() {
-                *out.offset(count as isize) = entry.manifest;
-                count += 1;
-            }
+        if p != 0 {
+            *out.offset(count as isize) = p as *const CAppManifest;
+            count += 1;
         }
     }
     count

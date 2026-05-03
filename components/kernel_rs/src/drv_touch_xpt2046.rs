@@ -60,23 +60,26 @@ struct SpiBusConfig {
     intr_flags: i32,
 }
 
+// ESP-IDF v6 layout: clock_source (i32) after mode, u16 duty_cycle_pos/cs_ena_pretrans,
+// sample_point (i32) added between input_delay_ns and spics_io_num.
 #[repr(C)]
 struct SpiDeviceInterfaceConfig {
-    command_bits: u8,
-    address_bits: u8,
-    dummy_bits: u8,
-    mode: u8,
-    clock_source: u32,
-    duty_cycle_pos: u16,
-    cs_ena_pretrans: u16,
-    cs_ena_posttrans: u8,
-    clock_speed_hz: i32,
-    input_delay_ns: i32,
-    spics_io_num: i32,
-    flags: u32,
-    queue_size: i32,
-    pre_cb: Option<unsafe extern "C" fn(*mut c_void)>,
-    post_cb: Option<unsafe extern "C" fn(*mut c_void)>,
+    command_bits: u8,       // offset 0
+    address_bits: u8,       // offset 1
+    dummy_bits: u8,         // offset 2
+    mode: u8,               // offset 3
+    clock_source: i32,      // offset 4  (0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT)
+    duty_cycle_pos: u16,    // offset 8
+    cs_ena_pretrans: u16,   // offset 10
+    cs_ena_posttrans: u8,   // offset 12  (+ 3 bytes implicit padding → offset 16)
+    clock_speed_hz: i32,    // offset 16
+    input_delay_ns: i32,    // offset 20
+    sample_point: i32,      // offset 24  (spi_sampling_point_t; 0 = default)
+    spics_io_num: i32,      // offset 28
+    flags: u32,             // offset 32
+    queue_size: i32,        // offset 36
+    pre_cb: Option<unsafe extern "C" fn(*mut c_void)>,  // offset 40
+    post_cb: Option<unsafe extern "C" fn(*mut c_void)>, // offset 44
 }
 
 #[repr(C)]
@@ -617,12 +620,13 @@ unsafe extern "C" fn xpt2046_init(config: *const c_void) -> i32 {
         address_bits: 0,
         dummy_bits: 0,
         mode: 0, // SPI mode 0 (CPOL=0, CPHA=0)
-        clock_source: 0,
+        clock_source: 0, // 0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT
         duty_cycle_pos: 0,
         cs_ena_pretrans: 0,
         cs_ena_posttrans: 0,
         clock_speed_hz: 1_000_000, // 1 MHz — safe for XPT2046
         input_delay_ns: 0,
+        sample_point: 0, // SPI_SAMPLING_POINT_PHASE_0 (default)
         spics_io_num: S_TOUCH.cfg.pin_cs,
         flags: 0,
         queue_size: 1,

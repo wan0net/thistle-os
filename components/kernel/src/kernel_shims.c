@@ -54,37 +54,13 @@ __attribute__((weak)) int adc_cali_delete_scheme_curve_fitting(void *handle) {
 }
 #endif
 
-__attribute__((weak)) uint32_t wm_widget_get_app_root(void) { return 0; }
-__attribute__((weak)) uint32_t wm_widget_create_container(uint32_t p) { return 0; }
-__attribute__((weak)) uint32_t wm_widget_create_label(uint32_t p, const char *t) { return 0; }
-__attribute__((weak)) uint32_t wm_widget_create_button(uint32_t p, const char *t) { return 0; }
-__attribute__((weak)) uint32_t wm_widget_create_text_input(uint32_t p, const char *t) { return 0; }
-__attribute__((weak)) void wm_widget_destroy(uint32_t w) {}
-__attribute__((weak)) void wm_widget_set_text(uint32_t w, const char *t) {}
-__attribute__((weak)) const char *wm_widget_get_text(uint32_t w) { return ""; }
-__attribute__((weak)) void wm_widget_set_size(uint32_t w, int32_t width, int32_t h) {}
-__attribute__((weak)) void wm_widget_set_pos(uint32_t w, int32_t x, int32_t y) {}
-__attribute__((weak)) void wm_widget_set_visible(uint32_t w, bool v) {}
-__attribute__((weak)) void wm_widget_set_bg_color(uint32_t w, uint32_t c) {}
-__attribute__((weak)) void wm_widget_set_text_color(uint32_t w, uint32_t c) {}
-__attribute__((weak)) void wm_widget_set_font_size(uint32_t w, int32_t s) {}
-__attribute__((weak)) void wm_widget_set_layout(uint32_t w, int32_t l) {}
-__attribute__((weak)) void wm_widget_set_align(uint32_t w, int32_t m, int32_t c) {}
-__attribute__((weak)) void wm_widget_set_gap(uint32_t w, int32_t g) {}
-__attribute__((weak)) void wm_widget_set_flex_grow(uint32_t w, int32_t g) {}
-__attribute__((weak)) void wm_widget_set_scrollable(uint32_t w, bool s) {}
-__attribute__((weak)) void wm_widget_set_padding(uint32_t w, int32_t t, int32_t r, int32_t b, int32_t l) {}
-__attribute__((weak)) void wm_widget_set_border_width(uint32_t w, int32_t bw) {}
-__attribute__((weak)) void wm_widget_set_radius(uint32_t w, int32_t r) {}
-__attribute__((weak)) void wm_widget_on_event(uint32_t w, int32_t e, const void *cb, void *ud) {}
-__attribute__((weak)) void wm_widget_set_password_mode(uint32_t w, bool p) {}
-__attribute__((weak)) void wm_widget_set_one_line(uint32_t w, bool o) {}
-__attribute__((weak)) void wm_widget_set_placeholder(uint32_t w, const char *t) {}
-__attribute__((weak)) uint32_t wm_widget_theme_primary(void) { return 0x000000; }
-__attribute__((weak)) uint32_t wm_widget_theme_bg(void) { return 0xFFFFFF; }
-__attribute__((weak)) uint32_t wm_widget_theme_surface(void) { return 0xF0F0F0; }
-__attribute__((weak)) uint32_t wm_widget_theme_text(void) { return 0x000000; }
-__attribute__((weak)) uint32_t wm_widget_theme_text_secondary(void) { return 0x808080; }
+// wm_widget_* shims live in ui/src/widget_shims.c (they need to look up the
+// active WM vtable from the display server). They MUST NOT be duplicated
+// here as weak stubs: when both kernel.a (weak) and ui.a (strong) define the
+// symbol, the linker pulls in kernel.a first to satisfy the Rust extern
+// reference, the symbol is "resolved", and ui.a's strong vtable-dispatching
+// version is never pulled in. End result: every thistle_ui_create_* call
+// returns 0 and no widgets ever get created.
 
 // lstat shim — ESP-IDF newlib doesn't provide lstat (no symlinks on SPIFFS/FAT).
 // Rust std::fs::metadata calls lstat internally. Forward to stat.

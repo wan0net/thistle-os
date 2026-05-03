@@ -7,6 +7,7 @@
 //
 // This file is never called — it just ensures the symbols are present.
 
+#include "esp_wifi.h"
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
 #include "esp_adc/adc_oneshot.h"
@@ -27,6 +28,35 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
+
+// esp_ptr_in_drom became `inline static` in ESP-IDF v6 (esp_memory_utils.h),
+// which makes it not addressable for FFI. Expose a normal extern wrapper so
+// Rust callers can keep using a regular extern "C" declaration.
+#include "esp_memory_utils.h"
+bool thistle_esp_ptr_in_drom(const void *p)
+{
+    return esp_ptr_in_drom(p);
+}
+
+// WiFi init shim — WIFI_INIT_CONFIG_DEFAULT is a C macro that can't be called
+// directly from Rust FFI. This wrapper creates the properly-initialised config
+// (including magic values that ESP-IDF v6 validates strictly) and calls
+// esp_wifi_init. The zeroed-buffer approach used before broke in v6.
+#include "esp_log.h"
+static const char *WIFI_SHIM_TAG = "wifi_shim";
+esp_err_t thistle_wifi_init(void)
+{
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    // Debug: confirm shim is running and osi_funcs is populated.
+    // osi_funcs NULL means WIFI_INIT_CONFIG_DEFAULT expanded incorrectly.
+    ESP_LOGI(WIFI_SHIM_TAG, "osi_funcs=%p magic=0x%08x",
+             (void *)cfg.osi_funcs, (unsigned)cfg.magic);
+    esp_err_t ret = esp_wifi_init(&cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(WIFI_SHIM_TAG, "esp_wifi_init returned 0x%x", ret);
+    }
+    return ret;
+}
 
 // Reference each symbol so the linker pulls it from the ESP-IDF archive.
 // This function is never called — it's dead code that exists only to
@@ -75,10 +105,10 @@ static void _force_link_deps(void) {
     (void)vTaskDelete;
     (void)vTaskDelay;
     // UART (called by drv_gps_mia_m10q.rs)
+    // Note: uart_set_pin is a variadic macro in ESP-IDF v6 — not addressable.
     (void)uart_driver_install;
     (void)uart_driver_delete;
     (void)uart_param_config;
-    (void)uart_set_pin;
     (void)uart_read_bytes;
     (void)uart_write_bytes;
     // GPIO (called by multiple drivers)

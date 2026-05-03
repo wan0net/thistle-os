@@ -2,122 +2,126 @@
     "board": {
         "name": "LilyGo T-Deck Pro",
         "arch": "esp32s3",
+        "board_id": "tdeck-pro",
         "version": "1.0"
     },
+    "gpio_outputs": [
+        {"gpio": 34, "level": 1, "delay_ms": 0},
+        {"gpio": 3,  "level": 1, "delay_ms": 0},
+        {"gpio": 48, "level": 1, "delay_ms": 0},
+        {"gpio": 38, "level": 0, "delay_ms": 100},
+        {"gpio": 38, "level": 1, "delay_ms": 200},
+        {"gpio": 39, "level": 1, "delay_ms": 0},
+        {"gpio": 41, "level": 1, "delay_ms": 0},
+        {"gpio": 46, "level": 1, "delay_ms": 0},
+        {"gpio": 2,  "level": 0, "delay_ms": 0}
+    ],
     "buses": {
         "spi": [
             {
-                "host": 2,
-                "mosi": 41,
-                "miso": 38,
-                "sclk": 40,
+                "host": 1,
+                "mosi": 33,
+                "miso": 47,
+                "sclk": 36,
                 "max_transfer_bytes": 9600
             }
         ],
         "i2c": [
             {
                 "port": 0,
-                "sda": 18,
-                "scl": 8,
+                "sda": 13,
+                "scl": 14,
                 "freq_hz": 400000
             }
         ]
     },
     "drivers": [
         {
-            "id": "com.thistle.drv.epaper",
+            "id": "com.thistle.drv.epaper-gdeq031t10",
             "hal": "display",
-            "entry": "epaper_gdeq031t10.drv.elf",
+            "entry": "epaper-gdeq031t10.drv.elf",
             "config": {
-                "cs": 42,
-                "dc": 1,
-                "rst": 2,
-                "busy": 39,
                 "spi_bus": 0,
-                "width": 320,
-                "height": 240
+                "cs": 34,
+                "dc": 35,
+                "rst": -1,
+                "busy": 37,
+                "spi_clock_hz": 2000000
             }
         },
         {
-            "id": "com.thistle.drv.kbd",
+            "id": "com.thistle.drv.kbd-tca8418",
             "hal": "input",
-            "entry": "kbd_tca8418.drv.elf",
+            "entry": "kbd-tca8418.drv.elf",
             "config": {
                 "i2c_bus": 0,
                 "i2c_addr": "0x34",
-                "int_pin": 46
+                "pin_int": 15
             }
         },
         {
-            "id": "com.thistle.drv.touch",
+            "id": "com.thistle.drv.touch-cst328",
             "hal": "input",
-            "entry": "touch_cst328.drv.elf",
+            "entry": "touch-cst328.drv.elf",
             "config": {
                 "i2c_bus": 0,
                 "i2c_addr": "0x1A",
-                "int_pin": 16,
-                "rst_pin": 48
+                "pin_int": 12,
+                "pin_rst": 45,
+                "max_x": 240,
+                "max_y": 320
             }
         },
         {
-            "id": "com.thistle.drv.radio",
+            "id": "com.thistle.drv.radio-sx1262",
             "hal": "radio",
-            "entry": "radio_sx1262.drv.elf",
+            "entry": "radio-sx1262.drv.elf",
             "config": {
-                "cs": 9,
-                "rst": 5,
-                "busy": 36,
-                "dio1": 45,
-                "spi_bus": 0
+                "spi_bus": 0,
+                "cs": 3,
+                "dio1": 5,
+                "rst": 4,
+                "busy": 6
             }
         },
         {
-            "id": "com.thistle.drv.gps",
+            "id": "com.thistle.drv.gps-mia-m10q",
             "hal": "gps",
-            "entry": "gps_mia_m10q.drv.elf",
+            "entry": "gps-mia-m10q.drv.elf",
             "config": {
-                "uart_num": 1,
-                "tx": 17,
-                "rx": 15,
-                "baud": 9600
+                "uart_num": 2,
+                "tx": 43,
+                "rx": 44,
+                "baud_rate": 9600
             }
         },
         {
-            "id": "com.thistle.drv.audio",
+            "id": "com.thistle.drv.audio-pcm5102a",
             "hal": "audio",
-            "entry": "audio_pcm5102a.drv.elf",
+            "entry": "audio-pcm5102a.drv.elf",
             "config": {
-                "bck": 7,
-                "ws": 6,
-                "data": 3
+                "i2s_bck": 7,
+                "i2s_ws": 9,
+                "i2s_data": 8
             }
         },
         {
-            "id": "com.thistle.drv.power",
-            "hal": "power",
-            "entry": "power_tp4065b.drv.elf",
-            "config": {
-                "adc_pin": 4,
-                "charge_pin": 10
-            }
-        },
-        {
-            "id": "com.thistle.drv.imu",
+            "id": "com.thistle.drv.imu-bhi260ap",
             "hal": "imu",
-            "entry": "imu_bhi260ap.drv.elf",
+            "entry": "imu-bhi260ap.drv.elf",
             "config": {
                 "i2c_bus": 0,
                 "i2c_addr": "0x28",
-                "int_pin": 14
+                "pin_int": 21
             }
         },
         {
-            "id": "com.thistle.drv.light",
-            "hal": "sensor",
-            "entry": "light_ltr553als.drv.elf",
+            "id": "com.thistle.drv.power-tp4065b",
+            "hal": "power",
+            "entry": "power-tp4065b.drv.elf",
             "config": {
-                "i2c_bus": 0,
-                "i2c_addr": "0x23"
+                "adc_pin": 4,
+                "charge_pin": 10
             }
         },
         {
@@ -125,8 +129,8 @@
             "hal": "storage",
             "entry": "sdcard.drv.elf",
             "config": {
-                "cs": 43,
                 "spi_bus": 0,
+                "pin_cs": 48,
                 "mount_point": "/sdcard"
             }
         }

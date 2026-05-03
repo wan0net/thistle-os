@@ -1,0 +1,94 @@
+{
+    "board": {
+        "name": "Waveshare ESP32-S3 Touch AMOLED 2.06",
+        "arch": "esp32s3",
+        "board_id": "waveshare-esp32-s3-touch-amoled-2.06",
+        "version": "0.1"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 2,
+                "mosi": -1,
+                "miso": -1,
+                "sclk": -1,
+                "max_transfer_bytes": 41164
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": -1,
+                "scl": -1,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.display-co5300",
+            "hal": "display",
+            "entry": "display-co5300.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "cs": -1,
+                "sclk": -1,
+                "sdio0": -1,
+                "sdio1": -1,
+                "sdio2": -1,
+                "sdio3": -1,
+                "rst": -1,
+                "power": -1,
+                "spi_clock_hz": 40000000,
+                "width": 410,
+                "height": 502
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-ft3168",
+            "hal": "input",
+            "entry": "touch-ft3168.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x38",
+                "pin_int": -1,
+                "pin_rst": -1,
+                "max_x": 410,
+                "max_y": 502
+            }
+        },
+        {
+            "id": "com.thistle.drv.imu-qmi8658",
+            "hal": "imu",
+            "entry": "qmi8658.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x6A",
+                "pin_int": -1
+            }
+        },
+        {
+            "id": "com.thistle.drv.rtc-pcf8563",
+            "hal": "rtc",
+            "entry": "pcf8563.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x51"
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_bus": 0,
+                "pin_cs": -1,
+                "mount_point": "/sdcard"
+            }
+        }
+    ],
+    "notes": {
+        "status": "bringup",
+        "pin_source": "Waveshare documents the CO5300/FT3168/QMI8658/PCF85063/AXP2101 parts, but public HTML docs expose pin labels as images. Replace -1 pins from schematic before hardware flashing."
+    }
+}

@@ -1,0 +1,74 @@
+{
+    "board": {
+        "name": "CYD ESP32-2432S022C",
+        "arch": "esp32",
+        "board_id": "cyd-2432s022",
+        "version": "1.0"
+    },
+    "buses": {
+        "spi": [
+            {
+                "host": 1,
+                "mosi": 23,
+                "miso": 19,
+                "sclk": 18,
+                "max_transfer_bytes": 4096
+            }
+        ],
+        "i2c": [
+            {
+                "port": 0,
+                "sda": 21,
+                "scl": 22,
+                "freq_hz": 400000
+            }
+        ]
+    },
+    "drivers": [
+        {
+            "id": "com.thistle.drv.lcd-st7789-i80",
+            "hal": "display",
+            "entry": "lcd-st7789-i80.drv.elf",
+            "config": {
+                "interface": "i80",
+                "dc": 16,
+                "wr": 4,
+                "cs": 17,
+                "rst": -1,
+                "bl": 21,
+                "data_pins": [15, 13, 12, 14, 27, 25, 33, 32],
+                "width": 240,
+                "height": 320,
+                "swap_xy": false,
+                "invert_x": false,
+                "invert_y": false
+            }
+        },
+        {
+            "id": "com.thistle.drv.touch-cst816",
+            "hal": "input",
+            "entry": "touch-cst816.drv.elf",
+            "config": {
+                "i2c_bus": 0,
+                "i2c_addr": "0x15",
+                "pin_int": 36,
+                "pin_rst": -1,
+                "max_x": 240,
+                "max_y": 320
+            }
+        },
+        {
+            "id": "com.thistle.drv.sdcard",
+            "hal": "storage",
+            "entry": "sdcard.drv.elf",
+            "config": {
+                "spi_host": 1,
+                "spi_mosi": 23,
+                "spi_miso": 19,
+                "spi_sclk": 18,
+                "pin_cs": 5,
+                "mount_point": "/sdcard"
+            }
+        }
+    ]
+}

@@ -22,6 +22,23 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 
 // ── CST328 register addresses (16-bit) ──────────────────────────────────────
 
+// CST328 raw → panel coordinate calibration on the T-Deck Pro.
+//
+// Empirical from corner taps (TL / TR / BL / BR):
+//   TL: raw = (0,    ~550)
+//   TR: raw = (~3600, ~550)
+//   BL: raw = (0,    ~3370)
+//   BR: raw = (~3600, ~3370)
+//
+// X axis is symmetric around the panel: raw 0..~3600 spans left..right
+// with no usable margin to expand. Y axis has a ~550-unit deadband at
+// the top and tops out around 3370 — usable Y span is ~2820 raw units.
+// Per-axis offset/span scaling keeps the corners reachable.
+const CST328_X_OFFSET: i32 = 0;
+const CST328_X_SPAN:   i32 = 3600;
+const CST328_Y_OFFSET: i32 = 550;
+const CST328_Y_SPAN:   i32 = 2820;
+
 const CST328_REG_TOUCH_INFO: u16 = 0xD000; // Number of touch points (1 byte)
 const CST328_REG_TOUCH_PT1: u16 = 0xD001;  // Touch point 1 data (7 bytes)
 const CST328_REG_MODULE_VER: u16 = 0xD100; // Module version (2 bytes)
@@ -512,17 +529,21 @@ unsafe extern "C" fn cst328_poll() -> i32 {
             return ret;
         }
 
-        // Extract 12-bit X and Y coordinates.
-        let mut x: u16 = ((pt[0] as u16 & 0x0F) << 8) | pt[1] as u16;
-        let mut y: u16 = ((pt[2] as u16 & 0x0F) << 8) | pt[3] as u16;
+        // Extract 12-bit X and Y coordinates from the chip's native frame.
+        let raw_x: u16 = ((pt[0] as u16 & 0x0F) << 8) | pt[1] as u16;
+        let raw_y: u16 = ((pt[2] as u16 & 0x0F) << 8) | pt[3] as u16;
 
-        // Clamp to configured panel dimensions.
-        if S_TOUCH.cfg.max_x > 0 && x >= S_TOUCH.cfg.max_x {
-            x = S_TOUCH.cfg.max_x - 1;
-        }
-        if S_TOUCH.cfg.max_y > 0 && y >= S_TOUCH.cfg.max_y {
-            y = S_TOUCH.cfg.max_y - 1;
-        }
+        // Apply per-axis offset and span calibration, then scale into panel
+        // pixels. Both axes clamp at panel-1 to absorb the small over-range
+        // outside the calibrated active area.
+        let panel_w = if S_TOUCH.cfg.max_x > 0 { S_TOUCH.cfg.max_x as i32 } else { 240 };
+        let panel_h = if S_TOUCH.cfg.max_y > 0 { S_TOUCH.cfg.max_y as i32 } else { 320 };
+        let scaled_x = ((raw_x as i32 - CST328_X_OFFSET).max(0) * panel_w / CST328_X_SPAN)
+            .min(panel_w - 1).max(0);
+        let scaled_y = ((raw_y as i32 - CST328_Y_OFFSET).max(0) * panel_h / CST328_Y_SPAN)
+            .min(panel_h - 1).max(0);
+        let x = scaled_x as u16;
+        let y = scaled_y as u16;
 
         let ev_type = if !S_TOUCH.touching {
             S_TOUCH.touching = true;
