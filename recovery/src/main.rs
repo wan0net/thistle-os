@@ -5,8 +5,8 @@
 // 1. Checks if ota_1 has valid firmware → boots it
 // 2. Checks SD card for firmware update → flashes to ota_1
 // 3. Starts WiFi AP + captive portal web UI → user configures WiFi / selects board
-// 4. Downloads full bundle from app store (firmware + drivers + WM) → flashes / installs
-// 5. Falls back to UART console for manual recovery
+// 4. Downloads and verifies the selected board bundle → flashes / installs
+// 5. Reboots into ThistleOS
 
 #![allow(dead_code)]
 
@@ -21,7 +21,6 @@ use esp_idf_svc::wifi::{
 };
 
 use log::*;
-use std::io::{BufRead, Write};
 
 mod recovery_ota;
 mod recovery_web;
@@ -99,41 +98,9 @@ fn main() -> anyhow::Result<()> {
         println!("No firmware on SD card");
     }
 
-    // Step 2.5: Scan hardware components and auto-detect board
-    info!("Scanning hardware components...");
-    println!("Scanning hardware...");
-    let hw_components = recovery_ota::scan_hardware();
-    {
-        let mut st = recovery_web::STATE.lock().unwrap();
-        // Populate detected_components for the web UI /api/boards response
-        for c in &hw_components {
-            let name = recovery_ota::component_device_name(c).to_string();
-            st.detected_components
-                .push((c.bus.clone(), c.address, name));
-        }
-    }
-    // Derive board slug from the detected component set (for firmware/WM selection)
-    let has_tca8418 = hw_components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x34);
-    let has_bhi260 = hw_components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x28);
-    let board_slug: Option<&str> = if has_tca8418 && has_bhi260 {
-        Some("tdeck-pro")
-    } else if has_tca8418 {
-        Some("tdeck")
-    } else {
-        None
-    };
-    if let Some(board) = board_slug {
-        println!("Detected board: {}", board);
-        if let Ok(mut st) = recovery_web::STATE.lock() {
-            st.board_name = Some(board.to_string());
-        }
-    } else {
-        println!("Board not detected — select in web UI");
-    }
+    // Board/component knowledge is catalog-led. Recovery avoids generic probing
+    // so it does not drive board-specific pins before the user selects hardware.
+    println!("Board selection is catalog-driven — select your board in the web UI");
 
     // Step 3: Start WiFi AP + captive portal
     info!("Starting WiFi Access Point: {}", AP_SSID);
@@ -177,252 +144,19 @@ fn main() -> anyhow::Result<()> {
     recovery_web::register_handlers(&mut server)?;
     info!("Captive portal running at http://192.168.4.1");
 
-    // Step 5: UART console loop (also polls web UI state)
+    // Step 5: captive portal control loop
     println!("\n========================================");
-    println!("  ThistleOS Recovery — Interactive Mode");
+    println!("  ThistleOS Recovery — Web Mode");
     println!("========================================");
-    println!("Options:");
-    println!("  scan                — Scan WiFi networks");
-    println!("  connect SSID,PASS   — Connect to WiFi");
-    println!("  download            — Download full bundle for selected/detected board");
-    println!("  download firmware   — Download firmware only (legacy)");
-    println!("  board               — Show detected/selected board");
-    println!("  board <id>          — Select board manually (e.g. 'board tdeck-pro')");
-    println!("  reboot              — Restart device");
-    println!("  status              — Show current state");
-    println!("  help                — Show this message");
-    println!("");
-    println!("Or use the web UI at http://192.168.4.1 from any device");
-    println!("connected to the '{}' WiFi network.", AP_SSID);
-    println!("");
+    println!(
+        "Use http://192.168.4.1 from any device connected to '{}'.",
+        AP_SSID
+    );
+    println!("Recovery will keep polling web requests until install/reboot.");
 
-    let stdin = std::io::stdin();
     loop {
-        // ----------------------------------------------------------------
-        // Poll web UI shared state — handle requests queued by HTTP handlers
-        // ----------------------------------------------------------------
         poll_web_state(&mut wifi);
-
-        // ----------------------------------------------------------------
-        // UART command line
-        // ----------------------------------------------------------------
-        print!("recovery> ");
-        std::io::stdout().flush().ok();
-
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) | Err(_) => {
-                FreeRtos::delay_ms(100);
-                continue;
-            }
-            Ok(_) => {}
-        }
-
-        let cmd = line.trim();
-        if cmd.is_empty() {
-            continue;
-        }
-
-        match cmd {
-            "help" => {
-                println!("Commands: scan, connect, download, download firmware, board, reboot, status, help");
-            }
-            "scan" => {
-                println!("Scanning...");
-                wifi.scan().ok();
-                if let Ok(results) = wifi.scan() {
-                    for (i, ap) in results.iter().enumerate().take(15) {
-                        let lock = if ap.auth_method == Some(AuthMethod::None) {
-                            "[open]"
-                        } else {
-                            "[secured]"
-                        };
-                        println!(
-                            "  {:2}. {:<32} {:4} dBm  ch{:2}  {}",
-                            i + 1,
-                            ap.ssid,
-                            ap.signal_strength,
-                            ap.channel,
-                            lock
-                        );
-                    }
-                    println!("Found {} networks", results.len());
-                }
-            }
-            "reboot" => {
-                println!("Rebooting...");
-                FreeRtos::delay_ms(500);
-                unsafe { esp_idf_sys::esp_restart() };
-            }
-            "status" => {
-                println!("Recovery v{}", VERSION);
-                let chip = recovery_ota::detect_chip();
-                println!(
-                    "Chip: {} ({})",
-                    chip.to_uppercase(),
-                    recovery_ota::chip_arch_family(chip)
-                );
-                println!("WiFi AP: {} (192.168.4.1)", AP_SSID);
-                let connected = wifi.is_connected().unwrap_or(false);
-                println!(
-                    "WiFi STA: {}",
-                    if connected {
-                        "connected"
-                    } else {
-                        "disconnected"
-                    }
-                );
-                println!("ota_1: {:?}", recovery_ota::check_ota1());
-                println!("SD card firmware: {}", recovery_ota::check_sd_firmware());
-                let (board, bundle_status, components) = {
-                    let st = recovery_web::STATE.lock().unwrap();
-                    (
-                        st.board_name.clone(),
-                        st.bundle_status.clone(),
-                        st.detected_components.clone(),
-                    )
-                };
-                println!("Board: {}", board.as_deref().unwrap_or("(not selected)"));
-                println!(
-                    "Bundle status: {}",
-                    if bundle_status.is_empty() {
-                        "idle"
-                    } else {
-                        &bundle_status
-                    }
-                );
-                if components.is_empty() {
-                    println!("Hardware: no devices detected");
-                } else {
-                    println!("Hardware ({} device(s) detected):", components.len());
-                    for (bus, addr, name) in &components {
-                        match bus.as_str() {
-                            "i2c" => println!("  I2C  0x{:02X}        {}", addr, name),
-                            "spi" => println!("  SPI  CS=GPIO{}      {}", addr, name),
-                            "uart" => println!("  UART port={}        {}", addr, name),
-                            _ => println!(
-                                "  {}   addr={}         {}",
-                                bus.to_uppercase(),
-                                addr,
-                                name
-                            ),
-                        }
-                    }
-                }
-            }
-            "board" => {
-                // Show current board selection
-                let board = {
-                    let st = recovery_web::STATE.lock().unwrap();
-                    st.board_name.clone()
-                };
-                match board {
-                    Some(b) => println!("Selected board: {}", b),
-                    None => println!("No board selected. Use 'board <id>' to select."),
-                }
-                println!("Known boards (esp32s3): tdeck-pro, tdeck-plus, tdeck, tdisplay-s3, t3-s3, heltec-v3, cardputer, rak3312, twatch-ultra, waveshare-esp32-s3-touch-amoled-2.06");
-                println!("Known boards (esp32):   cyd-2432s022, cyd-2432s028");
-                println!("Known boards (esp32c3): c3-mini");
-            }
-            "download" => {
-                let connected = wifi.is_connected().unwrap_or(false);
-                if !connected {
-                    println!("Not connected to WiFi. Use 'connect SSID,PASS' first.");
-                } else {
-                    let board = {
-                        let st = recovery_web::STATE.lock().unwrap();
-                        st.board_name.clone()
-                    };
-                    let board_name = board.as_deref().unwrap_or("tdeck-pro");
-                    println!(
-                        "Downloading full bundle for board '{}' from {}...",
-                        board_name, BUNDLE_CATALOG_URL
-                    );
-                    match recovery_ota::recovery_download_board_bundle_for(
-                        BUNDLE_CATALOG_URL,
-                        board_name,
-                    ) {
-                        Ok(count) => {
-                            println!("Bundle installed ({} items). Rebooting...", count);
-                            FreeRtos::delay_ms(1000);
-                            unsafe { esp_idf_sys::esp_restart() };
-                        }
-                        Err(e) => println!("Bundle download failed: {}", e),
-                    }
-                }
-            }
-            "download firmware" => {
-                let connected = wifi.is_connected().unwrap_or(false);
-                if !connected {
-                    println!("Not connected to WiFi. Use 'connect SSID,PASS' first.");
-                } else {
-                    println!("Downloading firmware (only) from {}...", BUNDLE_CATALOG_URL);
-                    match recovery_ota::download_and_flash(BUNDLE_CATALOG_URL) {
-                        Ok(()) => {
-                            println!("Firmware installed! Rebooting...");
-                            FreeRtos::delay_ms(1000);
-                            unsafe { esp_idf_sys::esp_restart() };
-                        }
-                        Err(e) => println!("Download failed: {}", e),
-                    }
-                }
-            }
-            _ if cmd.starts_with("board ") => {
-                let board_id = cmd[6..].trim();
-                let known = [
-                    "tdeck-pro",
-                    "tdeck-plus",
-                    "tdeck",
-                    "tdisplay-s3",
-                    "t3-s3",
-                    "heltec-v3",
-                    "cardputer",
-                    "rak3312",
-                    "twatch-ultra",
-                    "waveshare-esp32-s3-touch-amoled-2.06",
-                    "cyd-2432s022",
-                    "cyd-2432s028",
-                    "c3-mini",
-                ];
-                if known.contains(&board_id) {
-                    {
-                        let mut st = recovery_web::STATE.lock().unwrap();
-                        st.board_name = Some(board_id.to_string());
-                    }
-                    println!("Board set to '{}'", board_id);
-                } else {
-                    println!(
-                        "Unknown board '{}'. Known boards: {}",
-                        board_id,
-                        known.join(", ")
-                    );
-                }
-            }
-            _ if cmd.starts_with("connect ") => {
-                let args = &cmd[8..];
-                if let Some(comma) = args.find(',') {
-                    let ssid = &args[..comma];
-                    let pass = &args[comma + 1..];
-                    println!("Connecting to '{}'...", ssid);
-
-                    match do_wifi_connect(&mut wifi, ssid, pass) {
-                        Ok(ip) => {
-                            println!("Connected! IP: {}", ip);
-                            // Mirror into shared state so web UI shows correct status
-                            let mut st = recovery_web::STATE.lock().unwrap();
-                            st.wifi_connected = true;
-                            st.wifi_ip = ip;
-                        }
-                        Err(e) => println!("Connection failed: {:?}", e),
-                    }
-                } else {
-                    println!("Usage: connect SSID,PASSWORD");
-                }
-            }
-            _ => {
-                println!("Unknown command: '{}'. Type 'help' for options.", cmd);
-            }
-        }
+        FreeRtos::delay_ms(100);
     }
 }
 

@@ -78,7 +78,7 @@
 
     <div class="callout info">
       <div class="callout-title">Status</div>
-      ThistleOS Rust migration complete. 100% Rust kernel (57 modules, 35,000+ LOC, 1,231 tests), 15 Rust hardware drivers, 10 supported boards, multi-arch ESP32 support, and hardware auto-detection in the Recovery OS.
+      ThistleOS Rust migration complete. 100% Rust kernel (57 modules, 35,000+ LOC, 1,231 tests), 15 Rust hardware drivers, 10 supported boards, multi-arch ESP32 support, and catalog-led provisioning in the Recovery OS.
     </div>
 
     <h2>What is ThistleOS?</h2>
@@ -89,7 +89,7 @@
       <li><strong>Drivers are fully swappable.</strong> Swapping a display driver means changing one line in a board definition, not touching the kernel. 15 drivers written in Rust.</li>
       <li><strong>Apps are ELF files on an SD card.</strong> The kernel's ELF loader resolves symbols against a syscall table at runtime. No recompilation of the OS needed to install an app.</li>
       <li><strong>BSD 3-Clause throughout.</strong> No GPL components in the ThistleOS core; swap to any commercial use case without license headaches.</li>
-      <li><strong>Recovery OS auto-detects hardware.</strong> A separate, minimal Rust firmware in <code>ota_0</code> scans I2C/SPI/UART buses, identifies connected components, and downloads the matching drivers and firmware over WiFi.</li>
+      <li><strong>Recovery OS provisions from board catalogs.</strong> A separate, minimal Rust firmware in <code>ota_0</code> starts a WiFi captive portal, downloads the selected board profile, verifies catalog hashes, and installs matching drivers and firmware.</li>
       <li><strong>Multi-arch.</strong> One kernel codebase targets Xtensa (ESP32, S2, S3) and RISC-V (C3, C6, H2). Board configs in JSON — no recompilation for new boards.</li>
     </ul>
 
@@ -145,7 +145,7 @@ idf.py -p /dev/ttyACM0 flash monitor</code></pre>
       <a href="recovery.html" class="card">
         <div class="card-icon">&#128260;</div>
         <div class="card-title">Recovery OS</div>
-        <div class="card-desc">Rust-based recovery firmware, captive portal, UART console, building from source.</div>
+        <div class="card-desc">Rust-based recovery firmware, captive portal, board catalog provisioning, building from source.</div>
       </a>
       <a href="release-flashing.html" class="card">
         <div class="card-icon">&#128229;</div>

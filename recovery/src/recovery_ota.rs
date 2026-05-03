@@ -153,14 +153,18 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
     let catalog_json = http_get_string(catalog_url)?;
 
     // Find the firmware entry (type = "firmware")
-    let fw_url = extract_firmware_url(&catalog_json)
+    let fw_entry = find_catalog_entry_by_type(&catalog_json, "firmware")
         .ok_or_else(|| anyhow::anyhow!("No firmware entry in catalog"))?;
+    let fw_url = json_extract_string(fw_entry, "url")
+        .ok_or_else(|| anyhow::anyhow!("Firmware entry missing url"))?;
+    let expected_sha = json_extract_string(fw_entry, "sha256")
+        .ok_or_else(|| anyhow::anyhow!("Firmware entry missing sha256"))?;
 
     info!("Downloading firmware: {}", fw_url);
     println!("Downloading: {}", fw_url);
 
-    // Download firmware binary
-    let firmware_data = http_get_bytes(&fw_url)?;
+    // Download and verify firmware binary before writing ota_1.
+    let firmware_data = download_verified_bytes(&fw_url, &expected_sha)?;
     info!("Downloaded {} bytes", firmware_data.len());
     println!("Downloaded {} bytes. Flashing...", firmware_data.len());
 
@@ -339,37 +343,16 @@ pub fn component_device_name(c: &DetectedComponent) -> &'static str {
     }
 }
 
-/// Scan all buses: I2C (addresses 0x08–0x77), SPI (GPIO-level CS/BUSY probing),
-/// and UART (listen for NMEA from GPS).
+/// Minimal recovery no longer probes generic board pins.
 ///
-/// Power rails are enabled once at the start of this function; each sub-scanner
-/// is responsible for cleaning up any resources it allocates (UART drivers, etc.).
-///
-/// Returns a `Vec<DetectedComponent>` — one entry per detected device.
+/// Board catalogs/configs are authoritative; probing remains intentionally
+/// disabled here so recovery never drives board-specific display, radio, power,
+/// or input pins before the user has selected the board profile.
 pub fn scan_hardware() -> Vec<DetectedComponent> {
     let chip = detect_chip();
     info!("Chip: {} ({})", chip.to_uppercase(), chip_arch_family(chip));
-    println!("Chip: {} ({})", chip.to_uppercase(), chip_arch_family(chip));
-
-    let mut found = Vec::new();
-
-    unsafe {
-        // Enable 1.8V power rail (GPIO 38) — I2C and SPI peripherals need this.
-        gpio_set_direction(PROBE_1V8_EN, 2); // GPIO_MODE_OUTPUT = 2
-        gpio_set_level(PROBE_1V8_EN, 1); // HIGH = enable
-                                         // Brief delay for power rail stabilisation (~100 ms at 100 Hz FreeRTOS tick)
-        vTaskDelay(10);
-    }
-
-    scan_i2c(&mut found);
-    scan_spi(&mut found);
-    scan_uart(&mut found);
-
-    info!(
-        "Hardware scan complete: {} device(s) found (I2C + SPI + UART)",
-        found.len()
-    );
-    found
+    info!("Hardware probing disabled; selected board config drives install matching");
+    Vec::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -646,10 +629,10 @@ fn scan_uart(found: &mut Vec<DetectedComponent>) {
     info!("UART probe complete");
 }
 
-/// Legacy board-level detection kept for backward compatibility.
+/// Legacy board lookup kept for backward compatibility.
 ///
-/// Calls `scan_hardware()` and maps the component set to a known board slug.
-/// Callers that need component-level detail should use `scan_hardware()` directly.
+/// Returns a selected/downloaded board profile when one already exists. Minimal
+/// recovery does not infer board identity by probing generic pins.
 pub fn autodetect_board() -> Option<String> {
     // First check board.json — if it exists, trust it
     if let Ok(content) = std::fs::read_to_string(BOARD_JSON_PATH) {
@@ -664,42 +647,7 @@ pub fn autodetect_board() -> Option<String> {
         }
     }
 
-    let components = scan_hardware();
-    let has_tca8418 = components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x34);
-    let has_bhi260 = components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x28);
-    let has_cst816 = components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x15);
-    let has_ssd1306 = components
-        .iter()
-        .any(|c| c.bus == "i2c" && c.address == 0x3C);
-    let has_lora_spi = components.iter().any(|c| c.bus == "spi");
-
-    if has_tca8418 {
-        if has_bhi260 {
-            info!("Detected: T-Deck Pro (TCA8418 + BHI260AP)");
-            return Some("tdeck-pro".to_string());
-        } else {
-            info!("Detected: T-Deck (TCA8418, no BHI260AP)");
-            return Some("tdeck".to_string());
-        }
-    }
-
-    if has_cst816 && !has_tca8418 {
-        info!("Detected: T-Display-S3 (CST816S touch, no keyboard)");
-        return Some("tdisplay-s3".to_string());
-    }
-
-    if has_ssd1306 && has_lora_spi && !has_tca8418 {
-        info!("Detected: T3-S3 (SSD1306 OLED + LoRa)");
-        return Some("t3-s3".to_string());
-    }
-
-    info!("No known board detected via hardware scan");
+    info!("No board profile found; select one in the recovery web UI");
     None
 }
 
@@ -740,6 +688,9 @@ extern "C" {
 
     // FreeRTOS
     fn vTaskDelay(ticks: u32);
+
+    // mbedTLS
+    fn mbedtls_sha256(input: *const u8, ilen: usize, output: *mut u8, is224: i32) -> i32;
 }
 
 // ---------------------------------------------------------------------------
@@ -750,7 +701,6 @@ const BOARD_JSON_PATH: &str = "/spiffs/config/board.json";
 const FALLBACK_BOARD: &str = "tdeck-pro";
 const SD_DRIVERS_DIR: &str = "/sdcard/drivers";
 const SD_WM_DIR: &str = "/sdcard/wm";
-const SD_UPDATE_DIR: &str = "/sdcard/update";
 const SD_BOARDS_DIR: &str = "/sdcard/config/boards";
 
 /// Read the board name from /spiffs/config/board.json, falling back to a
@@ -1076,8 +1026,11 @@ impl<'a> Iterator for JsonObjects<'a> {
 }
 
 /// Download a single file via HTTP GET and write it to `dest_path`.
-fn download_file(url: &str, dest_path: &str) -> anyhow::Result<()> {
-    let data = http_get_bytes(url)?;
+fn download_file(url: &str, expected_sha256: Option<&str>, dest_path: &str) -> anyhow::Result<()> {
+    let data = match expected_sha256 {
+        Some(expected) if !expected.is_empty() => download_verified_bytes(url, expected)?,
+        _ => http_get_bytes(url)?,
+    };
     std::fs::create_dir_all(
         std::path::Path::new(dest_path)
             .parent()
@@ -1085,6 +1038,44 @@ fn download_file(url: &str, dest_path: &str) -> anyhow::Result<()> {
     )?;
     std::fs::write(dest_path, &data)?;
     Ok(())
+}
+
+fn download_verified_bytes(url: &str, expected_sha256: &str) -> anyhow::Result<Vec<u8>> {
+    let data = http_get_bytes(url)?;
+    verify_sha256(&data, expected_sha256)?;
+    Ok(data)
+}
+
+fn verify_sha256(data: &[u8], expected_sha256: &str) -> anyhow::Result<()> {
+    let expected = expected_sha256.trim().to_ascii_lowercase();
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        anyhow::bail!("Invalid catalog sha256 '{}'", expected_sha256);
+    }
+
+    let actual = sha256_hex(data)?;
+    if actual != expected {
+        anyhow::bail!("SHA-256 mismatch: expected {}, got {}", expected, actual);
+    }
+    Ok(())
+}
+
+fn sha256_hex(data: &[u8]) -> anyhow::Result<String> {
+    let mut digest = [0u8; 32];
+    let ret = unsafe { mbedtls_sha256(data.as_ptr(), data.len(), digest.as_mut_ptr(), 0) };
+    if ret != 0 {
+        anyhow::bail!("mbedtls_sha256 failed: {}", ret);
+    }
+    Ok(hex_lower(&digest))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 /// Download all drivers, WM entries, and the firmware image that are
@@ -1097,28 +1088,25 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 }
 
 /// Download all drivers, board config, WM entries, and the firmware image that are
-/// compatible with `board_name` or matched via hardware detection probing.
+/// compatible with `board_name`.
 ///
 /// Progress is reported via `BUNDLE_PROGRESS` (0-100) so the web UI can poll
 /// `/api/bundle/status` while the download runs on the main thread.
 ///
 /// Matching rules (applied per catalog entry):
-///   - firmware/wm entries: matched by `compatible_boards` (unchanged).
+///   - firmware/driver/wm entries: matched by `compatible_boards`.
 ///   - board entries: matched by `id`/`board_id`.
-///   - driver entries with a `detection` object: matched if any detected
-///     component's bus+address matches the entry's `detection.bus`+`detection.address`.
-///   - driver entries without `detection`: fall back to `compatible_boards`.
+///   - all entries: filtered by detected chip `arch` when present.
 ///
 /// Steps:
-/// 1. Scan I2C hardware via `scan_hardware()`.
-/// 2. Fetch catalog JSON from `catalog_url`.
-/// 3. Count compatible entries to compute per-item progress increments.
-/// 4. For each compatible catalog entry:
-///    - firmware → /sdcard/update/thistle_os.bin
+/// 1. Fetch catalog JSON from `catalog_url`.
+/// 2. Count compatible entries to compute per-item progress increments.
+/// 3. For each compatible catalog entry:
+///    - firmware → verified and flashed directly to ota_1
 ///    - board    → /sdcard/config/boards/<id>.json and /sdcard/config/board.json
 ///    - driver   → /sdcard/drivers/<id>.drv.elf
 ///    - wm       → /sdcard/wm/<id>.wm.elf
-/// 5. Download matching .sig files alongside each item.
+/// 4. Download matching .sig files alongside non-firmware bundle files.
 ///
 /// Returns the number of items successfully downloaded.
 pub fn recovery_download_board_bundle_for(
@@ -1130,18 +1118,6 @@ pub fn recovery_download_board_bundle_for(
 
     BUNDLE_PROGRESS.store(0, Ordering::Relaxed);
 
-    // Probe hardware before fetching catalog so driver matching can use results
-    info!("Scanning hardware...");
-    let components = scan_hardware();
-    if components.is_empty() {
-        info!("No components detected — driver matching will use compatible_boards only");
-    } else {
-        for c in &components {
-            let name = component_device_name(c);
-            info!("  Detected: {} ({} addr={})", name, c.bus, c.address);
-        }
-    }
-
     info!("Fetching catalog: {}", catalog_url);
     let catalog_json = http_get_string(catalog_url)?;
 
@@ -1150,9 +1126,8 @@ pub fn recovery_download_board_bundle_for(
     info!("Filtering catalog for chip: {}", chip);
 
     // Closure: decide whether a catalog entry JSON object should be downloaded.
-    // For driver entries: prefer detection match; fall back to compatible_boards.
-    // For firmware/wm entries: always use compatible_boards.
-    // All entries: also filtered by `arch` field when present.
+    // The selected board config is authoritative; hardware probes are optional
+    // presentation hints and are not used for install decisions.
     let entry_should_download = |obj: &str| -> bool {
         // Arch check first — skip entries targeting a different chip entirely.
         if !catalog_entry_arch_matches(obj, chip) {
@@ -1161,20 +1136,7 @@ pub fn recovery_download_board_bundle_for(
 
         let entry_type = json_extract_string(obj, "type").unwrap_or_default();
         match entry_type.as_str() {
-            "driver" => {
-                // Check if the entry has a detection object
-                if let Some(det_bus) = catalog_extract_detection_str(obj, "bus") {
-                    let det_addr = catalog_extract_detection_u16(obj, "address");
-                    // Match against any detected component
-                    components
-                        .iter()
-                        .any(|c| c.bus == det_bus && (det_addr == 0 || c.address == det_addr))
-                } else {
-                    // No detection info — fall back to compatible_boards
-                    catalog_entry_board_matches(obj, board_name)
-                }
-            }
-            "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
+            "driver" | "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
             "board" => {
                 let id = json_extract_string(obj, "board_id")
                     .or_else(|| json_extract_string(obj, "id"))
@@ -1208,10 +1170,11 @@ pub fn recovery_download_board_bundle_for(
             None => continue,
         };
         let sig_url = json_extract_string(obj, "sig_url");
+        let expected_sha = json_extract_string(obj, "sha256");
         let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
 
         let dest_path = match entry_type.as_str() {
-            "firmware" => format!("{}/thistle_os.bin", SD_UPDATE_DIR),
+            "firmware" => String::new(),
             "board" => format!("{}/{}.json", SD_BOARDS_DIR, id),
             "driver" => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
             "wm" => format!("{}/{}.wm.elf", SD_WM_DIR, id),
@@ -1221,10 +1184,36 @@ pub fn recovery_download_board_bundle_for(
             }
         };
 
+        if entry_type == "firmware" {
+            let Some(expected_sha) = expected_sha.as_deref().filter(|s| !s.is_empty()) else {
+                error!("Firmware '{}' missing sha256 — skipping install", name);
+                errors += 1;
+                continue;
+            };
+            info!("Downloading firmware {} -> ota_1", name);
+            println!("  {} [firmware -> ota_1]", name);
+            match download_verified_bytes(&url, expected_sha).and_then(|data| flash_to_ota1(&data))
+            {
+                Ok(()) => {
+                    downloaded += 1;
+                    info!("Firmware '{}' flashed to ota_1", name);
+                    if total_entries > 0 {
+                        let pct = (downloaded * 100 / total_entries).min(99) as u8;
+                        BUNDLE_PROGRESS.store(pct, Ordering::Relaxed);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to flash firmware '{}': {}", name, e);
+                    errors += 1;
+                }
+            }
+            continue;
+        }
+
         info!("Downloading {} -> {}", name, dest_path);
         println!("  {} [{}]", name, entry_type);
 
-        if let Err(e) = download_file(&url, &dest_path) {
+        if let Err(e) = download_file(&url, expected_sha.as_deref(), &dest_path) {
             error!("Failed to download '{}': {}", name, e);
             errors += 1;
             continue;
@@ -1235,10 +1224,10 @@ pub fn recovery_download_board_bundle_for(
             let _ = std::fs::copy(&dest_path, "/sdcard/config/board.json");
         }
 
-        // Download and verify signature if sig_url is present
+        // Download signature companion if sig_url is present.
         if let Some(sig_url_str) = sig_url {
             let sig_path = format!("{}.sig", dest_path);
-            if let Err(e) = download_file(&sig_url_str, &sig_path) {
+            if let Err(e) = download_file(&sig_url_str, None, &sig_path) {
                 error!(
                     "Failed to download sig for '{}': {} — skipping install",
                     name, e
@@ -1281,10 +1270,9 @@ pub fn recovery_download_board_bundle_for(
 
 /// Build a dry-run JSON plan for the bundle entries recovery would download.
 ///
-/// This uses the same catalog, chip, board, and component matching rules as the
-/// installer, but does not write to flash or SD card.
+/// This uses the same catalog, chip, and board matching rules as the installer,
+/// but does not write to flash or SD card.
 pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow::Result<String> {
-    let components = scan_hardware();
     let catalog_json = http_get_string(catalog_url)?;
     let chip = detect_chip();
     let mut entries: Vec<String> = Vec::new();
@@ -1296,17 +1284,7 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
 
         let entry_type = json_extract_string(obj, "type").unwrap_or_default();
         let matches = match entry_type.as_str() {
-            "driver" => {
-                if let Some(det_bus) = catalog_extract_detection_str(obj, "bus") {
-                    let det_addr = catalog_extract_detection_u16(obj, "address");
-                    components
-                        .iter()
-                        .any(|c| c.bus == det_bus && (det_addr == 0 || c.address == det_addr))
-                } else {
-                    catalog_entry_board_matches(obj, board_name)
-                }
-            }
-            "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
+            "driver" | "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
             "board" => {
                 let id = json_extract_string(obj, "board_id")
                     .or_else(|| json_extract_string(obj, "id"))
@@ -1338,23 +1316,9 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
     ))
 }
 
-/// Simple JSON extraction — find "url" value for the first "firmware" type entry
-fn extract_firmware_url(json: &str) -> Option<String> {
-    // Find "type":"firmware" then find the "url" in the same object
-    let fw_pos = json.find("\"firmware\"")?;
-    let obj_start = json[..fw_pos].rfind('{')?;
-    let obj_end = json[fw_pos..].find('}').map(|p| fw_pos + p)?;
-    let obj = &json[obj_start..=obj_end];
-
-    // Extract "url" value
-    let url_key = obj.find("\"url\"")?;
-    let colon = obj[url_key..].find(':')?;
-    let quote_start = obj[url_key + colon..]
-        .find('"')
-        .map(|p| url_key + colon + p + 1)?;
-    let quote_end = obj[quote_start..].find('"').map(|p| quote_start + p)?;
-
-    Some(obj[quote_start..quote_end].to_string())
+fn find_catalog_entry_by_type<'a>(json: &'a str, entry_type: &str) -> Option<&'a str> {
+    iter_json_objects(json)
+        .find(|obj| json_extract_string(obj, "type").as_deref() == Some(entry_type))
 }
 
 /// HTTP GET returning a string

@@ -63,7 +63,7 @@
     <div class="page-header">
       <div class="breadcrumb"><a href="index.html">ThistleOS</a> / Recovery OS</div>
       <h1>Recovery OS</h1>
-      <p class="lead">A minimal Rust firmware in <code>ota_0</code> that auto-detects hardware via I2C/SPI/UART scanning, downloads matching drivers and firmware from the catalog, and reinstalls ThistleOS without a programmer — via SD card, WiFi, or the UART console.</p>
+      <p class="lead">A minimal Rust firmware in <code>ota_0</code> that starts a WiFi hotspot, serves a captive portal, downloads the selected board profile plus matching drivers and firmware from the catalog, verifies hashes, flashes <code>ota_1</code>, and reboots into ThistleOS without a programmer.</p>
       <a href="https://github.com/wan0net/thistle-os/blob/main/docs/recovery.html" class="edit-link">&#9998; Edit on GitHub</a>
     </div>
 
@@ -73,13 +73,13 @@
     <p>Key design choices:</p>
     <ul>
       <li><strong>Rust + esp-rs</strong> — smaller binary than equivalent C code, and memory safety means fewer panic-class bugs in the one piece of code that must always work.</li>
-      <li><strong>Hardware auto-detection</strong> — Recovery detects the chip variant (ESP32/S3/C3/etc.), then scans I2C buses (0x08–0x77), probes SPI device CS pins, and listens on UART for GPS NMEA / modem AT responses. Component matches are looked up in the catalog.</li>
+      <li><strong>Catalog-led board selection</strong> — Recovery detects the chip variant (ESP32/S3/C3/etc.) and lets the selected board profile drive firmware, driver, and window-manager selection. Generic I2C/SPI/UART probing is deliberately kept out of the minimal recovery path.</li>
       <li><strong>Multi-arch chip detection</strong> — a single Recovery binary identifies whether it is running on Xtensa or RISC-V and selects the correct firmware architecture from the catalog.</li>
       <li><strong>Downloadable board list</strong> — after WiFi connects, the web UI fetches the latest board catalog from <code>https://wan0net.github.io/thistle-os/catalog.json</code> and keeps the built-in list as the offline fallback.</li>
-      <li><strong>Full bundle download</strong> — Recovery downloads firmware binary, matching drivers, board config, and the appropriate window manager in one provisioning flow. The device boots fully configured with no manual SD card setup.</li>
+      <li><strong>Full bundle download</strong> — Recovery downloads the firmware binary, matching drivers, board config, and the appropriate window manager in one provisioning flow. Catalog SHA-256 hashes are checked before files are installed or firmware is flashed.</li>
       <li><strong>No LVGL</strong> — the recovery UI is a captive portal web page served over WiFi, viewable on any phone or laptop. The e-paper display shows status messages via raw framebuffer writes.</li>
       <li><strong>No SD card required</strong> — if the SD card is missing or corrupt, recovery can still download firmware over WiFi.</li>
-      <li><strong>UART console as fallback</strong> — if WiFi is not available, a serial console provides the same commands.</li>
+      <li><strong>Web-first control loop</strong> — recovery continuously polls captive-portal requests so WiFi connect and bundle download actions do not depend on serial-console input.</li>
     </ul>
 
     <h2>Boot flow</h2>
@@ -107,21 +107,14 @@
           &#x2514;&#x2500; NO &#x2500;&#x25BA; continue
                      &#x2502;
                      &#x25BC;
-          [Step 3] Hardware scan
-          &#x251c;&#x2500; Enable power rails
-          &#x251c;&#x2500; Scan I2C bus 0x08..0x77 (probe addresses)
-          &#x251c;&#x2500; Probe SPI CS pins (GPIO-level checks)
-          &#x251c;&#x2500; Probe UART: GPS (NMEA), modem (AT)
-          &#x2514;&#x2500; Match detected components to catalog entries
-                     &#x2502;
-                     &#x25BC;
-          [Step 4] Start WiFi AP "ThistleOS-Recovery"
-          [Step 5] Start HTTP captive portal (192.168.4.1)
+          [Step 3] Start WiFi AP "ThistleOS-Recovery"
+          [Step 4] Start HTTP captive portal (192.168.4.1)
                      — WiFi, board list download, dry-run plan, install, reboot
-          [Step 6] Start UART console loop
+          [Step 5] Poll captive portal requests
                      &#x2502;
-                     &#x25BC; (user action via web or UART)
-          Download firmware + matching drivers + WM bundle
+                     &#x25BC; (user action via web)
+          Download selected board config + matching drivers + WM bundle
+          Verify SHA-256 hashes
           Flash to ota_1 &#x2500;&#x25BA; Reboot into ThistleOS</div>
 
     <h2>Captive portal web UI</h2>
@@ -129,9 +122,9 @@
 
     <p>The portal provides a 3-step guided flow:</p>
     <ol>
-      <li><strong>Step 1 — WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP). Recovery shows detected hardware components on this screen.</li>
+      <li><strong>Step 1 — WiFi Connect</strong> — enter SSID and password to connect the ESP32 to your network (WPA2 client mode simultaneously with the AP).</li>
       <li><strong>Step 2 — Board Select</strong> — downloads the latest board list after WiFi connects, filters it by detected chip architecture, and keeps the built-in list available offline.</li>
-      <li><strong>Step 3 — Dry Run &amp; Install</strong> — dry-runs the selected board against the bundle catalog, then fetches the firmware binary, matching drivers, board config, and window manager from the official bundle catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>). Streams the bundle to flash and the SD card.</li>
+      <li><strong>Step 3 — Dry Run &amp; Install</strong> — dry-runs the selected board against the bundle catalog, then fetches the firmware binary, matching drivers, board config, and window manager from the official bundle catalog URL (<code>https://wan0net.github.io/thistle-apps/catalog.json</code>). Firmware is verified and flashed directly to <code>ota_1</code>; other bundle files are verified and installed to SD.</li>
       <li><strong>Step 3 — Reboot</strong> — confirms installation; reboots the device into a fully provisioned ThistleOS.</li>
     </ol>
 
@@ -142,47 +135,8 @@
       iOS, Android, and Windows all use different URLs to detect captive portals. The Recovery OS handles <code>/generate_204</code> (Android), <code>/hotspot-detect.html</code> (iOS), and <code>/connecttest.txt</code> (Windows), redirecting all of them to <code>/</code>.
     </div>
 
-    <h2>UART console commands</h2>
-    <p>Connect at 115200 baud, 8N1. Hit Enter after each command.</p>
-
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Command</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>help</code></td><td>Show available commands</td></tr>
-          <tr><td><code>status</code></td><td>Recovery version, WiFi state, ota_1 state, SD firmware presence</td></tr>
-          <tr><td><code>scan</code></td><td>Scan for WiFi networks and list up to 15 results with RSSI and channel</td></tr>
-          <tr><td><code>connect SSID,PASS</code></td><td>Connect to a WiFi network (WPA2). No spaces in SSID or password.</td></tr>
-          <tr><td><code>board</code></td><td>Show detected/selected board and known offline board IDs</td></tr>
-          <tr><td><code>board &lt;id&gt;</code></td><td>Select a board manually before bundle download</td></tr>
-          <tr><td><code>download</code></td><td>Download and install ThistleOS from the bundle catalog (requires WiFi)</td></tr>
-          <tr><td><code>reboot</code></td><td>Restart the device</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <p>Example session:</p>
-    <pre><code>recovery> status
-Recovery v0.1.0
-WiFi AP: ThistleOS-Recovery (192.168.4.1)
-WiFi STA: disconnected
-ota_1: Invalid
-SD card firmware: false
-
-recovery> scan
-Scanning...
-   1. HomeNetwork                     -52 dBm  ch 6  [secured]
-   2. Neighbors-5GHz                  -71 dBm  ch44  [secured]
-Found 2 networks
-
-recovery> connect HomeNetwork,mypassword
-Connecting to 'HomeNetwork'...
-Connected!
-IP: 192.168.1.42
-
-recovery> download
-Downloading full bundle for board 'tdeck-pro' from https://wan0net.github.io/thistle-apps/catalog.json...
-Bundle installed (4 items). Rebooting...</code></pre>
+    <h2>Recovery control path</h2>
+    <p>The captive portal is the primary control path. Recovery keeps the WiFi AP and HTTP server alive, polls queued web requests, connects STA WiFi, installs the selected bundle, and lets the web UI trigger reboot. The UART console is intentionally not part of the minimal install loop, so web-triggered work cannot stall behind blocking serial input.</p>
 
     <h2>REST API endpoints</h2>
     <p>The captive portal web server also exposes a small REST API for scripted recovery:</p>
@@ -236,7 +190,7 @@ espflash flash --partition-table partitions.csv \
       <table>
         <thead><tr><th>File</th><th>Contents</th></tr></thead>
         <tbody>
-          <tr><td><code>recovery/src/main.rs</code></td><td>Boot sequence, WiFi AP setup, UART console loop</td></tr>
+          <tr><td><code>recovery/src/main.rs</code></td><td>Boot sequence, WiFi AP setup, captive-portal polling loop</td></tr>
           <tr><td><code>recovery/src/recovery_ota.rs</code></td><td><code>check_ota1()</code>, <code>check_sd_firmware()</code>, <code>apply_sd_firmware()</code>, <code>download_and_flash()</code></td></tr>
           <tr><td><code>recovery/src/recovery_web.rs</code></td><td>Captive portal HTML (embedded as a <code>&amp;str</code>), HTTP handler registration</td></tr>
           <tr><td><code>recovery/Cargo.toml</code></td><td>Crate dependencies: <code>esp-idf-svc</code>, <code>esp-idf-hal</code>, <code>esp-idf-sys</code>, <code>anyhow</code></td></tr>

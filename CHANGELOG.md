@@ -19,6 +19,7 @@ Patch release from the watch compatibility and build-stabilisation work.
 - Added release flashing docs with checksum verification and slot offsets.
 - Added a Pages-published recovery board catalog and CI validation for board configs.
 - Split recovery board-list catalog from bundle catalog and added a dry-run install plan endpoint.
+- Hardened recovery install flow: web requests no longer block behind UART input, board configs drive bundle selection, and catalog SHA-256 hashes are verified before firmware/files are installed.
 - Added partition-size checks for firmware and recovery artifacts.
 - Added a manual release workflow that publishes versioned assets and `SHA256SUMS`.
 

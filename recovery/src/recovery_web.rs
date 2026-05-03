@@ -25,7 +25,7 @@ pub struct RecoveryState {
     pub wifi_ip: String,
     /// Set by /api/board/select (still used for firmware/WM selection).
     pub board_name: Option<String>,
-    /// Hardware components detected by the last scan_hardware() call.
+    /// Optional hardware components surfaced by future board-aware probes.
     /// Each entry is (bus, address, display_name).
     pub detected_components: Vec<(String, u16, String)>,
     /// Set by /api/bundle/download; cleared by main after processing.
@@ -177,10 +177,10 @@ input:focus { border-color: #2563eb; outline: none; }
   <div id="wifi-status" class="status-box"></div>
 </div>
 
-<!-- Step 2: Hardware detection + board selection (hidden until WiFi connected) -->
+<!-- Step 2: board selection (hidden until WiFi connected) -->
 <div class="card hidden" id="card-board">
-  <h3><span class="step-num locked" id="step2-num">2</span> Detect Hardware</h3>
-  <div id="scan-status" class="status-box info" style="display:block">Scanning hardware...</div>
+  <h3><span class="step-num locked" id="step2-num">2</span> Select Board</h3>
+  <div id="scan-status" class="status-box info" style="display:block">Board profiles are catalog-driven</div>
   <div id="components-list" class="bundle-items hidden"></div>
   <hr class="divider" id="board-divider" style="display:none">
   <p class="info-text" id="board-select-label" style="display:none">Select board for firmware &amp; window manager:</p>
@@ -224,7 +224,7 @@ var pollTimer = null;
 var bundlePollTimer = null;
 
 // ---------------------------------------------------------------------------
-// Initialise board list and detected components from /api/boards
+// Initialise board list and optional components from /api/boards
 // ---------------------------------------------------------------------------
 function initBoards() {
   fetch('/api/boards')
@@ -236,7 +236,7 @@ function initBoards() {
       var boardLabel   = document.getElementById('board-select-label');
       var boardList    = document.getElementById('board-list');
 
-      // Show detected hardware components
+      // Show optional hardware components if recovery has any board-aware hints.
       var comps = d.components || [];
       if (comps.length > 0) {
         while (compList.firstChild) { compList.removeChild(compList.firstChild); }
@@ -250,16 +250,16 @@ function initBoards() {
         scanStatus.className = 'status-box';
         compList.classList.remove('hidden');
       } else {
-        scanStatus.textContent = 'No I2C components detected — select board manually';
+        scanStatus.textContent = 'Select your board manually, or download the latest board list';
         scanStatus.className = 'status-box info';
       }
 
-      // Show board picker (secondary — for firmware/WM selection)
+      // Show board picker for firmware, driver, and WM selection.
       boardDivider.style.display = '';
       boardLabel.style.display   = '';
       while (boardList.firstChild) { boardList.removeChild(boardList.firstChild); }
 
-      // If board was auto-detected, pre-select it
+      // If a board was already selected, pre-select it.
       if (d.detected) {
         boardSelected = d.detected;
       }
@@ -306,7 +306,7 @@ function initBoards() {
     })
     .catch(function() {
       var scanStatus = document.getElementById('scan-status');
-      scanStatus.textContent = 'Hardware scan unavailable — select board manually';
+      scanStatus.textContent = 'Board list unavailable — select from the built-in list';
       scanStatus.className = 'status-box info';
     });
 
@@ -665,14 +665,17 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         };
         let status_eff = if bundle_status.is_empty() { "idle" } else { &bundle_status };
 
-        // When complete, report the atomic progress counter as an item count
         let live_progress = if bundle_status == "downloading" || bundle_status == "complete" {
             crate::recovery_ota::BUNDLE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed)
         } else {
             bundle_progress
         };
 
-        let bundle_items = if bundle_status == "complete" { live_progress as u32 } else { 0 };
+        let bundle_items = if bundle_status == "complete" {
+            bundle_progress as u32
+        } else {
+            0
+        };
 
         let chip_str = if chip.is_empty() {
             crate::recovery_ota::detect_chip().to_string()
@@ -953,7 +956,7 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/bundle/status",
         esp_idf_svc::http::Method::Get,
         |req| -> anyhow::Result<()> {
-            let (status, _stored_progress) = {
+            let (status, stored_progress) = {
                 let st = STATE.lock().unwrap();
                 (st.bundle_status.clone(), st.bundle_progress)
             };
@@ -967,16 +970,17 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
             // Always read fresh progress from the atomic (updated by download loop)
             let live =
                 crate::recovery_ota::BUNDLE_PROGRESS.load(std::sync::atomic::Ordering::Relaxed);
+            let progress = if status_str == "complete" { 100 } else { live };
 
             let items_field = if status_str == "complete" {
-                format!(",\"items\":{}", live)
+                format!(",\"items\":{}", stored_progress)
             } else {
                 String::new()
             };
 
             let json = format!(
                 r#"{{"status":"{}","progress":{}{}}}"#,
-                status_str, live, items_field
+                status_str, progress, items_field
             );
 
             let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
