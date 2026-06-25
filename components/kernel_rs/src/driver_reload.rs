@@ -30,6 +30,7 @@ const ESP_ERR_NO_MEM: i32 = 0x101;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
 const ESP_ERR_INVALID_STATE: i32 = 0x103;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
+const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -191,6 +192,11 @@ fn platform_stop_driver(_hal_type: u8) -> i32 {
 #[cfg(target_os = "espidf")]
 extern "C" {
     fn driver_loader_load(path: *const c_char) -> i32;
+    fn thistle_driver_reload_unload(driver_id: u32) -> i32;
+    fn thistle_driver_reload_start(hal_type: u8) -> i32;
+    fn thistle_driver_reload_stop(hal_type: u8) -> i32;
+    fn thistle_driver_reload_hal_pre_reload(hal_type: u8) -> i32;
+    fn thistle_driver_reload_hal_post_reload(hal_type: u8) -> i32;
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
@@ -223,27 +229,60 @@ fn platform_load_driver(path: &[u8], path_len: usize) -> i32 {
 }
 
 #[cfg(target_os = "espidf")]
-fn platform_unload_driver(_id: u32) -> i32 {
-    // TODO: call esp_elf_deinit when driver_loader exposes unload
+fn platform_unload_driver(id: u32) -> i32 {
     unsafe {
-        esp_log_write(
-            ESP_LOG_INFO,
-            TAG.as_ptr(),
-            b"platform_unload_driver (stub)\0".as_ptr(),
-        );
+        let ret = thistle_driver_reload_unload(id);
+        if ret != ESP_OK && ret != ESP_ERR_NOT_SUPPORTED {
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"platform_unload_driver failed: %d\0".as_ptr(),
+                ret,
+            );
+        }
+        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
     }
+}
+
+#[cfg(target_os = "espidf")]
+fn platform_start_driver(hal_type: u8) -> i32 {
+    unsafe {
+        let ret = thistle_driver_reload_start(hal_type);
+        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+    }
+}
+
+#[cfg(target_os = "espidf")]
+fn platform_stop_driver(hal_type: u8) -> i32 {
+    unsafe {
+        let ret = thistle_driver_reload_stop(hal_type);
+        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+    }
+}
+
+#[cfg(target_os = "espidf")]
+fn platform_hal_pre_reload(hal_type: u8) -> i32 {
+    unsafe {
+        let ret = thistle_driver_reload_hal_pre_reload(hal_type);
+        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+    }
+}
+
+#[cfg(not(target_os = "espidf"))]
+fn platform_hal_pre_reload(_hal_type: u8) -> i32 {
     ESP_OK
 }
 
 #[cfg(target_os = "espidf")]
-fn platform_start_driver(_hal_type: u8) -> i32 {
-    // TODO: call hal_registry_start for specific driver type
-    ESP_OK
+fn platform_hal_post_reload(hal_type: u8) -> i32 {
+    unsafe {
+        let ret = thistle_driver_reload_hal_post_reload(hal_type);
+        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+    }
 }
 
-#[cfg(target_os = "espidf")]
-fn platform_stop_driver(_hal_type: u8) -> i32 {
-    // TODO: call hal_registry_stop for specific driver type
+#[cfg(not(target_os = "espidf"))]
+fn platform_hal_post_reload(_hal_type: u8) -> i32 {
     ESP_OK
 }
 
@@ -554,6 +593,12 @@ pub extern "C" fn rs_driver_reload_reload(id: u32) -> i32 {
             if drv.state == DriverState::Stopped || drv.state == DriverState::Loaded
                 || drv.state == DriverState::Error
             {
+                let pre_ret = platform_hal_pre_reload(drv.hal_type);
+                if pre_ret != ESP_OK {
+                    drv.state = DriverState::Error;
+                    drv.last_error = pre_ret;
+                    return pre_ret;
+                }
                 let ret = platform_unload_driver(drv.id);
                 if ret != ESP_OK {
                     drv.state = DriverState::Error;
@@ -568,6 +613,13 @@ pub extern "C" fn rs_driver_reload_reload(id: u32) -> i32 {
                 drv.state = DriverState::Error;
                 drv.last_error = ret;
                 return ret;
+            }
+
+            let post_ret = platform_hal_post_reload(drv.hal_type);
+            if post_ret != ESP_OK {
+                drv.state = DriverState::Error;
+                drv.last_error = post_ret;
+                return post_ret;
             }
 
             drv.state = DriverState::Loaded;

@@ -6,7 +6,7 @@
 // On simulator builds all functions are stubs.
 
 use std::os::raw::{c_char, c_void};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use crate::event::{event_publish, CEvent, EventType};
 
@@ -75,6 +75,7 @@ impl WifiState {
 }
 
 static WIFI_STATE: Mutex<WifiState> = Mutex::new(WifiState::new());
+static WIFI_STATE_CV: Condvar = Condvar::new();
 
 // ---------------------------------------------------------------------------
 // ESP-IDF WiFi FFI (hardware only)
@@ -142,7 +143,13 @@ unsafe extern "C" fn wifi_event_handler(
     event_data: *mut c_void,
 ) {
     if event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED {
-        wifi_manager_set_state(WIFI_STATE_DISCONNECTED, std::ptr::null());
+        let old_state = wifi_manager_get_state();
+        let next_state = if old_state == WIFI_STATE_CONNECTING {
+            WIFI_STATE_FAILED
+        } else {
+            WIFI_STATE_DISCONNECTED
+        };
+        wifi_manager_set_state(next_state, std::ptr::null());
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"WiFi disconnected\0".as_ptr());
     } else if event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP {
         let got_ip = event_data as *const IpEventGotIp;
@@ -409,26 +416,60 @@ pub unsafe extern "C" fn wifi_manager_connect(
 
         if let Ok(mut s) = WIFI_STATE.lock() {
             s.state = WIFI_STATE_CONNECTING;
+            s.ip = [0u8; 16];
         }
+        WIFI_STATE_CV.notify_all();
 
-        let _ = esp_wifi_connect();
+        let connect_ret = esp_wifi_connect();
+        if connect_ret != ESP_OK {
+            if let Ok(mut s) = WIFI_STATE.lock() {
+                s.state = WIFI_STATE_FAILED;
+                s.ip = [0u8; 16];
+            }
+            WIFI_STATE_CV.notify_all();
+            return connect_ret;
+        }
 
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Connecting to WiFi...\0".as_ptr());
 
-        // Poll for connection with timeout
         let timeout = if timeout_ms == 0 { 10000 } else { timeout_ms };
-        let start = std::time::Instant::now();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout as u64);
+
+        let mut guard = match WIFI_STATE.lock() {
+            Ok(g) => g,
+            Err(_) => return ESP_ERR_INVALID_STATE,
+        };
 
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let state = WIFI_STATE.lock().map(|s| s.state).unwrap_or(WIFI_STATE_DISCONNECTED);
-            if state == WIFI_STATE_CONNECTED {
+            if guard.state == WIFI_STATE_CONNECTED {
                 return ESP_OK;
             }
-            if state == WIFI_STATE_FAILED || start.elapsed().as_millis() >= timeout as u128 {
-                if let Ok(mut s) = WIFI_STATE.lock() {
-                    s.state = WIFI_STATE_FAILED;
-                }
+            if guard.state == WIFI_STATE_FAILED || guard.state == WIFI_STATE_DISCONNECTED {
+                guard.state = WIFI_STATE_FAILED;
+                guard.ip = [0u8; 16];
+                WIFI_STATE_CV.notify_all();
+                return ESP_ERR_TIMEOUT;
+            }
+
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                let _ = esp_wifi_disconnect();
+                guard.state = WIFI_STATE_FAILED;
+                guard.ip = [0u8; 16];
+                WIFI_STATE_CV.notify_all();
+                return ESP_ERR_TIMEOUT;
+            }
+
+            let wait_for = deadline.saturating_duration_since(now);
+            let (new_guard, wait_result) = WIFI_STATE_CV
+                .wait_timeout(guard, wait_for)
+                .unwrap_or_else(|poison| poison.into_inner());
+            guard = new_guard;
+            if wait_result.timed_out() {
+                let _ = esp_wifi_disconnect();
+                guard.state = WIFI_STATE_FAILED;
+                guard.ip = [0u8; 16];
+                WIFI_STATE_CV.notify_all();
                 return ESP_ERR_TIMEOUT;
             }
         }
@@ -459,7 +500,9 @@ pub extern "C" fn wifi_manager_disconnect() -> i32 {
 
     if let Ok(mut s) = WIFI_STATE.lock() {
         s.state = WIFI_STATE_DISCONNECTED;
+        s.ip = [0u8; 16];
     }
+    WIFI_STATE_CV.notify_all();
 
     ESP_OK
 }
@@ -783,6 +826,88 @@ fn find_bool_value(json: &str, key: &str) -> Option<bool> {
     }
 }
 
+fn find_object_range_by_key(json: &str, key: &str) -> Option<(usize, usize)> {
+    let pattern = format!("\"{}\"", key);
+    let key_start = json.find(&pattern)?;
+    let after_key = &json[key_start + pattern.len()..];
+    let colon_idx = after_key.find(':')?;
+    let after_colon = &after_key[colon_idx + 1..];
+    let obj_rel_start = after_colon.find('{')?;
+    let obj_start = key_start + pattern.len() + colon_idx + 1 + obj_rel_start;
+
+    let mut depth = 0i32;
+    for (i, ch) in json[obj_start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((obj_start, obj_start + i + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn upsert_json_string_value(json: &str, key: &str, new_value: &str) -> String {
+    let replaced = replace_json_string_value(json, key, new_value);
+    if replaced != json {
+        return replaced;
+    }
+    let insert_pos = match json.rfind('}') {
+        Some(p) => p,
+        None => return json.to_string(),
+    };
+    let prefix = &json[..insert_pos];
+    let suffix = &json[insert_pos..];
+    let needs_comma = !prefix.trim_end().ends_with('{');
+    format!(
+        "{}{}\"{}\": \"{}\"{}",
+        prefix,
+        if needs_comma { ", " } else { " " },
+        key,
+        new_value,
+        suffix
+    )
+}
+
+fn upsert_json_bool_value(json: &str, key: &str, new_value: bool) -> String {
+    let replaced = replace_json_bool_value(json, key, new_value);
+    if replaced != json {
+        return replaced;
+    }
+    let insert_pos = match json.rfind('}') {
+        Some(p) => p,
+        None => return json.to_string(),
+    };
+    let prefix = &json[..insert_pos];
+    let suffix = &json[insert_pos..];
+    let needs_comma = !prefix.trim_end().ends_with('{');
+    format!(
+        "{}{}\"{}\": {}{}",
+        prefix,
+        if needs_comma { ", " } else { " " },
+        key,
+        if new_value { "true" } else { "false" },
+        suffix
+    )
+}
+
+fn update_wifi_object(json: &str, ssid: &str, password: &str, enabled: bool) -> Option<String> {
+    let (start, end) = find_object_range_by_key(json, "wifi")?;
+    let wifi_obj = &json[start..end];
+    let wifi_obj = upsert_json_string_value(wifi_obj, "ssid", ssid);
+    let wifi_obj = upsert_json_string_value(&wifi_obj, "password", password);
+    let wifi_obj = upsert_json_bool_value(&wifi_obj, "enabled", enabled);
+    let mut updated = String::with_capacity(json.len() + 64);
+    updated.push_str(&json[..start]);
+    updated.push_str(&wifi_obj);
+    updated.push_str(&json[end..]);
+    Some(updated)
+}
+
 /// Save WiFi credentials to system.json for auto-connect on boot.
 ///
 /// # Safety
@@ -824,10 +949,17 @@ pub unsafe extern "C" fn wifi_manager_save_credentials(
         }
     };
 
-    // Update the wifi section fields
-    let json = replace_json_string_value(&json, "ssid", ssid_str);
-    let json = replace_json_string_value(&json, "password", pass_str);
-    let json = replace_json_bool_value(&json, "enabled", true);
+    let json = match update_wifi_object(&json, ssid_str, pass_str, true) {
+        Some(updated) => updated,
+        None => {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"system.json missing wifi object\0".as_ptr(),
+            );
+            return ESP_ERR_NOT_FOUND;
+        }
+    };
 
     match std::fs::write(path, &json) {
         Ok(_) => {
@@ -955,6 +1087,7 @@ pub unsafe extern "C" fn wifi_manager_set_state(new_state: u32, ip: *const c_cha
             state.ip = [0u8; 16];
         }
     }
+    WIFI_STATE_CV.notify_all();
 
     if old_state != new_state {
         let event_type = match new_state {
@@ -1245,5 +1378,27 @@ mod tests {
         assert!(json.contains(r#""ssid": "TestNetwork""#));
         assert!(json.contains(r#""password": "secret123""#));
         assert!(json.contains(r#""enabled": true"#));
+    }
+
+    #[test]
+    fn test_update_wifi_object_scoped_to_wifi_block() {
+        let json = r#"{
+    "wifi": { "enabled": false, "ssid": "old", "password": "oldpw" },
+    "ap": { "ssid": "do-not-touch" }
+}"#;
+        let updated = update_wifi_object(json, "new-net", "new-pw", true).unwrap();
+        assert!(updated.contains(r#""wifi": { "enabled": true"#));
+        assert!(updated.contains(r#""ssid": "new-net""#));
+        assert!(updated.contains(r#""password": "new-pw""#));
+        assert!(updated.contains(r#""ap": { "ssid": "do-not-touch" }"#));
+    }
+
+    #[test]
+    fn test_update_wifi_object_upserts_missing_wifi_fields() {
+        let json = r#"{ "wifi": { } }"#;
+        let updated = update_wifi_object(json, "added-net", "added-pass", true).unwrap();
+        assert!(updated.contains(r#""ssid": "added-net""#));
+        assert!(updated.contains(r#""password": "added-pass""#));
+        assert!(updated.contains(r#""enabled": true"#));
     }
 }

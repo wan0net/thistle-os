@@ -18,6 +18,7 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "stdlib.h"
 #include "string.h"
 
 #include "hal/board.h"   /* hal_get_registry() / hal_registry_t */
@@ -223,6 +224,53 @@ static const msg_transport_driver_t s_sms_driver = {
 /* BLE relay transport (stub)                                           */
 /* ------------------------------------------------------------------ */
 
+/*
+ * BLE framing for messenger traffic:
+ *   M1|<sender>|<text>
+ * where <sender> is "Node-XXXXXXXX" and <text> is UTF-8 payload.
+ */
+#define BLE_MAX_TEXT 220
+
+static msg_rx_cb_t s_ble_rx_cb;
+static uint32_t    s_ble_device_id;
+
+static void ble_build_sender(char *out, size_t out_len)
+{
+    if (s_ble_device_id == 0) {
+        s_ble_device_id = (uint32_t)esp_timer_get_time() ^ 0xB1E01234;
+        if (s_ble_device_id == 0) s_ble_device_id = 0xB1E00001;
+    }
+    snprintf(out, out_len, "Node-%08X", (unsigned)s_ble_device_id);
+}
+
+static void ble_rx_handler(const uint8_t *data, size_t len, void *user_data)
+{
+    (void)user_data;
+    if (!s_ble_rx_cb || !data || len < 6) return;
+
+    char frame[BLE_MAX_TEXT + 48];
+    size_t copy_len = len < (sizeof(frame) - 1) ? len : (sizeof(frame) - 1);
+    memcpy(frame, data, copy_len);
+    frame[copy_len] = '\0';
+
+    if (strncmp(frame, "M1|", 3) != 0) return;
+
+    char *sender = frame + 3;
+    char *sep = strchr(sender, '|');
+    if (!sep) return;
+    *sep = '\0';
+
+    char *text = sep + 1;
+    if (text[0] == '\0') return;
+
+    if (strncmp(sender, "Node-", 5) == 0) {
+        unsigned long sender_id = strtoul(sender + 5, NULL, 16);
+        if ((uint32_t)sender_id == s_ble_device_id) return;
+    }
+
+    s_ble_rx_cb(MSG_TRANSPORT_BLE, sender, text);
+}
+
 static bool ble_is_available(void)
 {
     return (ble_manager_get_state() == BLE_STATE_CONNECTED);
@@ -232,36 +280,43 @@ static esp_err_t ble_send(const char *dest, const char *text)
 {
     (void)dest;
     if (!ble_is_available()) return ESP_ERR_NOT_SUPPORTED;
+    if (!text || text[0] == '\0') return ESP_ERR_INVALID_ARG;
 
-    /*
-     * TODO: define a framing protocol with the companion app.
-     * For now send the raw UTF-8 text so the phone can at least log it.
-     * ble_manager_send() takes a byte buffer; the companion must interpret
-     * the payload according to an agreed message schema.
-     */
-    ESP_LOGW(TAG, "BLE send: stub — companion protocol not yet defined");
-    size_t len = strlen(text);
-    esp_err_t err = ble_manager_send((const uint8_t *)text, len);
+    char sender[16];
+    ble_build_sender(sender, sizeof(sender));
+
+    size_t text_len = strlen(text);
+    if (text_len > BLE_MAX_TEXT) text_len = BLE_MAX_TEXT;
+
+    char frame[BLE_MAX_TEXT + 48];
+    int written = snprintf(frame, sizeof(frame), "M1|%s|%.*s",
+                           sender, (int)text_len, text);
+    if (written <= 0 || written >= (int)sizeof(frame)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t err = ble_manager_send((const uint8_t *)frame, (size_t)written);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ble_manager_send failed: %s", esp_err_to_name(err));
     }
-    return ESP_ERR_NOT_SUPPORTED;  /* still stub — no rx side yet */
+    return err;
 }
 
 static esp_err_t ble_start_receive(msg_rx_cb_t cb)
 {
-    (void)cb;
-    /*
-     * TODO: use ble_manager_register_rx_cb() and parse the companion
-     * framing to extract sender + text, then invoke cb().
-     */
-    ESP_LOGW(TAG, "BLE start_receive: not yet implemented");
-    return ESP_ERR_NOT_SUPPORTED;
+    if (!ble_is_available()) return ESP_ERR_NOT_SUPPORTED;
+    s_ble_rx_cb = cb;
+    esp_err_t err = ble_manager_register_rx_cb(ble_rx_handler, NULL);
+    if (err != ESP_OK) {
+        s_ble_rx_cb = NULL;
+    }
+    return err;
 }
 
 static void ble_stop_receive(void)
 {
-    /* TODO: deregister ble_manager rx callback */
+    s_ble_rx_cb = NULL;
+    ble_manager_register_rx_cb(NULL, NULL);
 }
 
 static const msg_transport_driver_t s_ble_driver = {
@@ -280,10 +335,7 @@ static const msg_transport_driver_t s_ble_driver = {
 
 static bool internet_is_available(void)
 {
-    /*
-     * TODO: check wifi_manager_is_connected() and that the HTTP/WebSocket
-     * endpoint is reachable.
-     */
+    /* Hidden until readiness/send/rx are implemented end-to-end. */
     return false;
 }
 

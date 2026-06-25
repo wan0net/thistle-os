@@ -25,6 +25,7 @@ static const char *TAG = "a7682e";
 #define A7682E_PWROFF_PULSE_MS    3000
 #define A7682E_BOOT_WAIT_MS       5000  ///< Wait after PWRKEY pulse for modem boot
 #define A7682E_PPP_TIMEOUT_S      30    ///< Seconds to wait for IP after PPP start
+#define A7682E_SMS_POLL_MS        3000
 
 /* Driver state ------------------------------------------------------------ */
 static struct {
@@ -37,7 +38,12 @@ static struct {
     a7682e_sms_cb_t  sms_cb;
     void            *sms_cb_data;
     bool             sms_initialized;
+    TaskHandle_t     sms_poll_task;
 } s_modem;
+
+static void sms_poll_task(void *arg);
+static void sms_poll_start_if_needed(void);
+static void sms_poll_stop(void);
 
 /* =========================================================================
  * Internal — PPP event handler
@@ -101,6 +107,8 @@ void drv_a7682e_deinit(void)
     if (!s_modem.initialized) {
         return;
     }
+
+    sms_poll_stop();
 
     if (s_modem.ppp_connected) {
         drv_a7682e_stop_ppp();
@@ -205,6 +213,7 @@ esp_err_t drv_a7682e_power(bool on)
         ESP_LOGI(TAG, "power-on: modem ready (esp_modem DCE created)");
 
     } else if (!on && s_modem.powered_on) {
+        sms_poll_stop();
         /* Power-off sequence:
          *   1. Stop PPP if active
          *   2. Destroy DCE (sends AT+CPOF internally if possible)
@@ -232,6 +241,63 @@ esp_err_t drv_a7682e_power(bool on)
     }
 
     return ESP_OK;
+}
+
+static void sms_poll_task(void *arg)
+{
+    (void)arg;
+
+    while (true) {
+        if (!s_modem.sms_cb || !s_modem.sms_initialized || !s_modem.powered_on || !s_modem.dce) {
+            vTaskDelay(pdMS_TO_TICKS(A7682E_SMS_POLL_MS));
+            continue;
+        }
+
+        bool ppp_was_active = s_modem.ppp_connected;
+        if (ppp_was_active) {
+            esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
+        }
+
+        char resp[768] = {0};
+        if (esp_modem_at(s_modem.dce, "AT+CMGL=\"REC UNREAD\"", resp, 5000) == ESP_OK) {
+            const char *p = resp;
+            while ((p = strstr(p, "+CMGL:")) != NULL) {
+                int index = 0;
+                if (sscanf(p, "+CMGL: %d", &index) == 1 && index > 0 && s_modem.sms_cb) {
+                    s_modem.sms_cb(index, s_modem.sms_cb_data);
+                }
+                p += 6;
+            }
+        }
+
+        if (ppp_was_active) {
+            esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(A7682E_SMS_POLL_MS));
+    }
+}
+
+static void sms_poll_start_if_needed(void)
+{
+    if (!s_modem.sms_cb || !s_modem.sms_initialized || !s_modem.powered_on || !s_modem.dce) {
+        return;
+    }
+    if (s_modem.sms_poll_task) {
+        return;
+    }
+    if (xTaskCreate(sms_poll_task, "a7682e_sms", 4096, NULL, 4, &s_modem.sms_poll_task) != pdPASS) {
+        s_modem.sms_poll_task = NULL;
+        ESP_LOGW(TAG, "sms poll task create failed");
+    }
+}
+
+static void sms_poll_stop(void)
+{
+    if (s_modem.sms_poll_task) {
+        vTaskDelete(s_modem.sms_poll_task);
+        s_modem.sms_poll_task = NULL;
+    }
 }
 
 /* =========================================================================
@@ -474,6 +540,7 @@ esp_err_t drv_a7682e_sms_init(void)
 
     s_modem.sms_initialized = true;
     ESP_LOGI(TAG, "sms_init: SMS subsystem ready");
+    sms_poll_start_if_needed();
 
 restore:
     if (ppp_was_active) {
@@ -646,11 +713,11 @@ void drv_a7682e_register_sms_cb(a7682e_sms_cb_t cb, void *user_data)
 {
     s_modem.sms_cb      = cb;
     s_modem.sms_cb_data = user_data;
-    /* TODO: Wire s_modem.sms_cb into an esp_modem URC handler once the
-     * esp_modem library exposes a URC registration API.  The handler should
-     * parse "+CMTI: \"ME\",<index>" lines and invoke sms_cb(index, sms_cb_data).
-     * For now, callers can poll AT+CMGL="ALL" or use AT+CNMI URCs read via a
-     * dedicated UART receive task. */
+    if (cb) {
+        sms_poll_start_if_needed();
+    } else {
+        sms_poll_stop();
+    }
     ESP_LOGD(TAG, "register_sms_cb: callback %s",
              cb ? "registered" : "unregistered");
 }
