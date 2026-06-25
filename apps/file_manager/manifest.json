@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.filemgr",
+  "name": "Files",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["storage.read", "storage.write"]
+}

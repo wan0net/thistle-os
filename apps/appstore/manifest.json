@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.appstore",
+  "name": "App Store",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["network", "storage.write", "ota"]
+}

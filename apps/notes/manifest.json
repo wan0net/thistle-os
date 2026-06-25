@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.notes",
+  "name": "Notes",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": []
+}

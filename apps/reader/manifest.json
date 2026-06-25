@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.reader",
+  "name": "Reader",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": []
+}
