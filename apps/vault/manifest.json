@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.vault",
+  "name": "Vault",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["storage.read", "storage.write"]
+}

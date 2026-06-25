@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.navigator",
+  "name": "Navigator",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["gps"]
+}

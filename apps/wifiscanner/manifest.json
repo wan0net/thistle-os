@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.wifiscanner",
+  "name": "WiFi Scanner",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["wifi.scan"]
+}

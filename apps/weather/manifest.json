@@ -1,0 +1,7 @@
+{
+  "id": "com.thistle.weather",
+  "name": "Weather",
+  "version": "0.1.0",
+  "allow_background": false,
+  "permissions": ["gps", "network"]
+}

@@ -68,3 +68,31 @@ __attribute__((weak)) int adc_cali_delete_scheme_curve_fitting(void *handle) {
 int __attribute__((weak)) lstat(const char *path, struct stat *buf) {
     return stat(path, buf);
 }
+
+// Driver reload lifecycle hook stubs — platform-specific implementations can
+// override these symbols to provide real unload/start/stop and HAL
+// deregister/re-register behavior during hot reload.
+int __attribute__((weak)) thistle_driver_reload_unload(uint32_t driver_id) {
+    (void)driver_id;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+int __attribute__((weak)) thistle_driver_reload_start(uint8_t hal_type) {
+    (void)hal_type;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+int __attribute__((weak)) thistle_driver_reload_stop(uint8_t hal_type) {
+    (void)hal_type;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+int __attribute__((weak)) thistle_driver_reload_hal_pre_reload(uint8_t hal_type) {
+    (void)hal_type;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+int __attribute__((weak)) thistle_driver_reload_hal_post_reload(uint8_t hal_type) {
+    (void)hal_type;
+    return ESP_ERR_NOT_SUPPORTED;
+}

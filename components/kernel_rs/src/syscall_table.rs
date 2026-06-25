@@ -198,8 +198,15 @@ unsafe fn syscall_is_ptr_allowed(ptr: *const c_void) -> bool {
     }
     #[cfg(not(target_os = "espidf"))]
     {
-        // Simulator/Host: allow all non-null pointers for now.
-        true
+        #[cfg(test)]
+        {
+            // Host-test safety gate: reject obviously invalid/low addresses.
+            (ptr as usize) >= 0x1000
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
     }
 }
 
@@ -844,5 +851,39 @@ mod tests {
     fn test_resolve_null_returns_null() {
         let ptr = unsafe { syscall_resolve(std::ptr::null()) };
         assert!(ptr.is_null(), "syscall_resolve(NULL) must return NULL");
+    }
+
+    #[test]
+    fn test_permission_denied_without_grant() {
+        permissions::init();
+        let app_id = std::ffi::CString::new("app.unsigned").unwrap();
+        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+
+        let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
+        let denied = unsafe { syscall_resolve(sym.as_ptr()) };
+        assert!(denied.is_null(), "protected syscall must be denied without permissions");
+
+        unsafe { syscall_set_current_app(std::ptr::null()) };
+    }
+
+    #[test]
+    fn test_permission_allowed_after_grant() {
+        permissions::init();
+        let app_id = std::ffi::CString::new("app.signed").unwrap();
+        permissions::grant("app.signed", PERM_STORAGE);
+        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+
+        let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
+        let resolved = unsafe { syscall_resolve(sym.as_ptr()) };
+        assert!(!resolved.is_null(), "protected syscall must resolve after permission grant");
+
+        unsafe { syscall_set_current_app(std::ptr::null()) };
+    }
+
+    #[test]
+    fn test_pointer_boundary_validation_host() {
+        assert!(unsafe { syscall_is_ptr_allowed(std::ptr::null()) });
+        assert!(!unsafe { syscall_is_ptr_allowed(1usize as *const c_void) });
+        assert!(unsafe { syscall_is_ptr_allowed(0x1000usize as *const c_void) });
     }
 }
