@@ -10,7 +10,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
 curve25519-dalek = { version = "4", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 hmac = { version = "0.13", default-features = false }
