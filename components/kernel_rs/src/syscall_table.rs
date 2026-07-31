@@ -170,8 +170,8 @@ extern "C" {
     fn hal_set_board_name(name: *const c_char);
 
     // HAL bus
-    fn hal_bus_register_spi(bus: *const c_void) -> i32;
-    fn hal_bus_register_i2c(bus: *const c_void) -> i32;
+    fn hal_bus_register_spi(host_id: i32, bus_handle: *mut c_void) -> i32;
+    fn hal_bus_register_i2c(port: i32, bus_handle: *mut c_void) -> i32;
     fn hal_bus_get_spi(id: u32) -> *const c_void;
     fn hal_bus_get_i2c(id: u32) -> *const c_void;
 
@@ -631,8 +631,8 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("hal_audio_register",            hal_audio_register                  as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
     entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
-    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(i32, *mut c_void) -> i32),
     entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
     entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
@@ -742,8 +742,8 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("hal_audio_register",            hal_audio_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("hal_bus_get_i2c",               hal_bus_get_i2c                     as unsafe extern "C" fn(u32) -> *const c_void),
     entry!("hal_bus_get_spi",               hal_bus_get_spi                     as unsafe extern "C" fn(u32) -> *const c_void),
-    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(*const c_void) -> i32),
-    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(*const c_void) -> i32),
+    entry!("hal_bus_register_i2c",          hal_bus_register_i2c                as unsafe extern "C" fn(i32, *mut c_void) -> i32),
+    entry!("hal_bus_register_spi",          hal_bus_register_spi                as unsafe extern "C" fn(i32, *mut c_void) -> i32),
     entry!("hal_display_register",          hal_display_register                as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
     entry!("hal_get_registry",              hal_get_registry                    as unsafe extern "C" fn() -> *const c_void),
     entry!("hal_gps_register",              hal_gps_register                    as unsafe extern "C" fn(*const c_void, *const c_void) -> i32),
@@ -1012,6 +1012,34 @@ mod tests {
         }
 
         unsafe { syscall_set_current_app(std::ptr::null()) };
+    }
+
+    #[test]
+    fn test_driver_bus_registration_call_through_matches_public_abi() {
+        *crate::hal_registry::registry_mut() = crate::hal_registry::HalRegistry::new();
+        let mut spi_handle = 0x1234_u32;
+        let mut i2c_handle = 0x5678_u32;
+
+        for (name, bus_id, handle) in [
+            ("hal_bus_register_spi", 7, &mut spi_handle as *mut u32 as *mut c_void),
+            ("hal_bus_register_i2c", 3, &mut i2c_handle as *mut u32 as *mut c_void),
+        ] {
+            let c_name = std::ffi::CString::new(name).unwrap();
+            let address = unsafe { syscall_resolve(c_name.as_ptr()) };
+            assert!(!address.is_null(), "driver resolver lost {name}");
+            let register: unsafe extern "C" fn(i32, *mut c_void) -> i32 =
+                unsafe { std::mem::transmute(address) };
+            assert_eq!(unsafe { register(bus_id, handle) }, ESP_OK);
+        }
+
+        assert_eq!(
+            crate::hal_registry::hal_bus_get_spi(0),
+            &mut spi_handle as *mut u32 as *mut c_void
+        );
+        assert_eq!(
+            crate::hal_registry::hal_bus_get_i2c(0),
+            &mut i2c_handle as *mut u32 as *mut c_void
+        );
     }
 
     #[test]
