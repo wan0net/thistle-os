@@ -76,6 +76,11 @@ jobs:
             -o /tmp/test_assistant_request
           /tmp/test_assistant_request
 
+      - name: Test secure signing-key generation
+        run: |
+          python3 -m pip install -r tools/requirements.txt
+          python3 tools/test_sign.py
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest
