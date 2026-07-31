@@ -2,6 +2,7 @@
 // ThistleOS — Simcom A7682E 4G LTE modem driver (esp_modem backend)
 
 #include "drv_modem_a7682e.h"
+#include "a7682e_sms_validation.h"
 
 #include "esp_modem_api.h"
 #include "esp_modem_config.h"
@@ -551,15 +552,9 @@ restore:
 
 esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg)
 {
-    if (!phone || !msg) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (strlen(phone) >= 32) {
-        ESP_LOGE(TAG, "send_sms: phone number too long (max 31 chars)");
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (strlen(msg) > 160) {
-        ESP_LOGE(TAG, "send_sms: message too long (max 160 chars for GSM 7-bit)");
+    if (!a7682e_sms_phone_is_valid(phone)
+        || !a7682e_sms_message_is_valid(msg)) {
+        ESP_LOGE(TAG, "send_sms: rejected unsafe recipient or message text");
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_modem.dce || !s_modem.powered_on) {
@@ -572,27 +567,26 @@ esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg)
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
     }
 
-    char resp[128] = {0};
-
     /* Ensure text mode is active before sending */
-    esp_modem_at(s_modem.dce, "AT+CMGF=1", resp, 2000);
-
-    /* Build combined AT+CMGS command with message body and Ctrl+Z terminator.
-     * The esp_modem AT handler passes the full string to the modem;
-     * the embedded \r triggers the ">" prompt and the modem reads the text
-     * up to the Ctrl+Z (0x1A) as the message body. */
-    char cmd[320] = {0};
-    snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"\r%s\x1A", phone, msg);
-
-    ESP_LOGI(TAG, "send_sms: sending to %s", phone);
-    esp_err_t ret = esp_modem_at(s_modem.dce, cmd, resp, 15000);
+    esp_err_t ret = esp_modem_sms_txt_mode(s_modem.dce, true);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "send_sms: failed (%s), resp: %s",
-                 esp_err_to_name(ret), resp);
-    } else {
-        ESP_LOGI(TAG, "send_sms: sent successfully, resp: %s", resp);
+        ESP_LOGE(TAG, "send_sms: failed to enable text mode: %s",
+                 esp_err_to_name(ret));
+        goto restore;
     }
 
+    ESP_LOGI(TAG, "send_sms: sending to %s", phone);
+    /* esp_modem_send_sms performs the prompt-aware two-stage exchange: it
+     * submits the validated recipient command, waits for the CMGS prompt, and
+     * only then transmits the validated message body and terminator. */
+    ret = esp_modem_send_sms(s_modem.dce, phone, msg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "send_sms: failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "send_sms: sent successfully");
+    }
+
+restore:
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
     }

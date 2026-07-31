@@ -54,6 +54,18 @@ jobs:
           echo "Total test cases (approximate):"
           grep -r "TEST_CASE" components/test_thistle/ | wc -l
 
+      - name: Test SMS command framing validation
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/drv_modem_a7682e/include \
+            components/drv_modem_a7682e/tests/test_sms_validation.c \
+            -o /tmp/test_sms_validation
+          /tmp/test_sms_validation
+          grep -q "esp_modem_send_sms" \
+            components/drv_modem_a7682e/src/drv_modem_a7682e.c
+          ! grep -Eq 'AT\\+CMGS=.*msg|AT\\+CMGS=.*\\\\r' \
+            components/drv_modem_a7682e/src/drv_modem_a7682e.c
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

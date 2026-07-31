@@ -199,9 +199,9 @@ esp_err_t drv_a7682e_sms_init(void);
  * Temporarily switches to command mode if PPP is active, sends the message,
  * then restores PPP if it was active.
  *
- * @param phone  Destination phone number (E.164 format, e.g. "+15551234567").
- * @param msg    Message text (max 160 chars for GSM 7-bit encoding).
- * @return ESP_OK on success, ESP_ERR_INVALID_ARG if phone/msg is NULL,
+ * @param phone  Destination number: optional leading '+', then digits only.
+ * @param msg    Message text (max 160 chars; controls and quotes rejected).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if either field is unsafe,
  *         ESP_ERR_INVALID_STATE if modem is off.
  */
 esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg);
