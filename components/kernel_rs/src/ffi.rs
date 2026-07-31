@@ -193,9 +193,10 @@ pub extern "C" fn kernel_version() -> *const c_char {
 
 #[cfg(test)]
 mod tests {
-    use super::{manifest_parse_file, CManifest, ESP_OK};
+    use super::{copy_to_buf, manifest_parse_file, CManifest, ESP_OK};
     use std::ffi::{CStr, CString};
     use std::mem::{align_of, offset_of, size_of, MaybeUninit};
+    use std::process::Command;
 
     #[test]
     fn c_manifest_layout_matches_public_c_abi() {
@@ -208,6 +209,100 @@ mod tests {
         assert_eq!(offset_of!(CManifest, min_memory_kb), 444);
         assert_eq!(offset_of!(CManifest, hal_interface), 448);
         assert_eq!(offset_of!(CManifest, changelog), 464);
+    }
+
+    #[test]
+    fn c_manifest_round_trips_through_c_fixture() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo_dir = manifest_dir.join("../..");
+        let fixture = manifest_dir.join("tests/manifest_abi_fixture.c");
+        let test_dir = std::env::temp_dir().join(format!(
+            "thistle-manifest-abi-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&test_dir).expect("create ABI fixture directory");
+        let executable = test_dir.join("manifest_abi_fixture");
+        let binary = test_dir.join("manifest.bin");
+        let compiler = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+
+        let compile = Command::new(compiler)
+            .arg("-std=c11")
+            .arg("-Wall")
+            .arg("-Wextra")
+            .arg("-Werror")
+            .arg("-I")
+            .arg(repo_dir.join("simulator/platform"))
+            .arg("-I")
+            .arg(repo_dir.join("components/kernel/include"))
+            .arg(&fixture)
+            .arg("-o")
+            .arg(&executable)
+            .status()
+            .expect("compile C ABI fixture");
+        assert!(compile.success(), "C ABI fixture must compile");
+
+        let write = Command::new(&executable)
+            .arg("write")
+            .arg(&binary)
+            .status()
+            .expect("run C manifest writer");
+        assert!(write.success(), "C fixture must write its manifest");
+
+        let bytes = std::fs::read(&binary).expect("read C manifest bytes");
+        assert_eq!(bytes.len(), size_of::<CManifest>());
+        let mut from_c = MaybeUninit::<CManifest>::uninit();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                from_c.as_mut_ptr().cast::<u8>(),
+                bytes.len(),
+            );
+        }
+        let from_c = unsafe { from_c.assume_init() };
+        assert_eq!(from_c.manifest_type, 1);
+        assert_eq!(
+            unsafe { CStr::from_ptr(from_c.id.as_ptr().cast()) }.to_bytes(),
+            b"com.thistle.abi-fixture"
+        );
+        assert_eq!(from_c.permissions, 0xA5A5_5A5A);
+        assert!(from_c.background);
+        assert_eq!(from_c.min_memory_kb, 65_536);
+
+        let mut from_rust: CManifest = unsafe { std::mem::zeroed() };
+        from_rust.manifest_type = 1;
+        copy_to_buf("com.thistle.abi-fixture", &mut from_rust.id);
+        copy_to_buf("ABI Fixture", &mut from_rust.name);
+        copy_to_buf("1.2.3", &mut from_rust.version);
+        copy_to_buf("esp32s3", &mut from_rust.arch);
+        copy_to_buf("abi-fixture.drv.elf", &mut from_rust.entry);
+        from_rust.permissions = 0xA5A5_5A5A;
+        from_rust.background = true;
+        from_rust.min_memory_kb = 65_536;
+        copy_to_buf("display", &mut from_rust.hal_interface);
+        copy_to_buf("C and Rust agree", &mut from_rust.changelog);
+        let rust_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&from_rust as *const CManifest).cast::<u8>(),
+                size_of::<CManifest>(),
+            )
+        };
+        std::fs::write(&binary, rust_bytes).expect("write Rust manifest bytes");
+
+        let check = Command::new(&executable)
+            .arg("check")
+            .arg(&binary)
+            .status()
+            .expect("run C manifest checker");
+        assert!(
+            check.success(),
+            "C fixture must accept Rust manifest fields"
+        );
+
+        let _ = std::fs::remove_dir_all(test_dir);
     }
 
     #[test]
