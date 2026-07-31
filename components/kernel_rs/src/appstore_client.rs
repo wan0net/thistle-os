@@ -180,6 +180,37 @@ const CATALOG_TYPE_FIRMWARE: u32 = 1;
 const CATALOG_TYPE_DRIVER:   u32 = 2;
 const CATALOG_TYPE_WM:       u32 = 3;
 
+fn validated_catalog_id(id: &[u8; 64]) -> Result<&str, i32> {
+    let length = id.iter().position(|&byte| byte == 0).ok_or(ESP_ERR_INVALID_ARG)?;
+    let value = std::str::from_utf8(&id[..length]).map_err(|_| ESP_ERR_INVALID_ARG)?;
+
+    if value.is_empty()
+        || value.contains("..")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.'
+        })
+    {
+        return Err(ESP_ERR_INVALID_ARG);
+    }
+    Ok(value)
+}
+
+fn install_destination(entry_type: u32, id: &str) -> Result<std::path::PathBuf, i32> {
+    let (root, file_name) = match entry_type {
+        CATALOG_TYPE_FIRMWARE => ("/sdcard/update", "thistle_os.bin".to_string()),
+        CATALOG_TYPE_DRIVER => ("/sdcard/drivers", format!("{id}.drv.elf")),
+        CATALOG_TYPE_WM => ("/sdcard/wm", format!("{id}.wm.elf")),
+        _ => ("/sdcard/apps", format!("{id}.app.elf")),
+    };
+
+    let root = std::path::Path::new(root);
+    let destination = root.join(file_name);
+    if destination.parent() != Some(root) || !destination.starts_with(root) {
+        return Err(ESP_ERR_INVALID_ARG);
+    }
+    Ok(destination)
+}
+
 // Progress callback type
 pub type DownloadProgressCb =
     unsafe extern "C" fn(downloaded: u32, total: u32, user_data: *mut c_void);
@@ -880,27 +911,33 @@ pub unsafe extern "C" fn appstore_install_entry(
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Determine destination directory and extension
-    let (dir, ext) = match e.entry_type {
-        CATALOG_TYPE_FIRMWARE => ("/sdcard/update",   ".bin"),
-        CATALOG_TYPE_DRIVER   => ("/sdcard/drivers",  ".drv.elf"),
-        CATALOG_TYPE_WM       => ("/sdcard/wm",       ".wm.elf"),
-        _                     => ("/sdcard/apps",     ".app.elf"),
+    let id_str = match validated_catalog_id(&e.id) {
+        Ok(id) => id,
+        Err(error) => return error,
     };
+    let destination = match install_destination(e.entry_type, id_str) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
+    let dir = destination.parent().expect("validated destination has a parent");
 
     // Ensure destination directory exists
     let _ = std::fs::create_dir_all(dir);
 
-    // Build destination path
-    let id_str = CStr::from_ptr(e.id.as_ptr() as *const c_char)
-        .to_str()
-        .unwrap_or("unknown");
-
-    let dest_path = if e.entry_type == CATALOG_TYPE_FIRMWARE {
-        format!("{}/thistle_os.bin", dir)
-    } else {
-        format!("{}/{}{}", dir, id_str, ext)
+    // Re-check the existing parent after filesystem resolution. This rejects
+    // a type-specific root redirected through a symlink or mount alias.
+    let canonical_root = match std::fs::canonicalize(dir) {
+        Ok(path) => path,
+        Err(_) => return ESP_FAIL,
     };
+    let canonical_parent = match destination.parent().and_then(|path| std::fs::canonicalize(path).ok()) {
+        Some(path) => path,
+        None => return ESP_FAIL,
+    };
+    if canonical_parent != canonical_root {
+        return ESP_ERR_INVALID_ARG;
+    }
+    let dest_path = destination.to_string_lossy().into_owned();
 
     let dest_cstr = match std::ffi::CString::new(dest_path.as_str()) {
         Ok(c) => c,
@@ -968,6 +1005,14 @@ pub unsafe extern "C" fn appstore_install_entry(
     _user_data: *mut c_void,
 ) -> i32 {
     if entry.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+    let e = &*entry;
+    let id = match validated_catalog_id(&e.id) {
+        Ok(id) => id,
+        Err(error) => return error,
+    };
+    if install_destination(e.entry_type, id).is_err() {
         return ESP_ERR_INVALID_ARG;
     }
     ESP_ERR_NOT_SUPPORTED
@@ -1466,6 +1511,54 @@ mod tests {
         assert!(!source.contains(concat!("struct EspHttpClient", "Event")));
         assert!(!source.contains(concat!("_pad:", " [u8;")));
         assert!(source.contains("thistle_http_client_init"));
+    }
+
+    #[test]
+    fn test_catalog_id_rejects_traversal_and_unsafe_components() {
+        for invalid in ["", "..", "../wm/target", "safe..target", "/absolute", "a/b", "a\\b", "C:target", "bad\nname"] {
+            let mut id = [0u8; 64];
+            copy_str_to_buf(invalid, &mut id);
+            assert_eq!(validated_catalog_id(&id), Err(ESP_ERR_INVALID_ARG), "accepted {invalid:?}");
+        }
+
+        let unterminated = [b'a'; 64];
+        assert_eq!(validated_catalog_id(&unterminated), Err(ESP_ERR_INVALID_ARG));
+    }
+
+    #[test]
+    fn test_catalog_id_accepts_strict_identifiers() {
+        for valid in ["weather", "com.thistle.weather", "driver_sx1262", "wm-dark-2"] {
+            let mut id = [0u8; 64];
+            copy_str_to_buf(valid, &mut id);
+            assert_eq!(validated_catalog_id(&id), Ok(valid));
+        }
+    }
+
+    #[test]
+    fn test_install_destinations_stay_in_type_specific_roots() {
+        for (entry_type, expected) in [
+            (CATALOG_TYPE_APP, "/sdcard/apps/safe.app.elf"),
+            (CATALOG_TYPE_DRIVER, "/sdcard/drivers/safe.drv.elf"),
+            (CATALOG_TYPE_WM, "/sdcard/wm/safe.wm.elf"),
+            (CATALOG_TYPE_FIRMWARE, "/sdcard/update/thistle_os.bin"),
+        ] {
+            assert_eq!(
+                install_destination(entry_type, "safe").unwrap(),
+                std::path::PathBuf::from(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn test_install_rejects_invalid_id_before_http_or_filesystem_work() {
+        let mut entry = CatalogEntry::default();
+        copy_str_to_buf("../../config/system", &mut entry.id);
+        copy_str_to_buf("https://example.invalid/app.elf", &mut entry.url);
+
+        assert_eq!(
+            unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
+            ESP_ERR_INVALID_ARG
+        );
     }
 
     // -----------------------------------------------------------------------
