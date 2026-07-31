@@ -54,6 +54,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_app.c
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_ui.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_app.c
+    ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_request.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_ui.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_app.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_ui.c

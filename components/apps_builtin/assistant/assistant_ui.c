@@ -18,10 +18,13 @@
  * on app pause and loaded on app create.
  */
 #include "assistant/assistant_app.h"
+#include "assistant/assistant_request.h"
 
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -388,48 +391,26 @@ static esp_err_t call_claude_api(const assistant_config_t *cfg,
      * Build JSON request body.
      * Include up to the last 6 messages for conversation context.
      * ------------------------------------------------------------------ */
-    char body[2048];
-    int pos = 0;
-
-    pos += snprintf(body + pos, sizeof(body) - pos,
-        "{\"model\":\"%s\",\"max_tokens\":512,\"system\":\"%s\",\"messages\":[",
-        cfg->model, cfg->system_prompt);
-
     int start = (s_ai.msg_count > 6) ? s_ai.msg_count - 6 : 0;
+    assistant_request_message_t history[6];
+    size_t history_count = 0;
     for (int i = start; i < s_ai.msg_count; i++) {
         int idx = i % MAX_MESSAGES;
-        const char *role = s_ai.messages[idx].is_user ? "user" : "assistant";
-        if (i > start) pos += snprintf(body + pos, sizeof(body) - pos, ",");
-
-        /* Inline-escape the message text: " → \", \ → \\, newline → \n */
-        char escaped[MAX_MSG_TEXT * 2];
-        size_t ep = 0;
-        for (const char *c = s_ai.messages[idx].text; *c && ep + 3 < sizeof(escaped); c++) {
-            if (*c == '"')       { escaped[ep++] = '\\'; escaped[ep++] = '"';  }
-            else if (*c == '\\') { escaped[ep++] = '\\'; escaped[ep++] = '\\'; }
-            else if (*c == '\n') { escaped[ep++] = '\\'; escaped[ep++] = 'n';  }
-            else                 { escaped[ep++] = *c; }
-        }
-        escaped[ep] = '\0';
-
-        pos += snprintf(body + pos, sizeof(body) - pos,
-            "{\"role\":\"%s\",\"content\":\"%s\"}", role, escaped);
+        history[history_count].role =
+            s_ai.messages[idx].is_user ? "user" : "assistant";
+        history[history_count].content = s_ai.messages[idx].text;
+        history_count++;
     }
 
-    /* Current user message — also escaped */
-    char escaped_msg[MAX_MSG_TEXT * 2];
-    size_t ep = 0;
-    for (const char *c = user_msg; *c && ep + 3 < sizeof(escaped_msg); c++) {
-        if (*c == '"')       { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = '"';  }
-        else if (*c == '\\') { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = '\\'; }
-        else if (*c == '\n') { escaped_msg[ep++] = '\\'; escaped_msg[ep++] = 'n';  }
-        else                 { escaped_msg[ep++] = *c; }
+    size_t body_len = 0;
+    char *body = assistant_request_build(
+        cfg->model, cfg->system_prompt, history, history_count, user_msg,
+        &body_len);
+    if (!body || body_len > INT_MAX) {
+        free(body);
+        ESP_LOGE(TAG, "Failed to build bounded assistant request");
+        return ESP_ERR_NO_MEM;
     }
-    escaped_msg[ep] = '\0';
-
-    if (s_ai.msg_count > start) pos += snprintf(body + pos, sizeof(body) - pos, ",");
-    pos += snprintf(body + pos, sizeof(body) - pos,
-        "{\"role\":\"user\",\"content\":\"%s\"}]}", escaped_msg);
 
     /* ------------------------------------------------------------------
      * HTTP POST
@@ -447,6 +428,7 @@ static esp_err_t call_claude_api(const assistant_config_t *cfg,
 
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (!client) {
+        free(body);
         ESP_LOGE(TAG, "Failed to init HTTP client");
         return ESP_FAIL;
     }
@@ -455,9 +437,17 @@ static esp_err_t call_claude_api(const assistant_config_t *cfg,
     esp_http_client_set_header(client, "x-api-key",           cfg->api_key);
     esp_http_client_set_header(client, "anthropic-version",   "2023-06-01");
     esp_http_client_set_header(client, "content-type",        "application/json");
-    esp_http_client_set_post_field(client, body, (int)strlen(body));
+    esp_err_t post_err = esp_http_client_set_post_field(client, body,
+                                                         (int)body_len);
+    if (post_err != ESP_OK) {
+        free(body);
+        esp_http_client_cleanup(client);
+        ESP_LOGE(TAG, "Failed to set assistant request body");
+        return post_err;
+    }
 
     esp_err_t err = esp_http_client_perform(client);
+    free(body);
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
 

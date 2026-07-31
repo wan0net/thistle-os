@@ -8,6 +8,7 @@ idf_component_register(
         "messenger/messenger_transport.c"
         "messenger/messenger_ui.c"
         "assistant/assistant_app.c"
+        "assistant/assistant_request.c"
         "assistant/assistant_ui.c"
         "terminal/terminal_app.c"
         "terminal/terminal_ui.c"
