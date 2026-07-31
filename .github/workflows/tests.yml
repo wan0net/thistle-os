@@ -66,6 +66,16 @@ jobs:
           ! grep -Eq 'AT\\+CMGS=.*msg|AT\\+CMGS=.*\\\\r' \
             components/drv_modem_a7682e/src/drv_modem_a7682e.c
 
+      - name: Test assistant request bounds under sanitizers
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Icomponents/apps_builtin/assistant \
+            components/apps_builtin/assistant/assistant_request.c \
+            components/apps_builtin/assistant/tests/test_assistant_request.c \
+            -o /tmp/test_assistant_request
+          /tmp/test_assistant_request
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest
