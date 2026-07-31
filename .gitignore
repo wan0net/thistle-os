@@ -19,6 +19,7 @@ managed_components/
 .cache/
 
 # Signing keys (NEVER commit private keys)
+private.key
 *_private.key
 tools/*_private.key
 

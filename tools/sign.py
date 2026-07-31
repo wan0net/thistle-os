@@ -2,6 +2,8 @@
 """ThistleOS Ed25519 signing tool for apps, drivers, and firmware."""
 
 import argparse
+import os
+from pathlib import Path
 import sys
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -11,19 +13,51 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.exceptions import InvalidSignature
 
 
+PRIVATE_KEY_PATH = Path("private.key")
+PUBLIC_KEY_PATH = Path("public.key")
+
+
+def _require_absent(path):
+    """Reject files, directories, and symlinks before generating key material."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    raise FileExistsError(f"refusing to overwrite existing path: {path}")
+
+
+def _write_new_file(path, data, mode):
+    """Create a new regular file without following or replacing existing paths."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, mode)
+    try:
+        # os.open applies the process umask. Force the intended final mode on
+        # the already-open descriptor before writing any sensitive bytes.
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb", closefd=True) as output:
+            descriptor = -1
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def cmd_keygen(args):
+    _require_absent(PRIVATE_KEY_PATH)
+    _require_absent(PUBLIC_KEY_PATH)
+
     private_key = Ed25519PrivateKey.generate()
     private_bytes = private_key.private_bytes_raw()
     public_bytes = private_key.public_key().public_bytes_raw()
 
-    with open("private.key", "wb") as f:
-        f.write(private_bytes)
+    _write_new_file(PRIVATE_KEY_PATH, private_bytes, 0o600)
+    _write_new_file(PUBLIC_KEY_PATH, public_bytes, 0o644)
 
-    with open("public.key", "wb") as f:
-        f.write(public_bytes)
-
-    print(f"Private key written to: private.key")
-    print(f"Public key written to:  public.key")
+    print("Private key written to: private.key")
+    print("Public key written to:  public.key")
     print(f"Public key (hex): {public_bytes.hex()}")
 
 
@@ -86,12 +120,16 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "keygen":
-        cmd_keygen(args)
-    elif args.command == "sign":
-        cmd_sign(args)
-    elif args.command == "verify":
-        cmd_verify(args)
+    try:
+        if args.command == "keygen":
+            cmd_keygen(args)
+        elif args.command == "sign":
+            cmd_sign(args)
+        elif args.command == "verify":
+            cmd_verify(args)
+    except OSError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
