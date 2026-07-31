@@ -40,8 +40,6 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/launcher/launcher_ui.c
     ${THISTLE_DIR}/components/apps_builtin/settings/settings_app.c
     ${THISTLE_DIR}/components/apps_builtin/settings/settings_ui.c
-    ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_app.c
-    ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_ui.c
     ${THISTLE_DIR}/components/apps_builtin/reader/reader_app.c
     ${THISTLE_DIR}/components/apps_builtin/reader/reader_ui.c
     ${THISTLE_DIR}/components/apps_builtin/messenger/messenger_app.c
@@ -66,6 +64,53 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_app.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_ui.c
 )
+
+# The simulator unit-test target is independent from optional built-in apps.
+# Keep CMake configuration valid when an app source is not present so CI can
+# still build and execute thistle_sim_tests.
+if(EXISTS "${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_app.c")
+    set(THISTLE_HAVE_FILEMGR 1)
+    list(APPEND THISTLE_SRCS
+        ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_app.c
+        ${THISTLE_DIR}/components/apps_builtin/file_manager/filemgr_ui.c
+    )
+else()
+    set(THISTLE_HAVE_FILEMGR 0)
+endif()
+
+function(thistle_set_optional_app_flag flag source)
+    if(EXISTS "${THISTLE_DIR}/${source}")
+        set(${flag} 1 PARENT_SCOPE)
+    else()
+        set(${flag} 0 PARENT_SCOPE)
+    endif()
+endfunction()
+
+thistle_set_optional_app_flag(THISTLE_HAVE_READER
+    "components/apps_builtin/reader/reader_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_NAVIGATOR
+    "components/apps_builtin/navigator/navigator_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_NOTES
+    "components/apps_builtin/notes/notes_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_APPSTORE
+    "components/apps_builtin/appstore/appstore_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_WIFISCANNER
+    "components/apps_builtin/wifiscanner/wifiscanner_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_FLASHLIGHT
+    "components/apps_builtin/flashlight/flashlight_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_WEATHER
+    "components/apps_builtin/weather/weather_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_VAULT
+    "components/apps_builtin/vault/vault_app.c")
+
+set(THISTLE_SIM_SRCS)
+foreach(source IN LISTS THISTLE_SRCS)
+    if(EXISTS "${source}")
+        list(APPEND THISTLE_SIM_SRCS "${source}")
+    else()
+        message(STATUS "Skipping unavailable simulator app source: ${source}")
+    endif()
+endforeach()
 
 # Simulator sources
 set(SIM_SRCS
@@ -96,7 +141,7 @@ set(SIM_SRCS
     sim_assert.c
 )
 
-add_executable(thistle_sim ${SIM_SRCS} ${THISTLE_SRCS} ${LVGL_SRCS})
+add_executable(thistle_sim ${SIM_SRCS} ${THISTLE_SIM_SRCS} ${LVGL_SRCS})
 
 # Include paths — simulator platform stubs MUST come before any ThistleOS includes
 # so that #include "esp_log.h" finds our stub, not a real ESP-IDF header
@@ -129,6 +174,15 @@ target_compile_definitions(thistle_sim PRIVATE
     LV_COLOR_DEPTH=16
     # Disable ESP-IDF specific features
     SIMULATOR_BUILD=1
+    THISTLE_HAVE_FILEMGR=${THISTLE_HAVE_FILEMGR}
+    THISTLE_HAVE_READER=${THISTLE_HAVE_READER}
+    THISTLE_HAVE_NAVIGATOR=${THISTLE_HAVE_NAVIGATOR}
+    THISTLE_HAVE_NOTES=${THISTLE_HAVE_NOTES}
+    THISTLE_HAVE_APPSTORE=${THISTLE_HAVE_APPSTORE}
+    THISTLE_HAVE_WIFISCANNER=${THISTLE_HAVE_WIFISCANNER}
+    THISTLE_HAVE_FLASHLIGHT=${THISTLE_HAVE_FLASHLIGHT}
+    THISTLE_HAVE_WEATHER=${THISTLE_HAVE_WEATHER}
+    THISTLE_HAVE_VAULT=${THISTLE_HAVE_VAULT}
     CONFIG_LOG_DEFAULT_LEVEL=3
     # SD card path for simulator — points to local sdcard directory
     THISTLE_SDCARD_PATH="/tmp/thistle_sdcard"
