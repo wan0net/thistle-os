@@ -258,6 +258,23 @@ unsafe impl Send for DriverLoaderState {}
 static EMPTY_CONFIG: &[u8] = b"{}\0";
 static STATE: Mutex<DriverLoaderState> = Mutex::new(DriverLoaderState::new());
 
+/// Return whether signature policy permits loading a driver. Production
+/// accepts only a verified signature. Debug builds retain the deliberate
+/// development exception for an absent `.sig`, but malformed signatures and
+/// all verifier failures remain fatal.
+fn driver_signature_allows_load(signature_result: i32) -> Result<bool, i32> {
+    if signature_result == ESP_OK {
+        return Ok(true);
+    }
+
+    if signature_result == ESP_ERR_NOT_FOUND {
+        #[cfg(debug_assertions)]
+        return Ok(false);
+    }
+
+    Err(signature_result)
+}
+
 // ---------------------------------------------------------------------------
 // Symbol resolver — delegates to the kernel syscall table
 // ---------------------------------------------------------------------------
@@ -372,25 +389,33 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
     }
 
     // 1. Verify signature
-    let sig_ret = signing_verify_file(path);
-    if sig_ret == ESP_ERR_INVALID_CRC {
-        esp_log_write(
-            ESP_LOG_ERROR,
-            TAG.as_ptr(),
-            b"Driver signature INVALID: %s\0".as_ptr(),
-            path,
-        );
-        return ESP_ERR_INVALID_CRC;
-    } else if sig_ret == ESP_ERR_NOT_FOUND {
-        #[cfg(not(debug_assertions))]
-        {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Driver unsigned: %s (REFUSED - production)\0".as_ptr(), path);
-            return ESP_ERR_INVALID_CRC;
+    match driver_signature_allows_load(signing_verify_file(path)) {
+        Ok(true) => {
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Driver signature verified: %s\0".as_ptr(),
+                path,
+            );
         }
-        #[cfg(debug_assertions)]
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"Driver unsigned (dev mode): %s\0".as_ptr(), path);
-    } else if sig_ret == ESP_OK {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver signature verified: %s\0".as_ptr(), path);
+        Ok(false) => {
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"Driver unsigned (dev mode): %s\0".as_ptr(),
+                path,
+            );
+        }
+        Err(err) => {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Driver signature verification failed: %d for %s\0".as_ptr(),
+                err,
+                path,
+            );
+            return err;
+        }
     }
 
     // 2. Parse manifest (optional)
@@ -702,5 +727,27 @@ mod tests {
     #[test]
     fn test_max_loaded_drvs_constant() {
         assert_eq!(MAX_LOADED_DRVS, 8, "MAX_LOADED_DRVS must be 8");
+    }
+
+    #[test]
+    fn test_driver_signature_gate_rejects_verifier_errors() {
+        assert_eq!(driver_signature_allows_load(ESP_OK), Ok(true));
+
+        #[cfg(debug_assertions)]
+        assert_eq!(driver_signature_allows_load(ESP_ERR_NOT_FOUND), Ok(false));
+        #[cfg(not(debug_assertions))]
+        assert_eq!(
+            driver_signature_allows_load(ESP_ERR_NOT_FOUND),
+            Err(ESP_ERR_NOT_FOUND)
+        );
+
+        for error in [
+            ESP_ERR_INVALID_CRC,
+            ESP_ERR_INVALID_SIZE,
+            0x103, // ESP_ERR_INVALID_STATE
+            ESP_ERR_INVALID_ARG,
+        ] {
+            assert_eq!(driver_signature_allows_load(error), Err(error));
+        }
     }
 }

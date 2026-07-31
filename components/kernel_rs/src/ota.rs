@@ -67,6 +67,17 @@ extern "C" {
 // Progress callback type — matches C typedef `void (*ota_progress_cb_t)(uint32_t written, uint32_t total, void *user_data)`
 pub type OtaProgressCb = unsafe extern "C" fn(written: u32, total: u32, user_data: *mut c_void);
 
+/// OTA images are production artifacts, so only an explicit verifier success
+/// may cross the firmware trust boundary. Preserve the verifier's exact error
+/// for diagnostics instead of treating non-CRC failures as success.
+fn require_valid_ota_signature(signature_result: i32) -> Result<(), i32> {
+    if signature_result == ESP_OK {
+        Ok(())
+    } else {
+        Err(signature_result)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FFI exports
 // ---------------------------------------------------------------------------
@@ -144,13 +155,14 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
     // 1. Verify signature
     let sig_ret = signing_verify_file(update_path_cstr);
-    if sig_ret == ESP_ERR_INVALID_CRC {
+    if let Err(err) = require_valid_ota_signature(sig_ret) {
         esp_log_write(
             ESP_LOG_ERROR,
             TAG.as_ptr(),
-            b"OTA update signature INVALID\0".as_ptr(),
+            b"OTA update signature verification failed: %d\0".as_ptr(),
+            err,
         );
-        return ESP_ERR_INVALID_CRC;
+        return err;
     }
 
     // 2. Open and size-check the update file
@@ -369,6 +381,22 @@ pub extern "C" fn ota_rollback() -> i32 {
 mod tests {
     use super::*;
     use std::ffi::CStr;
+
+    #[test]
+    fn test_ota_signature_gate_fails_closed_for_all_verifier_errors() {
+        assert_eq!(require_valid_ota_signature(ESP_OK), Ok(()));
+
+        for error in [
+            ESP_ERR_NOT_FOUND,
+            ESP_ERR_INVALID_CRC,
+            ESP_ERR_INVALID_SIZE,
+            0x103, // ESP_ERR_INVALID_STATE
+            0x102, // ESP_ERR_INVALID_ARG
+            ESP_ERR_NO_MEM,
+        ] {
+            assert_eq!(require_valid_ota_signature(error), Err(error));
+        }
+    }
 
     // -----------------------------------------------------------------------
     // test_get_current_version_non_null
