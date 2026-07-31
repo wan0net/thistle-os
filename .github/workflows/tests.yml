@@ -180,3 +180,42 @@ jobs:
       - name: Run kernel tests
         working-directory: components/kernel_rs
         run: cargo test --target x86_64-unknown-linux-gnu -- --test-threads=1
+
+  manifest-memory-safety:
+    name: Manifest Loader (Valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Rust and Valgrind
+        run: |
+          if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Build manifest parser test binary
+        working-directory: components/kernel_rs
+        run: |
+          cargo test --target x86_64-unknown-linux-gnu --locked --no-run \
+            --message-format=json > /tmp/thistle-test-artifacts.json
+          jq -r \
+            'select(.profile.test == true and .executable != null and .target.name == "thistle_kernel") | .executable' \
+            /tmp/thistle-test-artifacts.json | tail -n 1 > /tmp/thistle-test-binary
+          test -s /tmp/thistle-test-binary
+          test -x "$(cat /tmp/thistle-test-binary)"
+
+      - name: Check maximal manifest parse under Valgrind
+        run: |
+          valgrind \
+            --tool=memcheck \
+            --error-exitcode=1 \
+            --leak-check=no \
+            --track-origins=yes \
+            "$(cat /tmp/thistle-test-binary)" \
+            ffi::tests::maximal_manifest_parse_stays_within_typed_loader_storage \
+            --exact --test-threads=1
