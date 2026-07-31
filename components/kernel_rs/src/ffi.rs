@@ -15,7 +15,9 @@ use crate::manifest::Manifest;
 /// Field sizes must match the C header (manifest.h).
 #[repr(C)]
 pub struct CManifest {
-    pub manifest_type: u8, // ManifestType enum value
+    // `manifest_type_t` is a normal C enum and occupies four bytes in the
+    // public ABI. Narrowing this field shifts the following string fields.
+    pub manifest_type: u32,
     pub id: [u8; 64],
     pub name: [u8; 32],
     pub version: [u8; 16],
@@ -47,7 +49,7 @@ fn copy_to_buf(src: &str, dst: &mut [u8]) {
 impl From<&Manifest> for CManifest {
     fn from(m: &Manifest) -> Self {
         let mut c = CManifest {
-            manifest_type: m.manifest_type as u8,
+            manifest_type: m.manifest_type as u32,
             id: [0; 64],
             name: [0; 32],
             version: [0; 16],
@@ -91,10 +93,7 @@ const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 /// `json_path` must be a valid null-terminated C string.
 /// `out` must point to a valid CManifest-sized buffer.
 #[no_mangle]
-pub unsafe extern "C" fn manifest_parse_file(
-    json_path: *const c_char,
-    out: *mut CManifest,
-) -> i32 {
+pub unsafe extern "C" fn manifest_parse_file(json_path: *const c_char, out: *mut CManifest) -> i32 {
     if json_path.is_null() || out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -190,4 +189,106 @@ pub unsafe extern "C" fn manifest_path_from_elf(
 pub extern "C" fn kernel_version() -> *const c_char {
     // Include the null terminator
     b"0.1.0\0".as_ptr() as *const c_char
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{manifest_parse_file, CManifest, ESP_OK};
+    use std::ffi::{CStr, CString};
+    use std::mem::{align_of, offset_of, size_of, MaybeUninit};
+
+    #[test]
+    fn c_manifest_layout_matches_public_c_abi() {
+        assert_eq!(size_of::<CManifest>(), 720);
+        assert_eq!(align_of::<CManifest>(), 4);
+        assert_eq!(offset_of!(CManifest, manifest_type), 0);
+        assert_eq!(offset_of!(CManifest, id), 4);
+        assert_eq!(offset_of!(CManifest, permissions), 436);
+        assert_eq!(offset_of!(CManifest, background), 440);
+        assert_eq!(offset_of!(CManifest, min_memory_kb), 444);
+        assert_eq!(offset_of!(CManifest, hal_interface), 448);
+        assert_eq!(offset_of!(CManifest, changelog), 464);
+    }
+
+    #[test]
+    fn manifest_loaders_do_not_use_the_legacy_opaque_buffer() {
+        const LEGACY_BUFFER: &str = concat!("heap_caps_malloc(", "512, MALLOC_CAP_SPIRAM)");
+
+        assert!(!include_str!("elf_loader.rs").contains(LEGACY_BUFFER));
+        assert!(!include_str!("driver_loader.rs").contains(LEGACY_BUFFER));
+    }
+
+    #[test]
+    fn maximal_manifest_parse_stays_within_typed_loader_storage() {
+        #[repr(C)]
+        struct GuardedManifest {
+            before: [u8; 32],
+            manifest: MaybeUninit<CManifest>,
+            after: [u8; 32],
+        }
+
+        let json = format!(
+            r#"{{
+                "type":"firmware",
+                "id":"{}",
+                "name":"{}",
+                "version":"{}",
+                "author":"{}",
+                "description":"{}",
+                "min_os":"{}",
+                "arch":"{}",
+                "entry":"{}",
+                "icon":"{}",
+                "permissions":["storage","network","radio","gps","audio","system","ipc"],
+                "background":true,
+                "min_memory_kb":4294967295,
+                "hal_interface":"{}",
+                "changelog":"{}"
+            }}"#,
+            "i".repeat(63),
+            "n".repeat(31),
+            "1".repeat(15),
+            "a".repeat(31),
+            "d".repeat(127),
+            "0".repeat(15),
+            "r".repeat(15),
+            "e".repeat(63),
+            "o".repeat(63),
+            "h".repeat(15),
+            "c".repeat(255),
+        );
+
+        let path = std::env::temp_dir().join(format!(
+            "thistle-maximal-manifest-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, json).expect("write maximal manifest fixture");
+        let c_path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+
+        let mut guarded = GuardedManifest {
+            before: [0xA5; 32],
+            manifest: MaybeUninit::uninit(),
+            after: [0x5A; 32],
+        };
+        let result = unsafe { manifest_parse_file(c_path.as_ptr(), guarded.manifest.as_mut_ptr()) };
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(result, ESP_OK);
+        assert_eq!(guarded.before, [0xA5; 32]);
+        assert_eq!(guarded.after, [0x5A; 32]);
+
+        let manifest = unsafe { guarded.manifest.assume_init() };
+        assert_eq!(
+            unsafe { CStr::from_ptr(manifest.id.as_ptr().cast()) }
+                .to_bytes()
+                .len(),
+            63
+        );
+        assert_eq!(
+            unsafe { CStr::from_ptr(manifest.changelog.as_ptr().cast()) }
+                .to_bytes()
+                .len(),
+            255
+        );
+    }
 }

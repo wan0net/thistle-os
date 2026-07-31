@@ -9,6 +9,8 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::Mutex;
 
+use crate::ffi::CManifest;
+
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
@@ -45,8 +47,8 @@ extern "C" {
     fn signing_verify_file(path: *const c_char) -> i32;
 
     // Manifest (C/Rust shims)
-    fn manifest_parse_file(path: *const c_char, out: *mut c_void) -> i32;
-    fn manifest_is_compatible(manifest: *const c_void, current_arch: *const c_char) -> bool;
+    fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
+    fn manifest_is_compatible(manifest: *const CManifest, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table (C)
@@ -400,23 +402,22 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
             manifest_path_buf.len(),
         );
 
-        // Use a heap-allocated opaque blob for the manifest struct
-        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
-        if !manifest_buf.is_null() {
-            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                if !manifest_is_compatible(manifest_buf as *const c_void, CURRENT_ARCH.as_ptr() as *const c_char) {
-                    esp_log_write(
-                        ESP_LOG_ERROR,
-                        TAG.as_ptr(),
-                        b"Driver incompatible: %s\0".as_ptr(),
-                        path,
-                    );
-                    free(manifest_buf);
-                    return ESP_ERR_NOT_SUPPORTED;
-                }
-                esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver manifest OK: %s\0".as_ptr(), path);
+        let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
+        if manifest_parse_file(
+            manifest_path_buf.as_ptr() as *const c_char,
+            manifest.as_mut_ptr(),
+        ) == ESP_OK {
+            let manifest = manifest.assume_init();
+            if !manifest_is_compatible(&manifest, CURRENT_ARCH.as_ptr() as *const c_char) {
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"Driver incompatible: %s\0".as_ptr(),
+                    path,
+                );
+                return ESP_ERR_NOT_SUPPORTED;
             }
-            free(manifest_buf);
+            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver manifest OK: %s\0".as_ptr(), path);
         }
     }
 

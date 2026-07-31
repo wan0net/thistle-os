@@ -76,8 +76,8 @@ extern "C" {
     fn permissions_grant(app_id: *const c_char, perms: u32) -> i32;
 
     // Manifest (C/Rust)
-    fn manifest_parse_file(path: *const c_char, out: *mut c_void) -> i32;
-    fn manifest_is_compatible(manifest: *const c_void, current_arch: *const c_char) -> bool;
+    fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
+    fn manifest_is_compatible(manifest: *const CManifest, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table
@@ -344,20 +344,17 @@ pub unsafe extern "C" fn elf_app_load(
     {
         let mut manifest_path_buf = [0u8; 280];
         manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
-        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
-        if !manifest_buf.is_null() {
-            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                // Extract the "id" field from the parsed manifest
-                let id_ptr = (manifest_buf as *const u8).add(1); // type is first byte, id starts at offset 1
-                // The CManifest struct has id at offset 1 (after u8 type), as [u8; 64]
-                let id_bytes = std::slice::from_raw_parts(id_ptr, 64);
-                let id_len = id_bytes.iter().position(|&b| b == 0).unwrap_or(64);
-                if id_len > 0 {
-                    app_id_buf[..id_len].copy_from_slice(&id_bytes[..id_len]);
-                    has_manifest_id = true;
-                }
+        let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
+        if manifest_parse_file(
+            manifest_path_buf.as_ptr() as *const c_char,
+            manifest.as_mut_ptr(),
+        ) == ESP_OK {
+            let manifest = manifest.assume_init();
+            let id_len = manifest.id.iter().position(|&b| b == 0).unwrap_or(64);
+            if id_len > 0 {
+                app_id_buf[..id_len].copy_from_slice(&manifest.id[..id_len]);
+                has_manifest_id = true;
             }
-            free(manifest_buf);
         }
     }
 
@@ -447,18 +444,18 @@ pub unsafe extern "C" fn elf_app_load(
         let mut manifest_path_buf = [0u8; 280];
         manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
 
-        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
-        if !manifest_buf.is_null() {
-            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                if !manifest_is_compatible(manifest_buf as *const c_void, CURRENT_ARCH.as_ptr() as *const c_char) {
-                    esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
-                    esp_elf_deinit(elf_ptr);
-                    free(manifest_buf);
-                    return ESP_ERR_NOT_SUPPORTED;
-                }
-                esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Manifest OK: %s\0".as_ptr(), path);
+        let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
+        if manifest_parse_file(
+            manifest_path_buf.as_ptr() as *const c_char,
+            manifest.as_mut_ptr(),
+        ) == ESP_OK {
+            let manifest = manifest.assume_init();
+            if !manifest_is_compatible(&manifest, CURRENT_ARCH.as_ptr() as *const c_char) {
+                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
+                esp_elf_deinit(elf_ptr);
+                return ESP_ERR_NOT_SUPPORTED;
             }
-            free(manifest_buf);
+            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Manifest OK: %s\0".as_ptr(), path);
         }
     }
 
@@ -833,7 +830,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             let mut c_manifest = std::mem::zeroed::<CManifest>();
             let manifest_ret = manifest_parse_file(
                 manifest_path_buf.as_ptr() as *const c_char,
-                &mut c_manifest as *mut CManifest as *mut c_void,
+                &mut c_manifest,
             );
 
             if manifest_ret != ESP_OK {
