@@ -28,7 +28,7 @@ jobs:
           path: |
             /root/.cargo
             /root/.rustup
-          key: rust-esp-toolchain-v3-espup016
+          key: rust-esp-toolchain-v4-rust185-espup016
           # Don't restore from older prefixes — older caches have espup 0.17.0
           # contents that break the build. Only match the fully-qualified key.
 
@@ -38,13 +38,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+              sh -s -- -y --profile minimal --default-toolchain 1.85.0
           fi
           . "$HOME/.cargo/env"
+          rustup toolchain install 1.85.0 --profile minimal
           # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
           # that aborts with "Unsuported file extension: 'part'" during install.
           if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
-            cargo install espup --version 0.16.0 --force
+            cargo +1.85.0 install espup --version 0.16.0 --locked --force
           fi
           if ! command -v ldproxy &>/dev/null; then
             espup install
@@ -288,7 +290,7 @@ jobs:
             ~/.cargo
             ~/.rustup
             ~/.espup
-          key: rust-esp-recovery-${{ runner.os }}-v2-espup016
+          key: rust-esp-recovery-${{ runner.os }}-v3-rust185-espup016
           # Don't restore from older prefixes — v1 caches contain corrupt
           # espup 0.17.0 state that reproduces the "part" extension error.
 
@@ -296,13 +298,15 @@ jobs:
         shell: bash
         run: |
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+              sh -s -- -y --profile minimal --default-toolchain 1.85.0
           fi
           . "$HOME/.cargo/env"
+          rustup toolchain install 1.85.0 --profile minimal
           # Pin espup to 0.16.0 — 0.17.0 (released 2026-04-17) has a regression
           # that aborts with "Unsuported file extension: 'part'" during install.
           if ! command -v espup &> /dev/null || [ "$(espup --version 2>/dev/null | awk '{print $2}')" != "0.16.0" ]; then
-            cargo install espup --version 0.16.0 --force
+            cargo +1.85.0 install espup --version 0.16.0 --locked --force
           fi
           # Clear any stale .part files from prior interrupted runs so espup
           # doesn't try to re-use them.
@@ -313,7 +317,7 @@ jobs:
           # ldproxy is the linker wrapper cargo invokes for xtensa-esp32s3-espidf.
           # espup installs the toolchain but not ldproxy; cargo install it explicitly.
           if ! command -v ldproxy &> /dev/null; then
-            cargo install ldproxy
+            cargo +1.85.0 install ldproxy --version 0.3.5 --locked
           fi
 
       - name: Cache recovery target dir
