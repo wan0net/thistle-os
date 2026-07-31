@@ -17,6 +17,98 @@ use crate::permissions::{self, *};
 
 static CURRENT_APP_ID: Mutex<[u8; 64]> = Mutex::new([0u8; 64]);
 
+// Explicit app ABI allowlists. Driver ELFs use the full table; signed apps
+// receive only documented `thistle_*` wrappers, and unsigned debug apps are
+// restricted to the IPC-only development surface.
+const UNSIGNED_APP_SYMBOLS: &[&str] = &["thistle_msg_recv", "thistle_msg_send"];
+
+const APP_VISIBLE_SYMBOLS: &[&str] = &[
+    "thistle_crypto_aes128_ecb_decrypt",
+    "thistle_crypto_aes128_ecb_encrypt",
+    "thistle_crypto_aes256_cbc_decrypt",
+    "thistle_crypto_aes256_cbc_encrypt",
+    "thistle_crypto_ed25519_derive_public",
+    "thistle_crypto_ed25519_keygen",
+    "thistle_crypto_ed25519_sign",
+    "thistle_crypto_ed25519_verify",
+    "thistle_crypto_hmac_sha256",
+    "thistle_crypto_hmac_verify",
+    "thistle_crypto_pbkdf2_sha256",
+    "thistle_crypto_random",
+    "thistle_crypto_sha256",
+    "thistle_crypto_x25519_key_exchange",
+    "thistle_delay",
+    "thistle_display_get_height",
+    "thistle_display_get_width",
+    "thistle_event_publish",
+    "thistle_event_subscribe",
+    "thistle_free",
+    "thistle_fs_close",
+    "thistle_fs_open",
+    "thistle_fs_read",
+    "thistle_fs_write",
+    "thistle_gps_enable",
+    "thistle_gps_get_position",
+    "thistle_input_register_cb",
+    "thistle_log",
+    "thistle_malloc",
+    "thistle_mesh_clear_inbox",
+    "thistle_mesh_deinit",
+    "thistle_mesh_find_contact",
+    "thistle_mesh_get_contact",
+    "thistle_mesh_get_contact_count",
+    "thistle_mesh_get_inbox_count",
+    "thistle_mesh_get_inbox_message",
+    "thistle_mesh_get_self_key",
+    "thistle_mesh_get_self_name",
+    "thistle_mesh_get_stats",
+    "thistle_mesh_init",
+    "thistle_mesh_loop",
+    "thistle_mesh_send",
+    "thistle_mesh_send_advert",
+    "thistle_mesh_send_advert_pos",
+    "thistle_millis",
+    "thistle_msg_recv",
+    "thistle_msg_send",
+    "thistle_power_get_battery_mv",
+    "thistle_power_get_battery_pct",
+    "thistle_radio_send",
+    "thistle_radio_set_freq",
+    "thistle_radio_start_rx",
+    "thistle_realloc",
+    "thistle_ui_create_button",
+    "thistle_ui_create_container",
+    "thistle_ui_create_label",
+    "thistle_ui_create_text_input",
+    "thistle_ui_destroy",
+    "thistle_ui_get_app_root",
+    "thistle_ui_get_text",
+    "thistle_ui_on_event",
+    "thistle_ui_set_align",
+    "thistle_ui_set_bg_color",
+    "thistle_ui_set_border_width",
+    "thistle_ui_set_flex_grow",
+    "thistle_ui_set_font_size",
+    "thistle_ui_set_gap",
+    "thistle_ui_set_layout",
+    "thistle_ui_set_one_line",
+    "thistle_ui_set_padding",
+    "thistle_ui_set_password_mode",
+    "thistle_ui_set_placeholder",
+    "thistle_ui_set_pos",
+    "thistle_ui_set_radius",
+    "thistle_ui_set_scrollable",
+    "thistle_ui_set_size",
+    "thistle_ui_set_text",
+    "thistle_ui_set_text_color",
+    "thistle_ui_set_visible",
+    "thistle_ui_theme_bg",
+    "thistle_ui_theme_primary",
+    "thistle_ui_theme_surface",
+    "thistle_ui_theme_text",
+    "thistle_ui_theme_text_secondary",
+];
+
 /// Set the ID of the app currently resolving symbols.
 /// Used by elf_loader to enforce permissions during relocation.
 #[no_mangle]
@@ -751,66 +843,73 @@ pub extern "C" fn syscall_table_count() -> usize {
     SYSCALL_TABLE.len()
 }
 
-/// Look up a symbol by name. Returns its address or NULL if not found or denied.
-///
-/// # Safety
-/// `name` must be a valid null-terminated C string.
-#[no_mangle]
-pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
+unsafe fn find_entry(name: *const c_char) -> Option<&'static SyscallEntry> {
     if name.is_null() {
-        return std::ptr::null_mut();
+        return None;
     }
 
     let name_str = match CStr::from_ptr(name).to_str() {
         Ok(s) => s,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return None,
     };
 
-    // Binary search for efficiency (O(log N))
     let result = SYSCALL_TABLE.binary_search_by(|probe| {
         let entry_name = CStr::from_ptr(probe.name).to_str().unwrap_or("");
         entry_name.cmp(name_str)
     });
 
-    let idx = match result {
-        Ok(i) => i,
-        Err(_) => {
-            #[cfg(not(test))]
-            esp_log_write(
-                2, // WARN
-                b"syscall\0".as_ptr(),
-                b"syscall_resolve: unknown symbol '%s'\0".as_ptr(),
-                name,
-            );
-            return std::ptr::null_mut();
-        }
-    };
+    result.ok().map(|idx| &SYSCALL_TABLE[idx])
+}
 
-    let entry = &SYSCALL_TABLE[idx];
-
-    // Permission check
+unsafe fn app_permission_allows(entry: &SyscallEntry) -> bool {
     if entry.permission != 0 {
         let app_id_bytes = CURRENT_APP_ID.lock().unwrap();
-        if app_id_bytes[0] != 0 {
-            let app_id = CStr::from_ptr(app_id_bytes.as_ptr() as *const c_char)
-                .to_str()
-                .unwrap_or("");
-
-            if !permissions::check(app_id, entry.permission) {
-                #[cfg(not(test))]
-                esp_log_write(
-                    1, // ERROR
-                    b"syscall\0".as_ptr(),
-                    b"syscall_resolve: PERMISSION DENIED for app '%s' to call '%s'\0".as_ptr(),
-                    app_id_bytes.as_ptr(),
-                    name,
-                );
-                return std::ptr::null_mut();
-            }
+        if app_id_bytes[0] == 0 {
+            return false;
         }
+        let app_id = CStr::from_ptr(app_id_bytes.as_ptr() as *const c_char)
+            .to_str()
+            .unwrap_or("");
+        return permissions::check(app_id, entry.permission);
     }
+    true
+}
 
-    entry.func_ptr as *mut c_void
+unsafe fn resolve_app_symbol(name: *const c_char, allowed: &[&str]) -> *mut c_void {
+    let name_str = match (!name.is_null()).then(|| CStr::from_ptr(name).to_str()) {
+        Some(Ok(s)) => s,
+        _ => return std::ptr::null_mut(),
+    };
+    if allowed.binary_search(&name_str).is_err() {
+        return std::ptr::null_mut();
+    }
+    match find_entry(name) {
+        Some(entry) if app_permission_allows(entry) => entry.func_ptr as *mut c_void,
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// Resolve a symbol for a privileged driver ELF. This is the only resolver
+/// that exposes raw HAL and RTOS primitives.
+///
+/// # Safety
+/// `name` must be a valid null-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn syscall_resolve(name: *const c_char) -> *mut c_void {
+    find_entry(name)
+        .map(|entry| entry.func_ptr as *mut c_void)
+        .unwrap_or(std::ptr::null_mut())
+}
+
+/// Resolve a symbol for a signed app, constrained to the documented app ABI
+/// and the permissions granted to the current manifest identity.
+pub unsafe fn syscall_resolve_signed_app(name: *const c_char) -> *mut c_void {
+    resolve_app_symbol(name, APP_VISIBLE_SYMBOLS)
+}
+
+/// Resolve a symbol for an unsigned debug app. Only IPC is linkable.
+pub unsafe fn syscall_resolve_unsigned_app(name: *const c_char) -> *mut c_void {
+    resolve_app_symbol(name, UNSIGNED_APP_SYMBOLS)
 }
 
 // ---------------------------------------------------------------------------
@@ -838,6 +937,84 @@ mod tests {
     }
 
     #[test]
+    fn test_app_resolver_allowlists_are_sorted() {
+        let source = include_str!("syscall_table.rs");
+        for symbols in [APP_VISIBLE_SYMBOLS, UNSIGNED_APP_SYMBOLS] {
+            for pair in symbols.windows(2) {
+                assert!(pair[0] < pair[1], "app allowlist is not sorted");
+            }
+            for name in symbols {
+                assert!(
+                    source.contains(&format!("entry!(\"{name}\"")),
+                    "app ABI symbol is absent from syscall table source: {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_every_syscall_has_an_explicit_caller_class() {
+        for entry in SYSCALL_TABLE {
+            let name = unsafe { CStr::from_ptr(entry.name).to_str().unwrap() };
+            let signed_app = APP_VISIBLE_SYMBOLS.binary_search(&name).is_ok();
+            let unsigned_app = UNSIGNED_APP_SYMBOLS.binary_search(&name).is_ok();
+
+            if signed_app {
+                assert!(name.starts_with("thistle_"), "non-wrapper exposed to app: {name}");
+                assert_ne!(name, "thistle_driver_get_config");
+            }
+            if unsigned_app {
+                assert!(signed_app, "unsigned ABI must be a subset of signed ABI");
+                assert_eq!(entry.permission, PERM_IPC, "unsigned ABI must require IPC");
+            }
+            // Entries absent from APP_VISIBLE_SYMBOLS are explicitly
+            // driver-only, including every raw HAL, logging, and RTOS symbol.
+        }
+    }
+
+    #[test]
+    fn test_apps_cannot_resolve_driver_hal_logging_or_rtos_primitives() {
+        for name in [
+            "esp_log_write",
+            "hal_get_registry",
+            "hal_display_register",
+            "hal_bus_register_spi",
+            "hal_bus_register_i2c",
+            "vTaskDelete",
+            "xTaskCreatePinnedToCore",
+            "xQueueGenericCreate",
+            "xQueueGenericSend",
+            "xQueueReceive",
+            "thistle_driver_get_config",
+        ] {
+            let c_name = std::ffi::CString::new(name).unwrap();
+            assert!(unsafe { syscall_resolve_signed_app(c_name.as_ptr()) }.is_null());
+            assert!(unsafe { syscall_resolve_unsigned_app(c_name.as_ptr()) }.is_null());
+        }
+    }
+
+    #[test]
+    fn test_unsigned_app_resolves_only_ipc() {
+        permissions::init();
+        permissions::grant("app.unsigned", PERM_IPC);
+        let app_id = std::ffi::CString::new("app.unsigned").unwrap();
+        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+
+        for entry in SYSCALL_TABLE {
+            let name = unsafe { CStr::from_ptr(entry.name).to_str().unwrap() };
+            let c_name = std::ffi::CString::new(name).unwrap();
+            let resolved = unsafe { syscall_resolve_unsigned_app(c_name.as_ptr()) };
+            assert_eq!(
+                !resolved.is_null(),
+                UNSIGNED_APP_SYMBOLS.binary_search(&name).is_ok(),
+                "unsigned resolver policy mismatch for {name}"
+            );
+        }
+
+        unsafe { syscall_set_current_app(std::ptr::null()) };
+    }
+
+    #[test]
     fn test_resolve_thistle_delay() {
         let name = b"thistle_delay\0";
         let ptr = unsafe { syscall_resolve(name.as_ptr() as *const c_char) };
@@ -860,7 +1037,7 @@ mod tests {
         unsafe { syscall_set_current_app(app_id.as_ptr()) };
 
         let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
-        let denied = unsafe { syscall_resolve(sym.as_ptr()) };
+        let denied = unsafe { syscall_resolve_signed_app(sym.as_ptr()) };
         assert!(denied.is_null(), "protected syscall must be denied without permissions");
 
         unsafe { syscall_set_current_app(std::ptr::null()) };
@@ -874,7 +1051,7 @@ mod tests {
         unsafe { syscall_set_current_app(app_id.as_ptr()) };
 
         let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
-        let resolved = unsafe { syscall_resolve(sym.as_ptr()) };
+        let resolved = unsafe { syscall_resolve_signed_app(sym.as_ptr()) };
         assert!(!resolved.is_null(), "protected syscall must resolve after permission grant");
 
         unsafe { syscall_set_current_app(std::ptr::null()) };
