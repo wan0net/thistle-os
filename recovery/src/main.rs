@@ -22,6 +22,7 @@ use esp_idf_svc::wifi::{
 
 use log::*;
 
+mod catalog_path;
 mod recovery_ota;
 mod recovery_web;
 

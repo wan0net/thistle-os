@@ -7,6 +7,8 @@ use esp_idf_sys::*;
 use log::*;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::catalog_path::{catalog_destination, validate_catalog_id};
+
 // ---------------------------------------------------------------------------
 // Chip detection
 // ---------------------------------------------------------------------------
@@ -1231,6 +1233,7 @@ pub fn recovery_download_board_bundle_for(
             Some(v) => v,
             None => continue,
         };
+        validate_catalog_id(&id).map_err(anyhow::Error::msg)?;
         let url = match json_extract_string(obj, "url") {
             Some(v) => v,
             None => continue,
@@ -1240,15 +1243,18 @@ pub fn recovery_download_board_bundle_for(
         let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
 
         let dest_path = match entry_type.as_str() {
-            "firmware" => String::new(),
-            "board" => format!("{}/{}.json", SD_BOARDS_DIR, id),
-            "driver" => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
-            "wm" => format!("{}/{}.wm.elf", SD_WM_DIR, id),
+            "firmware" => Ok(std::path::PathBuf::new()),
+            "board" => catalog_destination(SD_BOARDS_DIR, &id, ".json"),
+            "driver" => catalog_destination(SD_DRIVERS_DIR, &id, ".drv.elf"),
+            "wm" => catalog_destination(SD_WM_DIR, &id, ".wm.elf"),
             other => {
                 info!("Skipping '{}' (type={})", id, other);
                 continue;
             }
-        };
+        }
+        .map_err(anyhow::Error::msg)?
+        .to_string_lossy()
+        .into_owned();
 
         if entry_type == "firmware" {
             let Some(expected_sha) = expected_sha.as_deref().filter(|s| !s.is_empty()) else {
