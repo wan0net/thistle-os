@@ -45,70 +45,35 @@ const ESP_LOG_WARN:  i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
-// esp_http_client FFI — same API on device (esp_http_client.h) and
-// simulator (sim_http.c shim).
+// Typed HTTP C shim. ESP-IDF owns all config/event structs; Rust crosses the
+// boundary only with stable primitive and opaque-pointer types.
 // ---------------------------------------------------------------------------
 
+type HttpDataCb = unsafe extern "C" fn(*const u8, c_int, *mut c_void) -> i32;
+
 extern "C" {
-    fn esp_http_client_init(config: *const EspHttpClientConfig) -> *mut c_void;
+    #[link_name = "thistle_http_client_init"]
+    fn http_client_init(
+        url: *const c_char,
+        timeout_ms: c_int,
+        data_cb: Option<HttpDataCb>,
+        user_data: *mut c_void,
+    ) -> *mut c_void;
+    #[link_name = "thistle_http_client_perform"]
     fn esp_http_client_perform(client: *mut c_void) -> i32;
+    #[link_name = "thistle_http_client_get_status_code"]
     fn esp_http_client_get_status_code(client: *mut c_void) -> c_int;
+    #[link_name = "thistle_http_client_cleanup"]
     fn esp_http_client_cleanup(client: *mut c_void) -> i32;
+    #[link_name = "thistle_http_client_open"]
     fn esp_http_client_open(client: *mut c_void, write_len: i32) -> i32;
-    fn esp_http_client_fetch_headers(client: *mut c_void) -> c_int;
+    #[link_name = "thistle_http_client_fetch_headers"]
+    fn esp_http_client_fetch_headers(client: *mut c_void) -> i64;
+    #[link_name = "thistle_http_client_read"]
     fn esp_http_client_read(client: *mut c_void, buf: *mut c_char, len: c_int) -> c_int;
+    #[link_name = "thistle_http_client_close"]
     fn esp_http_client_close(client: *mut c_void) -> i32;
 }
-
-// esp_http_client_config_t — only the fields we use; must be repr(C) padded to match.
-// We use a flexible approach: declare only the fields we set and pad to 128 bytes.
-#[repr(C)]
-struct EspHttpClientConfig {
-    url: *const c_char,
-    event_handler: Option<unsafe extern "C" fn(*mut EspHttpClientEvent) -> i32>,
-    user_data: *mut c_void,
-    timeout_ms: i32,
-    _pad: [u8; 84], // Pad to match ESP-IDF struct size (~128 bytes)
-}
-
-impl EspHttpClientConfig {
-    fn new(url: *const c_char, timeout_ms: i32) -> Self {
-        EspHttpClientConfig {
-            url,
-            event_handler: None,
-            user_data: std::ptr::null_mut(),
-            timeout_ms,
-            _pad: [0u8; 84],
-        }
-    }
-
-    fn with_handler(
-        url: *const c_char,
-        timeout_ms: i32,
-        handler: unsafe extern "C" fn(*mut EspHttpClientEvent) -> i32,
-        user_data: *mut c_void,
-    ) -> Self {
-        EspHttpClientConfig {
-            url,
-            event_handler: Some(handler),
-            user_data,
-            timeout_ms,
-            _pad: [0u8; 84],
-        }
-    }
-}
-
-// esp_http_client_event_t — minimal layout
-#[repr(C)]
-struct EspHttpClientEvent {
-    event_id: i32,      // HTTP_EVENT_ON_DATA = 5
-    data: *const u8,
-    data_len: i32,
-    user_data: *mut c_void,
-    // … more fields follow in the C struct, but we only read the above
-}
-
-const HTTP_EVENT_ON_DATA: i32 = 5;
 
 // ---------------------------------------------------------------------------
 // Signing FFI
@@ -510,21 +475,23 @@ impl HttpBuf {
     }
 }
 
-// http_buf_event_handler calls esp_log_write — excluded from test builds.
+// The C shim filters HTTP_EVENT_ON_DATA and passes only stable primitives.
 #[cfg(not(test))]
-unsafe extern "C" fn http_buf_event_handler(evt: *mut EspHttpClientEvent) -> i32 {
-    let resp = (*evt).user_data as *mut HttpBuf;
-    if resp.is_null() { return ESP_OK; }
+unsafe extern "C" fn http_buf_data_handler(
+    data: *const u8,
+    data_len: c_int,
+    user_data: *mut c_void,
+) -> i32 {
+    let resp = user_data as *mut HttpBuf;
+    if resp.is_null() || data.is_null() || data_len <= 0 { return ESP_OK; }
     let buf = &mut *resp;
 
-    if (*evt).event_id == HTTP_EVENT_ON_DATA {
-        let data = std::slice::from_raw_parts((*evt).data, (*evt).data_len as usize);
-        if buf.data.len() + data.len() < buf.capacity {
-            buf.data.extend_from_slice(data);
-        } else {
-            buf.overflow = true;
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"HTTP buffer overflow - truncated\0".as_ptr());
-        }
+    let bytes = std::slice::from_raw_parts(data, data_len as usize);
+    if buf.data.len() + bytes.len() <= buf.capacity {
+        buf.data.extend_from_slice(bytes);
+    } else {
+        buf.overflow = true;
+        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"HTTP buffer overflow - truncated\0".as_ptr());
     }
 
     ESP_OK
@@ -573,14 +540,12 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
     let mut resp_buf = Box::new(HttpBuf::new(MAX_CATALOG_JSON + 1));
 
     let url_cstr = std::ffi::CString::new(url_str).unwrap_or_default();
-    let config = EspHttpClientConfig::with_handler(
+    let client = http_client_init(
         url_cstr.as_ptr(),
         15000,
-        http_buf_event_handler,
+        Some(http_buf_data_handler),
         &mut *resp_buf as *mut HttpBuf as *mut c_void,
     );
-
-    let client = esp_http_client_init(&config);
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -794,8 +759,7 @@ pub unsafe extern "C" fn appstore_download_file(
         Err(_) => return ESP_ERR_INVALID_ARG,
     };
 
-    let config = EspHttpClientConfig::new(url_cstr.as_ptr(), 30000);
-    let client = esp_http_client_init(&config);
+    let client = http_client_init(url_cstr.as_ptr(), 30000, None, std::ptr::null_mut());
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -1359,8 +1323,12 @@ pub unsafe extern "C" fn appstore_submit_rating(
         Err(_) => return ESP_FAIL,
     };
 
-    let config = EspHttpClientConfig::new(endpoint_cstr.as_ptr(), 10000);
-    let client = esp_http_client_init(&config);
+    let client = http_client_init(
+        endpoint_cstr.as_ptr(),
+        10000,
+        None,
+        std::ptr::null_mut(),
+    );
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -1433,8 +1401,12 @@ pub unsafe extern "C" fn appstore_report_download(
         Err(_) => return ESP_FAIL,
     };
 
-    let config = EspHttpClientConfig::new(endpoint_cstr.as_ptr(), 10000);
-    let client = esp_http_client_init(&config);
+    let client = http_client_init(
+        endpoint_cstr.as_ptr(),
+        10000,
+        None,
+        std::ptr::null_mut(),
+    );
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -1471,7 +1443,7 @@ pub unsafe extern "C" fn appstore_report_download(
 // Tests
 //
 // appstore_fetch_catalog(), appstore_download_file(), and
-// appstore_install_entry() all call esp_http_client_init (or esp_log_write)
+// appstore_install_entry() all call the HTTP client shim (or esp_log_write)
 // and are not safe on aarch64-apple-darwin. Test builds use guard-only stubs.
 //
 // The following are pure Rust and tested here:
@@ -1486,6 +1458,15 @@ pub unsafe extern "C" fn appstore_report_download(
 mod tests {
     use super::*;
     use std::ffi::CStr;
+
+    #[test]
+    fn test_http_ffi_has_no_approximate_esp_idf_structs() {
+        let source = include_str!("appstore_client.rs");
+        assert!(!source.contains(concat!("struct EspHttpClient", "Config")));
+        assert!(!source.contains(concat!("struct EspHttpClient", "Event")));
+        assert!(!source.contains(concat!("_pad:", " [u8;")));
+        assert!(source.contains("thistle_http_client_init"));
+    }
 
     // -----------------------------------------------------------------------
     // test_get_catalog_url_contains_thistle_apps

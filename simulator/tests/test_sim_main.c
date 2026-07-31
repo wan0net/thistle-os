@@ -25,6 +25,9 @@ extern void test_tca8418_key_injection(void);
 extern void test_cst328_no_touch(void);
 extern void test_cst328_touch_injection(void);
 
+/* test_http_client_shim.c */
+extern void test_http_shim_delivers_fixture_bytes_status_and_cleanup(void);
+
 int main(void)
 {
     printf("=== Simulator Unit Tests ===\n\n");
@@ -56,6 +59,9 @@ int main(void)
     printf("\n[cst328]\n");
     RUN_TEST(cst328_no_touch);
     RUN_TEST(cst328_touch_injection);
+
+    printf("\n[http_client_shim]\n");
+    RUN_TEST(http_shim_delivers_fixture_bytes_status_and_cleanup);
 
     TEST_SUMMARY();
     return _tests_failed > 0 ? 1 : 0;
