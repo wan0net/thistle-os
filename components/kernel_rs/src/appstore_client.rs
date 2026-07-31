@@ -9,8 +9,11 @@
 // (libcurl-backed) in simulator builds. SHA-256 uses the sha2 crate.
 
 use std::ffi::CStr;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
@@ -20,6 +23,7 @@ use std::sync::Mutex;
 const ESP_OK: i32 = 0x000;
 const ESP_ERR_NO_MEM: i32 = 0x101;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
+const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 const ESP_ERR_INVALID_CRC: i32 = 0x109;
@@ -29,6 +33,14 @@ const DEFAULT_CATALOG_URL: &str = "https://wan0net.github.io/thistle-apps/catalo
 const MAX_CATALOG_JSON: usize = 32 * 1024; // 32 KB
 const DOWNLOAD_BUF_SIZE: usize = 4096;
 const APPSTORE_URL_MAX: usize = 256;
+const MAX_APP_DOWNLOAD: u64 = 8 * 1024 * 1024;
+const MAX_FIRMWARE_DOWNLOAD: u64 = 16 * 1024 * 1024;
+const MAX_DRIVER_DOWNLOAD: u64 = 4 * 1024 * 1024;
+const MAX_WM_DOWNLOAD: u64 = 8 * 1024 * 1024;
+const MAX_SIGNATURE_DOWNLOAD: u64 = 64;
+const MAX_GENERIC_DOWNLOAD: u64 = 16 * 1024 * 1024;
+
+static TEMP_FILE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
 static TAG: &[u8] = b"appstore_client\0";
 
@@ -40,8 +52,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
@@ -95,19 +107,19 @@ use sha2::{Digest, Sha256};
 
 #[repr(C)]
 pub struct CatalogEntry {
-    pub id:               [u8; 64],
-    pub name:             [u8; 64],
-    pub version:          [u8; 16],
-    pub author:           [u8; 32],
-    pub description:      [u8; 256],
-    pub url:              [u8; 256],
-    pub sig_url:          [u8; 256],
-    pub sha256_hex:       [u8; 65],
-    pub permissions:      [u8; 64],
-    pub min_os_version:   [u8; 16],
-    pub size_bytes:       u32,
-    pub entry_type:       u32, // CatalogType enum: 0=app, 1=firmware, 2=driver, 3=wm
-    pub is_signed:        bool,
+    pub id: [u8; 64],
+    pub name: [u8; 64],
+    pub version: [u8; 16],
+    pub author: [u8; 32],
+    pub description: [u8; 256],
+    pub url: [u8; 256],
+    pub sig_url: [u8; 256],
+    pub sha256_hex: [u8; 65],
+    pub permissions: [u8; 64],
+    pub min_os_version: [u8; 16],
+    pub size_bytes: u32,
+    pub entry_type: u32, // CatalogType enum: 0=app, 1=firmware, 2=driver, 3=wm
+    pub is_signed: bool,
     /// Comma-separated board names this entry targets; empty = universal.
     pub compatible_boards: [u8; 128],
 
@@ -122,66 +134,69 @@ pub struct CatalogEntry {
 
     // Rich metadata — new fields (default to 0/empty for backward compat)
     /// Category string: "tools", "communication", "games", "drivers", "system"
-    pub category:         [u8; 32],
+    pub category: [u8; 32],
     /// URL to 1-bit icon (32x32 or 48x48 PNG)
-    pub icon_url:         [u8; 256],
+    pub icon_url: [u8; 256],
     /// Up to 3 screenshot URLs
-    pub screenshots:      [[u8; 256]; 3],
+    pub screenshots: [[u8; 256]; 3],
     /// Number of valid screenshot URLs (0–3)
     pub screenshot_count: u8,
     /// Average rating × 100 (e.g. 450 = 4.50 stars)
-    pub rating_stars:     u16,
+    pub rating_stars: u16,
     /// Number of ratings
-    pub rating_count:     u32,
+    pub rating_count: u32,
     /// Total downloads
-    pub download_count:   u32,
+    pub download_count: u32,
     /// ISO date string: "2026-03-22"
-    pub updated_date:     [u8; 11],
+    pub updated_date: [u8; 11],
     /// What's new in this version
-    pub changelog:        [u8; 512],
+    pub changelog: [u8; 512],
 }
 
 impl Default for CatalogEntry {
     fn default() -> Self {
         CatalogEntry {
-            id:               [0u8; 64],
-            name:             [0u8; 64],
-            version:          [0u8; 16],
-            author:           [0u8; 32],
-            description:      [0u8; 256],
-            url:              [0u8; 256],
-            sig_url:          [0u8; 256],
-            sha256_hex:       [0u8; 65],
-            permissions:      [0u8; 64],
-            min_os_version:   [0u8; 16],
-            size_bytes:       0,
-            entry_type:       CATALOG_TYPE_APP,
-            is_signed:        false,
+            id: [0u8; 64],
+            name: [0u8; 64],
+            version: [0u8; 16],
+            author: [0u8; 32],
+            description: [0u8; 256],
+            url: [0u8; 256],
+            sig_url: [0u8; 256],
+            sha256_hex: [0u8; 65],
+            permissions: [0u8; 64],
+            min_os_version: [0u8; 16],
+            size_bytes: 0,
+            entry_type: CATALOG_TYPE_APP,
+            is_signed: false,
             compatible_boards: [0u8; 128],
-            detection_bus:    [0u8; 8],
+            detection_bus: [0u8; 8],
             detection_address: 0,
             detection_chip_id_reg: 0,
             detection_chip_id_value: 0,
-            category:         [0u8; 32],
-            icon_url:         [0u8; 256],
-            screenshots:      [[0u8; 256]; 3],
+            category: [0u8; 32],
+            icon_url: [0u8; 256],
+            screenshots: [[0u8; 256]; 3],
             screenshot_count: 0,
-            rating_stars:     0,
-            rating_count:     0,
-            download_count:   0,
-            updated_date:     [0u8; 11],
-            changelog:        [0u8; 512],
+            rating_stars: 0,
+            rating_count: 0,
+            download_count: 0,
+            updated_date: [0u8; 11],
+            changelog: [0u8; 512],
         }
     }
 }
 
-const CATALOG_TYPE_APP:      u32 = 0;
+const CATALOG_TYPE_APP: u32 = 0;
 const CATALOG_TYPE_FIRMWARE: u32 = 1;
-const CATALOG_TYPE_DRIVER:   u32 = 2;
-const CATALOG_TYPE_WM:       u32 = 3;
+const CATALOG_TYPE_DRIVER: u32 = 2;
+const CATALOG_TYPE_WM: u32 = 3;
 
 fn validated_catalog_id(id: &[u8; 64]) -> Result<&str, i32> {
-    let length = id.iter().position(|&byte| byte == 0).ok_or(ESP_ERR_INVALID_ARG)?;
+    let length = id
+        .iter()
+        .position(|&byte| byte == 0)
+        .ok_or(ESP_ERR_INVALID_ARG)?;
     let value = std::str::from_utf8(&id[..length]).map_err(|_| ESP_ERR_INVALID_ARG)?;
 
     if value.is_empty()
@@ -224,7 +239,9 @@ static CATALOG_URL_LOADED: Mutex<bool> = Mutex::new(false);
 
 fn load_catalog_url() {
     let already = CATALOG_URL_LOADED.lock().map(|v| *v).unwrap_or(false);
-    if already { return; }
+    if already {
+        return;
+    }
 
     let config_path = "/sdcard/config/appstore.json";
     if let Ok(content) = std::fs::read_to_string(config_path) {
@@ -295,7 +312,7 @@ fn json_array_extract(json: &str, key: &str) -> Option<String> {
     let search = format!("\"{}\"", key);
     let pos = json.find(&search)?;
     let after_key = &json[pos + search.len()..];
-    let bracket = after_key.find('[')? ;
+    let bracket = after_key.find('[')?;
     let content_start = bracket + 1;
     let content = &after_key[content_start..];
     let bracket_end = content.find(']')?;
@@ -349,9 +366,15 @@ fn extract_detection_u16(obj_json: &str, key: &str) -> u16 {
         None => return 0,
     };
     let after = &obj_json[pos + det_key.len()..];
-    let brace = match after.find('{') { Some(i) => i + 1, None => return 0 };
+    let brace = match after.find('{') {
+        Some(i) => i + 1,
+        None => return 0,
+    };
     let inner_start = &after[brace..];
-    let brace_end = match inner_start.find('}') { Some(i) => i, None => return 0 };
+    let brace_end = match inner_start.find('}') {
+        Some(i) => i,
+        None => return 0,
+    };
     let inner = &inner_start[..brace_end];
     json_hex_or_int_extract(inner, key)
 }
@@ -373,7 +396,10 @@ fn json_hex_or_int_extract(json: &str, key: &str) -> u16 {
     if after_colon.starts_with('"') {
         // Quoted string: "0x34" or "52"
         let inner = &after_colon[1..];
-        let end = match inner.find('"') { Some(i) => i, None => return 0 };
+        let end = match inner.find('"') {
+            Some(i) => i,
+            None => return 0,
+        };
         let s = inner[..end].trim();
         if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
             u16::from_str_radix(hex, 16).unwrap_or(0)
@@ -514,7 +540,9 @@ unsafe extern "C" fn http_buf_data_handler(
     user_data: *mut c_void,
 ) -> i32 {
     let resp = user_data as *mut HttpBuf;
-    if resp.is_null() || data.is_null() || data_len <= 0 { return ESP_OK; }
+    if resp.is_null() || data.is_null() || data_len <= 0 {
+        return ESP_OK;
+    }
     let buf = &mut *resp;
 
     let bytes = std::slice::from_raw_parts(data, data_len as usize);
@@ -522,7 +550,11 @@ unsafe extern "C" fn http_buf_data_handler(
         buf.data.extend_from_slice(bytes);
     } else {
         buf.overflow = true;
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"HTTP buffer overflow - truncated\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"HTTP buffer overflow - truncated\0".as_ptr(),
+        );
     }
 
     ESP_OK
@@ -566,7 +598,12 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         Err(_) => return ESP_ERR_INVALID_ARG,
     };
 
-    esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Fetching catalog: %s\0".as_ptr(), url_ptr);
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"Fetching catalog: %s\0".as_ptr(),
+        url_ptr,
+    );
 
     let mut resp_buf = Box::new(HttpBuf::new(MAX_CATALOG_JSON + 1));
 
@@ -581,7 +618,7 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         return ESP_FAIL;
     }
 
-    let err    = esp_http_client_perform(client);
+    let err = esp_http_client_perform(client);
     let status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
 
@@ -628,27 +665,49 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         let entry = &mut *entries.add(count as usize);
         *entry = CatalogEntry::default();
 
-        if let Some(v) = json_str_extract(obj, "id")          { copy_str_to_buf(&v, &mut entry.id); }
-        if let Some(v) = json_str_extract(obj, "name")        { copy_str_to_buf(&v, &mut entry.name); }
-        if let Some(v) = json_str_extract(obj, "version")     { copy_str_to_buf(&v, &mut entry.version); }
-        if let Some(v) = json_str_extract(obj, "author")      { copy_str_to_buf(&v, &mut entry.author); }
-        if let Some(v) = json_str_extract(obj, "description") { copy_str_to_buf(&v, &mut entry.description); }
-        if let Some(v) = json_str_extract(obj, "url")         { copy_str_to_buf(&v, &mut entry.url); }
-        if let Some(v) = json_str_extract(obj, "sig_url")     { copy_str_to_buf(&v, &mut entry.sig_url); }
-        if let Some(v) = json_str_extract(obj, "sha256")      { copy_str_to_buf(&v, &mut entry.sha256_hex); }
-        if let Some(v) = json_str_extract(obj, "permissions") { copy_str_to_buf(&v, &mut entry.permissions); }
-        if let Some(v) = json_str_extract(obj, "min_os_version") { copy_str_to_buf(&v, &mut entry.min_os_version); }
+        if let Some(v) = json_str_extract(obj, "id") {
+            copy_str_to_buf(&v, &mut entry.id);
+        }
+        if let Some(v) = json_str_extract(obj, "name") {
+            copy_str_to_buf(&v, &mut entry.name);
+        }
+        if let Some(v) = json_str_extract(obj, "version") {
+            copy_str_to_buf(&v, &mut entry.version);
+        }
+        if let Some(v) = json_str_extract(obj, "author") {
+            copy_str_to_buf(&v, &mut entry.author);
+        }
+        if let Some(v) = json_str_extract(obj, "description") {
+            copy_str_to_buf(&v, &mut entry.description);
+        }
+        if let Some(v) = json_str_extract(obj, "url") {
+            copy_str_to_buf(&v, &mut entry.url);
+        }
+        if let Some(v) = json_str_extract(obj, "sig_url") {
+            copy_str_to_buf(&v, &mut entry.sig_url);
+        }
+        if let Some(v) = json_str_extract(obj, "sha256") {
+            copy_str_to_buf(&v, &mut entry.sha256_hex);
+        }
+        if let Some(v) = json_str_extract(obj, "permissions") {
+            copy_str_to_buf(&v, &mut entry.permissions);
+        }
+        if let Some(v) = json_str_extract(obj, "min_os_version") {
+            copy_str_to_buf(&v, &mut entry.min_os_version);
+        }
 
         if let Some(sz) = json_int_extract(obj, "size_bytes") {
-            if sz > 0 { entry.size_bytes = sz as u32; }
+            if sz > 0 && sz <= u32::MAX as i64 {
+                entry.size_bytes = sz as u32;
+            }
         }
 
         if let Some(t) = json_str_extract(obj, "type") {
             entry.entry_type = match t.as_str() {
                 "firmware" => CATALOG_TYPE_FIRMWARE,
-                "driver"   => CATALOG_TYPE_DRIVER,
-                "wm"       => CATALOG_TYPE_WM,
-                _          => CATALOG_TYPE_APP,
+                "driver" => CATALOG_TYPE_DRIVER,
+                "wm" => CATALOG_TYPE_WM,
+                _ => CATALOG_TYPE_APP,
             };
         }
 
@@ -660,33 +719,47 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         // Parse detection object: {"bus":"i2c","address":"0x34",...}
         if let Some(det_bus) = extract_detection_field(obj, "bus") {
             copy_str_to_buf(&det_bus, &mut entry.detection_bus);
-            entry.detection_address       = extract_detection_u16(obj, "address");
-            entry.detection_chip_id_reg   = extract_detection_u16(obj, "chip_id_reg");
+            entry.detection_address = extract_detection_u16(obj, "address");
+            entry.detection_chip_id_reg = extract_detection_u16(obj, "chip_id_reg");
             entry.detection_chip_id_value = extract_detection_u16(obj, "chip_id_value");
         }
 
         // Rich metadata fields
-        if let Some(v) = json_str_extract(obj, "category")  { copy_str_to_buf(&v, &mut entry.category); }
-        if let Some(v) = json_str_extract(obj, "icon_url")  { copy_str_to_buf(&v, &mut entry.icon_url); }
-        if let Some(v) = json_str_extract(obj, "changelog") { copy_str_to_buf(&v, &mut entry.changelog); }
-        if let Some(v) = json_str_extract(obj, "updated")   { copy_str_to_buf(&v, &mut entry.updated_date); }
+        if let Some(v) = json_str_extract(obj, "category") {
+            copy_str_to_buf(&v, &mut entry.category);
+        }
+        if let Some(v) = json_str_extract(obj, "icon_url") {
+            copy_str_to_buf(&v, &mut entry.icon_url);
+        }
+        if let Some(v) = json_str_extract(obj, "changelog") {
+            copy_str_to_buf(&v, &mut entry.changelog);
+        }
+        if let Some(v) = json_str_extract(obj, "updated") {
+            copy_str_to_buf(&v, &mut entry.updated_date);
+        }
 
         if let Some(f) = json_float_extract(obj, "rating") {
             // Store as rating × 100, rounded
             entry.rating_stars = (f * 100.0 + 0.5) as u16;
         }
         if let Some(n) = json_int_extract(obj, "rating_count") {
-            if n > 0 { entry.rating_count = n as u32; }
+            if n > 0 {
+                entry.rating_count = n as u32;
+            }
         }
         if let Some(n) = json_int_extract(obj, "downloads") {
-            if n > 0 { entry.download_count = n as u32; }
+            if n > 0 {
+                entry.download_count = n as u32;
+            }
         }
 
         // Screenshots array
         if let Some(screenshots_raw) = json_array_extract(obj, "screenshots") {
             let mut sc_count = 0u8;
             for (i, url) in screenshots_raw.split(',').enumerate() {
-                if i >= 3 { break; }
+                if i >= 3 {
+                    break;
+                }
                 copy_str_to_buf(url.trim(), &mut entry.screenshots[i]);
                 sc_count += 1;
             }
@@ -736,6 +809,412 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
 // File download with SHA-256 verification
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamValidationError {
+    HttpStatus,
+    MissingLength,
+    SizeMismatch,
+    Oversized,
+    Read,
+    CounterOverflow,
+}
+
+impl StreamValidationError {
+    fn esp_error(self) -> i32 {
+        match self {
+            Self::SizeMismatch | Self::Oversized | Self::CounterOverflow => ESP_ERR_INVALID_SIZE,
+            Self::HttpStatus | Self::MissingLength | Self::Read => ESP_FAIL,
+        }
+    }
+}
+
+struct StreamValidator {
+    content_length: u64,
+    expected_size: Option<u64>,
+    max_size: u64,
+    received: u64,
+}
+
+impl StreamValidator {
+    fn new(
+        status: i32,
+        content_length: i64,
+        expected_size: Option<u64>,
+        max_size: u64,
+    ) -> Result<Self, StreamValidationError> {
+        if !(200..300).contains(&status) {
+            return Err(StreamValidationError::HttpStatus);
+        }
+        if content_length < 0 {
+            return Err(StreamValidationError::MissingLength);
+        }
+        let content_length = content_length as u64;
+        if content_length > max_size {
+            return Err(StreamValidationError::Oversized);
+        }
+        if expected_size.is_some_and(|expected| content_length != expected) {
+            return Err(StreamValidationError::SizeMismatch);
+        }
+        Ok(Self {
+            content_length,
+            expected_size,
+            max_size,
+            received: 0,
+        })
+    }
+
+    fn observe_read(&mut self, read_len: i32) -> Result<bool, StreamValidationError> {
+        if read_len < 0 {
+            return Err(StreamValidationError::Read);
+        }
+        if read_len == 0 {
+            if self.received != self.content_length
+                || self
+                    .expected_size
+                    .is_some_and(|expected| self.received != expected)
+            {
+                return Err(StreamValidationError::SizeMismatch);
+            }
+            return Ok(false);
+        }
+
+        let received = self
+            .received
+            .checked_add(read_len as u64)
+            .ok_or(StreamValidationError::CounterOverflow)?;
+        if received > self.max_size {
+            return Err(StreamValidationError::Oversized);
+        }
+        if received > self.content_length
+            || self
+                .expected_size
+                .is_some_and(|expected| received > expected)
+        {
+            return Err(StreamValidationError::SizeMismatch);
+        }
+        self.received = received;
+        Ok(true)
+    }
+}
+
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn fixed_cstr(value: &[u8]) -> Option<&str> {
+    let end = value.iter().position(|byte| *byte == 0)?;
+    std::str::from_utf8(&value[..end]).ok()
+}
+
+fn max_download_for_type(entry_type: u32) -> u64 {
+    match entry_type {
+        CATALOG_TYPE_FIRMWARE => MAX_FIRMWARE_DOWNLOAD,
+        CATALOG_TYPE_DRIVER => MAX_DRIVER_DOWNLOAD,
+        CATALOG_TYPE_WM => MAX_WM_DOWNLOAD,
+        _ => MAX_APP_DOWNLOAD,
+    }
+}
+
+/// A sibling temporary file which is removed unless it has been committed.
+/// Keeping it beside the destination guarantees the final rename is on the
+/// same filesystem.
+struct StagedFile {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl StagedFile {
+    fn create_for(destination: &Path) -> std::io::Result<Self> {
+        let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+        let name = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("artifact");
+
+        for _ in 0..128 {
+            let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!(".{name}.thistle-tmp-{sequence}"));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                    })
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "unable to allocate a unique app-store temporary file",
+        ))
+    }
+
+    fn create_exact(path: PathBuf) -> std::io::Result<Self> {
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    fn writer(&mut self) -> &mut File {
+        self.file.as_mut().expect("staged file is already closed")
+    }
+
+    fn sync_and_close(&mut self) -> std::io::Result<()> {
+        if let Some(mut file) = self.file.take() {
+            file.flush()?;
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn unused_backup_path(destination: &Path) -> PathBuf {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    loop {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(".{name}.thistle-backup-{sequence}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+}
+
+fn atomic_replace_with<F>(
+    staged: &StagedFile,
+    destination: &Path,
+    mut rename: F,
+) -> std::io::Result<()>
+where
+    F: FnMut(&Path, &Path) -> std::io::Result<()>,
+{
+    if !destination.exists() {
+        return rename(&staged.path, destination);
+    }
+
+    // FatFs cannot rename over an existing path. Retain the old artifact until
+    // the verified staging file has been moved into place, restoring on error.
+    let backup = unused_backup_path(destination);
+    rename(destination, &backup)?;
+    if let Err(commit_error) = rename(&staged.path, destination) {
+        if let Err(restore_error) = std::fs::rename(&backup, destination) {
+            return Err(std::io::Error::new(
+                restore_error.kind(),
+                format!("commit failed: {commit_error}; restore failed: {restore_error}"),
+            ));
+        }
+        return Err(commit_error);
+    }
+    // The new artifact is already live. Failure to remove an obsolete backup
+    // must not turn a completed commit into a reported install failure.
+    let _ = std::fs::remove_file(backup);
+    Ok(())
+}
+
+fn atomic_replace(staged: &StagedFile, destination: &Path) -> std::io::Result<()> {
+    atomic_replace_with(staged, destination, |from, to| std::fs::rename(from, to))
+}
+
+fn atomic_replace_pair_with<F>(
+    staged_payload: &StagedFile,
+    payload_destination: &Path,
+    staged_signature: &StagedFile,
+    signature_destination: &Path,
+    mut rename: F,
+) -> std::io::Result<()>
+where
+    F: FnMut(&Path, &Path) -> std::io::Result<()>,
+{
+    let payload_backup = unused_backup_path(payload_destination);
+    let signature_backup = unused_backup_path(signature_destination);
+    let had_payload = payload_destination.exists();
+    let had_signature = signature_destination.exists();
+    let mut payload_backed_up = false;
+    let mut signature_backed_up = false;
+    let mut payload_installed = false;
+    let mut signature_installed = false;
+
+    let result = (|| {
+        if had_payload {
+            rename(payload_destination, &payload_backup)?;
+            payload_backed_up = true;
+        }
+        if had_signature {
+            rename(signature_destination, &signature_backup)?;
+            signature_backed_up = true;
+        }
+        rename(&staged_signature.path, signature_destination)?;
+        signature_installed = true;
+        rename(&staged_payload.path, payload_destination)?;
+        payload_installed = true;
+        Ok(())
+    })();
+
+    if let Err(commit_error) = result {
+        if payload_installed {
+            let _ = std::fs::remove_file(payload_destination);
+        }
+        if signature_installed {
+            let _ = std::fs::remove_file(signature_destination);
+        }
+        if signature_backed_up {
+            let _ = std::fs::rename(&signature_backup, signature_destination);
+        }
+        if payload_backed_up {
+            let _ = std::fs::rename(&payload_backup, payload_destination);
+        }
+        return Err(commit_error);
+    }
+
+    if had_payload {
+        let _ = std::fs::remove_file(payload_backup);
+    }
+    if had_signature {
+        let _ = std::fs::remove_file(signature_backup);
+    }
+    Ok(())
+}
+
+fn atomic_replace_pair(
+    staged_payload: &StagedFile,
+    payload_destination: &Path,
+    staged_signature: &StagedFile,
+    signature_destination: &Path,
+) -> std::io::Result<()> {
+    atomic_replace_pair_with(
+        staged_payload,
+        payload_destination,
+        staged_signature,
+        signature_destination,
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+#[cfg(not(test))]
+struct HttpDownloadSession {
+    client: *mut c_void,
+    opened: bool,
+}
+
+#[cfg(not(test))]
+impl Drop for HttpDownloadSession {
+    fn drop(&mut self) {
+        unsafe {
+            if self.opened {
+                let _ = esp_http_client_close(self.client);
+            }
+            let _ = esp_http_client_cleanup(self.client);
+        }
+    }
+}
+
+#[cfg(not(test))]
+unsafe fn download_into_staged(
+    url: *const c_char,
+    expected_sha256_hex: *const c_char,
+    expected_size: Option<u64>,
+    max_size: u64,
+    progress_cb: Option<DownloadProgressCb>,
+    user_data: *mut c_void,
+    staged: &mut StagedFile,
+) -> i32 {
+    let expected_hash = if expected_sha256_hex.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(expected_sha256_hex).to_str() {
+            Ok("") => None,
+            Ok(value) if valid_sha256_hex(value) => Some(value),
+            Ok(_) | Err(_) => return ESP_ERR_INVALID_ARG,
+        }
+    };
+
+    let client = http_client_init(url, 30000, None, std::ptr::null_mut());
+    if client.is_null() {
+        return ESP_FAIL;
+    }
+    let mut session = HttpDownloadSession {
+        client,
+        opened: false,
+    };
+
+    let open_error = esp_http_client_open(client, 0);
+    if open_error != ESP_OK {
+        return open_error;
+    }
+    session.opened = true;
+
+    let content_length = esp_http_client_fetch_headers(client);
+    let status = esp_http_client_get_status_code(client);
+    let mut validator = match StreamValidator::new(status, content_length, expected_size, max_size)
+    {
+        Ok(validator) => validator,
+        Err(error) => return error.esp_error(),
+    };
+    let total = match u32::try_from(validator.content_length) {
+        Ok(total) => total,
+        Err(_) => return ESP_ERR_INVALID_SIZE,
+    };
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; DOWNLOAD_BUF_SIZE];
+
+    loop {
+        let read_len = esp_http_client_read(
+            client,
+            buffer.as_mut_ptr().cast::<c_char>(),
+            DOWNLOAD_BUF_SIZE as c_int,
+        );
+        match validator.observe_read(read_len) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(error) => return error.esp_error(),
+        }
+
+        let chunk = &buffer[..read_len as usize];
+        hasher.update(chunk);
+        if staged.writer().write_all(chunk).is_err() {
+            return ESP_FAIL;
+        }
+        if let Some(callback) = progress_cb {
+            let downloaded = match u32::try_from(validator.received) {
+                Ok(downloaded) => downloaded,
+                Err(_) => return ESP_ERR_INVALID_SIZE,
+            };
+            callback(downloaded, total, user_data);
+        }
+    }
+
+    if let Some(expected) = expected_hash {
+        let hash = hasher.finalize();
+        let computed: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        if !computed.eq_ignore_ascii_case(expected) {
+            return ESP_ERR_INVALID_CRC;
+        }
+    }
+
+    if staged.sync_and_close().is_err() {
+        return ESP_FAIL;
+    }
+    ESP_OK
+}
+
 /// Download a file from `url` to `dest_path`, optionally verifying SHA-256.
 ///
 /// # Safety
@@ -757,13 +1236,11 @@ pub unsafe extern "C" fn appstore_download_file(
         return ESP_ERR_INVALID_ARG;
     }
 
-    let url_str = match CStr::from_ptr(url).to_str() {
-        Ok(s) => s,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
-
-    let dest_str = match CStr::from_ptr(dest_path).to_str() {
-        Ok(s) => s,
+    if CStr::from_ptr(url).to_str().is_err() {
+        return ESP_ERR_INVALID_ARG;
+    }
+    let destination = match CStr::from_ptr(dest_path).to_str() {
+        Ok(path) => Path::new(path),
         Err(_) => return ESP_ERR_INVALID_ARG,
     };
 
@@ -775,93 +1252,41 @@ pub unsafe extern "C" fn appstore_download_file(
         dest_path,
     );
 
-    let mut file = match std::fs::File::create(dest_str) {
-        Ok(f) => f,
+    let mut staged = match StagedFile::create_for(destination) {
+        Ok(staged) => staged,
         Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot create dest file\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Cannot create temporary file\0".as_ptr(),
+            );
             return ESP_ERR_NOT_FOUND;
         }
     };
 
-    let mut hasher = Sha256::new();
+    let result = download_into_staged(
+        url,
+        expected_sha256_hex,
+        None,
+        MAX_GENERIC_DOWNLOAD,
+        progress_cb,
+        user_data,
+        &mut staged,
+    );
+    if result != ESP_OK {
+        return result;
+    }
 
-    let url_cstr = match std::ffi::CString::new(url_str) {
-        Ok(c) => c,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
-
-    let client = http_client_init(url_cstr.as_ptr(), 30000, None, std::ptr::null_mut());
-    if client.is_null() {
+    if atomic_replace(&staged, destination).is_err() {
         return ESP_FAIL;
     }
-
-    let err = esp_http_client_open(client, 0);
-    if err != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"HTTP open failed: %d\0".as_ptr(), err);
-        esp_http_client_cleanup(client);
-        return err;
-    }
-
-    let content_length = esp_http_client_fetch_headers(client);
-    let total: u32 = if content_length > 0 { content_length as u32 } else { 0 };
-    let mut downloaded: u32 = 0;
-
-    let mut buf = vec![0u8; DOWNLOAD_BUF_SIZE];
-
-    loop {
-        let read_len = esp_http_client_read(client, buf.as_mut_ptr() as *mut c_char, DOWNLOAD_BUF_SIZE as c_int);
-        if read_len <= 0 { break; }
-
-        let chunk = &buf[..read_len as usize];
-        hasher.update(chunk);
-
-        if file.write_all(chunk).is_err() {
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            return ESP_FAIL;
-        }
-
-        downloaded += read_len as u32;
-
-        if let Some(cb) = progress_cb {
-            cb(downloaded, total, user_data);
-        }
-    }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    drop(file);
-
-    // Verify SHA-256 if expected hash was provided
-    if !expected_sha256_hex.is_null() {
-        let expected_str = match CStr::from_ptr(expected_sha256_hex).to_str() {
-            Ok(s) => s,
-            Err(_) => return ESP_ERR_INVALID_ARG,
-        };
-
-        if !expected_str.is_empty() {
-            let hash = hasher.finalize();
-            let computed: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-
-            if computed != expected_str {
-                esp_log_write(
-                    ESP_LOG_ERROR,
-                    TAG.as_ptr(),
-                    b"SHA-256 mismatch!\0".as_ptr(),
-                );
-                let _ = std::fs::remove_file(dest_str);
-                return ESP_ERR_INVALID_CRC;
-            }
-
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"SHA-256 verified OK\0".as_ptr());
-        }
-    }
-
     esp_log_write(
         ESP_LOG_INFO,
         TAG.as_ptr(),
         b"Downloaded %d bytes to %s\0".as_ptr(),
-        downloaded as i32,
+        std::fs::metadata(destination)
+            .map(|metadata| metadata.len().min(i32::MAX as u64) as i32)
+            .unwrap_or(0),
         dest_path,
     );
 
@@ -911,6 +1336,15 @@ pub unsafe extern "C" fn appstore_install_entry(
         return ESP_ERR_INVALID_ARG;
     }
 
+    let expected_hash = match fixed_cstr(&e.sha256_hex) {
+        Some(hash) if valid_sha256_hex(hash) => hash,
+        _ => return ESP_ERR_INVALID_ARG,
+    };
+    let max_download = max_download_for_type(e.entry_type);
+    if e.size_bytes == 0 || e.size_bytes as u64 > max_download {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     let id_str = match validated_catalog_id(&e.id) {
         Ok(id) => id,
         Err(error) => return error,
@@ -919,7 +1353,9 @@ pub unsafe extern "C" fn appstore_install_entry(
         Ok(path) => path,
         Err(error) => return error,
     };
-    let dir = destination.parent().expect("validated destination has a parent");
+    let dir = destination
+        .parent()
+        .expect("validated destination has a parent");
 
     // Ensure destination directory exists
     let _ = std::fs::create_dir_all(dir);
@@ -930,7 +1366,10 @@ pub unsafe extern "C" fn appstore_install_entry(
         Ok(path) => path,
         Err(_) => return ESP_FAIL,
     };
-    let canonical_parent = match destination.parent().and_then(|path| std::fs::canonicalize(path).ok()) {
+    let canonical_parent = match destination
+        .parent()
+        .and_then(|path| std::fs::canonicalize(path).ok())
+    {
         Some(path) => path,
         None => return ESP_FAIL,
     };
@@ -944,41 +1383,98 @@ pub unsafe extern "C" fn appstore_install_entry(
         Err(_) => return ESP_FAIL,
     };
 
-    let url_ptr  = e.url.as_ptr() as *const c_char;
-    let sha_ptr  = if e.sha256_hex[0] != 0 { e.sha256_hex.as_ptr() as *const c_char } else { std::ptr::null() };
+    let url_ptr = e.url.as_ptr() as *const c_char;
+    let sha_cstr = match std::ffi::CString::new(expected_hash) {
+        Ok(hash) => hash,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
 
-    // Download the payload
-    let ret = appstore_download_file(url_ptr, dest_cstr.as_ptr(), sha_ptr, progress_cb, user_data);
+    // Keep the payload staged until transport, size, hash, and any signature
+    // verification have all succeeded.
+    let mut staged_payload = match StagedFile::create_for(&destination) {
+        Ok(staged) => staged,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+    let ret = download_into_staged(
+        url_ptr,
+        sha_cstr.as_ptr(),
+        Some(e.size_bytes as u64),
+        max_download,
+        progress_cb,
+        user_data,
+        &mut staged_payload,
+    );
     if ret != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Payload download failed: %d\0".as_ptr(), ret);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"Payload download failed: %d\0".as_ptr(),
+            ret,
+        );
         return ret;
     }
 
     // Download and verify signature if sig_url is present
     if e.sig_url[0] != 0 {
         let sig_path = format!("{}.sig", dest_path);
-        let sig_cstr = match std::ffi::CString::new(sig_path.as_str()) {
-            Ok(c) => c,
-            Err(_) => return ESP_FAIL,
+        let staged_sig_path = PathBuf::from(format!("{}.sig", staged_payload.path.display()));
+        let mut staged_signature = match StagedFile::create_exact(staged_sig_path) {
+            Ok(staged) => staged,
+            Err(_) => return ESP_ERR_NOT_FOUND,
         };
 
         let sig_url_ptr = e.sig_url.as_ptr() as *const c_char;
-        let sig_dl = appstore_download_file(sig_url_ptr, sig_cstr.as_ptr(), std::ptr::null(), None, std::ptr::null_mut());
+        let sig_dl = download_into_staged(
+            sig_url_ptr,
+            std::ptr::null(),
+            Some(MAX_SIGNATURE_DOWNLOAD),
+            MAX_SIGNATURE_DOWNLOAD,
+            None,
+            std::ptr::null_mut(),
+            &mut staged_signature,
+        );
 
         if sig_dl != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature download failed - aborting install\0".as_ptr());
-            let _ = std::fs::remove_file(&dest_path);
-            return ESP_FAIL;
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Signature download failed - aborting install\0".as_ptr(),
+            );
+            return sig_dl;
         }
 
-        let sig_ret = signing_verify_file(dest_cstr.as_ptr());
+        let staged_cstr =
+            match std::ffi::CString::new(staged_payload.path.to_string_lossy().as_bytes()) {
+                Ok(path) => path,
+                Err(_) => return ESP_FAIL,
+            };
+        let sig_ret = signing_verify_file(staged_cstr.as_ptr());
         if sig_ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature verification failed - deleting\0".as_ptr());
-            let _ = std::fs::remove_file(&dest_path);
-            let _ = std::fs::remove_file(format!("{}.sig", dest_path));
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Signature verification failed\0".as_ptr(),
+            );
             return ESP_ERR_INVALID_CRC;
         }
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Signature verified OK\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Signature verified OK\0".as_ptr(),
+        );
+
+        if atomic_replace_pair(
+            &staged_payload,
+            &destination,
+            &staged_signature,
+            Path::new(&sig_path),
+        )
+        .is_err()
+        {
+            return ESP_FAIL;
+        }
+    } else if atomic_replace(&staged_payload, &destination).is_err() {
+        return ESP_FAIL;
     }
 
     let name_str = CStr::from_ptr(e.name.as_ptr() as *const c_char)
@@ -1008,6 +1504,16 @@ pub unsafe extern "C" fn appstore_install_entry(
         return ESP_ERR_INVALID_ARG;
     }
     let e = &*entry;
+    if e.url[0] == 0 {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if !matches!(fixed_cstr(&e.sha256_hex), Some(hash) if valid_sha256_hex(hash)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    let max_download = max_download_for_type(e.entry_type);
+    if e.size_bytes == 0 || e.size_bytes as u64 > max_download {
+        return ESP_ERR_INVALID_SIZE;
+    }
     let id = match validated_catalog_id(&e.id) {
         Ok(id) => id,
         Err(error) => return error,
@@ -1111,41 +1617,77 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
 
         let mut entry = CatalogEntry::default();
 
-        if let Some(v) = json_str_extract(obj, "id")          { copy_str_to_buf(&v, &mut entry.id); }
-        if entry.id[0] == 0 { continue; }
+        if let Some(v) = json_str_extract(obj, "id") {
+            copy_str_to_buf(&v, &mut entry.id);
+        }
+        if entry.id[0] == 0 {
+            continue;
+        }
 
-        if let Some(v) = json_str_extract(obj, "name")        { copy_str_to_buf(&v, &mut entry.name); }
-        if let Some(v) = json_str_extract(obj, "version")     { copy_str_to_buf(&v, &mut entry.version); }
-        if let Some(v) = json_str_extract(obj, "author")      { copy_str_to_buf(&v, &mut entry.author); }
-        if let Some(v) = json_str_extract(obj, "description") { copy_str_to_buf(&v, &mut entry.description); }
-        if let Some(v) = json_str_extract(obj, "url")         { copy_str_to_buf(&v, &mut entry.url); }
-        if let Some(v) = json_str_extract(obj, "sig_url")     { copy_str_to_buf(&v, &mut entry.sig_url); }
-        if let Some(v) = json_str_extract(obj, "sha256")      { copy_str_to_buf(&v, &mut entry.sha256_hex); }
-        if let Some(v) = json_str_extract(obj, "permissions") { copy_str_to_buf(&v, &mut entry.permissions); }
-        if let Some(v) = json_str_extract(obj, "min_os_version") { copy_str_to_buf(&v, &mut entry.min_os_version); }
-        if let Some(v) = json_str_extract(obj, "category")    { copy_str_to_buf(&v, &mut entry.category); }
-        if let Some(v) = json_str_extract(obj, "icon_url")    { copy_str_to_buf(&v, &mut entry.icon_url); }
-        if let Some(v) = json_str_extract(obj, "changelog")   { copy_str_to_buf(&v, &mut entry.changelog); }
-        if let Some(v) = json_str_extract(obj, "updated")     { copy_str_to_buf(&v, &mut entry.updated_date); }
+        if let Some(v) = json_str_extract(obj, "name") {
+            copy_str_to_buf(&v, &mut entry.name);
+        }
+        if let Some(v) = json_str_extract(obj, "version") {
+            copy_str_to_buf(&v, &mut entry.version);
+        }
+        if let Some(v) = json_str_extract(obj, "author") {
+            copy_str_to_buf(&v, &mut entry.author);
+        }
+        if let Some(v) = json_str_extract(obj, "description") {
+            copy_str_to_buf(&v, &mut entry.description);
+        }
+        if let Some(v) = json_str_extract(obj, "url") {
+            copy_str_to_buf(&v, &mut entry.url);
+        }
+        if let Some(v) = json_str_extract(obj, "sig_url") {
+            copy_str_to_buf(&v, &mut entry.sig_url);
+        }
+        if let Some(v) = json_str_extract(obj, "sha256") {
+            copy_str_to_buf(&v, &mut entry.sha256_hex);
+        }
+        if let Some(v) = json_str_extract(obj, "permissions") {
+            copy_str_to_buf(&v, &mut entry.permissions);
+        }
+        if let Some(v) = json_str_extract(obj, "min_os_version") {
+            copy_str_to_buf(&v, &mut entry.min_os_version);
+        }
+        if let Some(v) = json_str_extract(obj, "category") {
+            copy_str_to_buf(&v, &mut entry.category);
+        }
+        if let Some(v) = json_str_extract(obj, "icon_url") {
+            copy_str_to_buf(&v, &mut entry.icon_url);
+        }
+        if let Some(v) = json_str_extract(obj, "changelog") {
+            copy_str_to_buf(&v, &mut entry.changelog);
+        }
+        if let Some(v) = json_str_extract(obj, "updated") {
+            copy_str_to_buf(&v, &mut entry.updated_date);
+        }
 
         if let Some(sz) = json_int_extract(obj, "size_bytes") {
-            if sz > 0 { entry.size_bytes = sz as u32; }
+            if sz > 0 && sz <= u32::MAX as i64 {
+                entry.size_bytes = sz as u32;
+            }
         }
         if let Some(f) = json_float_extract(obj, "rating") {
             entry.rating_stars = (f * 100.0 + 0.5) as u16;
         }
         if let Some(n) = json_int_extract(obj, "rating_count") {
-            if n > 0 { entry.rating_count = n as u32; }
+            if n > 0 {
+                entry.rating_count = n as u32;
+            }
         }
         if let Some(n) = json_int_extract(obj, "downloads") {
-            if n > 0 { entry.download_count = n as u32; }
+            if n > 0 {
+                entry.download_count = n as u32;
+            }
         }
         if let Some(t) = json_str_extract(obj, "type") {
             entry.entry_type = match t.as_str() {
                 "firmware" => CATALOG_TYPE_FIRMWARE,
-                "driver"   => CATALOG_TYPE_DRIVER,
-                "wm"       => CATALOG_TYPE_WM,
-                _          => CATALOG_TYPE_APP,
+                "driver" => CATALOG_TYPE_DRIVER,
+                "wm" => CATALOG_TYPE_WM,
+                _ => CATALOG_TYPE_APP,
             };
         }
         if let Some(boards) = json_array_extract(obj, "compatible_boards") {
@@ -1154,7 +1696,9 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
         if let Some(screenshots_raw) = json_array_extract(obj, "screenshots") {
             let mut sc_count = 0u8;
             for (i, url) in screenshots_raw.split(',').enumerate() {
-                if i >= 3 { break; }
+                if i >= 3 {
+                    break;
+                }
                 copy_str_to_buf(url.trim(), &mut entry.screenshots[i]);
                 sc_count += 1;
             }
@@ -1162,8 +1706,8 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
         }
         if let Some(det_bus) = extract_detection_field(obj, "bus") {
             copy_str_to_buf(&det_bus, &mut entry.detection_bus);
-            entry.detection_address       = extract_detection_u16(obj, "address");
-            entry.detection_chip_id_reg   = extract_detection_u16(obj, "chip_id_reg");
+            entry.detection_address = extract_detection_u16(obj, "address");
+            entry.detection_chip_id_reg = extract_detection_u16(obj, "chip_id_reg");
             entry.detection_chip_id_value = extract_detection_u16(obj, "chip_id_value");
         }
         entry.is_signed = entry.sig_url[0] != 0;
@@ -1228,7 +1772,9 @@ pub unsafe extern "C" fn appstore_fetch_by_category(
 
     let mut out_idx = 0u32;
     for i in 0..total as usize {
-        if out_idx >= max_entries { break; }
+        if out_idx >= max_entries {
+            break;
+        }
         let e = &tmp_entries[i];
         if cat_str != "all" {
             let cat = std::str::from_utf8(&e.category)
@@ -1239,20 +1785,32 @@ pub unsafe extern "C" fn appstore_fetch_by_category(
             }
         }
         *entries.add(out_idx as usize) = CatalogEntry {
-            id: e.id, name: e.name, version: e.version, author: e.author,
-            description: e.description, url: e.url, sig_url: e.sig_url,
-            sha256_hex: e.sha256_hex, permissions: e.permissions,
-            min_os_version: e.min_os_version, size_bytes: e.size_bytes,
-            entry_type: e.entry_type, is_signed: e.is_signed,
+            id: e.id,
+            name: e.name,
+            version: e.version,
+            author: e.author,
+            description: e.description,
+            url: e.url,
+            sig_url: e.sig_url,
+            sha256_hex: e.sha256_hex,
+            permissions: e.permissions,
+            min_os_version: e.min_os_version,
+            size_bytes: e.size_bytes,
+            entry_type: e.entry_type,
+            is_signed: e.is_signed,
             compatible_boards: e.compatible_boards,
             detection_bus: e.detection_bus,
             detection_address: e.detection_address,
             detection_chip_id_reg: e.detection_chip_id_reg,
             detection_chip_id_value: e.detection_chip_id_value,
-            category: e.category, icon_url: e.icon_url,
-            screenshots: e.screenshots, screenshot_count: e.screenshot_count,
-            rating_stars: e.rating_stars, rating_count: e.rating_count,
-            download_count: e.download_count, updated_date: e.updated_date,
+            category: e.category,
+            icon_url: e.icon_url,
+            screenshots: e.screenshots,
+            screenshot_count: e.screenshot_count,
+            rating_stars: e.rating_stars,
+            rating_count: e.rating_count,
+            download_count: e.download_count,
+            updated_date: e.updated_date,
             changelog: e.changelog,
         };
         out_idx += 1;
@@ -1278,10 +1836,10 @@ pub unsafe extern "C" fn appstore_fetch_by_category(
 }
 
 // Sort field constants
-pub const SORT_BY_NAME:      u32 = 0;
-pub const SORT_BY_RATING:    u32 = 1;
+pub const SORT_BY_NAME: u32 = 0;
+pub const SORT_BY_RATING: u32 = 1;
 pub const SORT_BY_DOWNLOADS: u32 = 2;
-pub const SORT_BY_UPDATED:   u32 = 3;
+pub const SORT_BY_UPDATED: u32 = 3;
 
 /// Sort a slice of CatalogEntry in place.
 ///
@@ -1293,18 +1851,30 @@ pub fn sort_entries_slice(entries: &mut [CatalogEntry], sort_by: u32, ascending:
             SORT_BY_RATING => a.rating_stars.cmp(&b.rating_stars),
             SORT_BY_DOWNLOADS => a.download_count.cmp(&b.download_count),
             SORT_BY_UPDATED => {
-                let da = std::str::from_utf8(&a.updated_date).unwrap_or("").trim_end_matches('\0');
-                let db = std::str::from_utf8(&b.updated_date).unwrap_or("").trim_end_matches('\0');
+                let da = std::str::from_utf8(&a.updated_date)
+                    .unwrap_or("")
+                    .trim_end_matches('\0');
+                let db = std::str::from_utf8(&b.updated_date)
+                    .unwrap_or("")
+                    .trim_end_matches('\0');
                 da.cmp(db)
             }
             _ => {
                 // name
-                let na = std::str::from_utf8(&a.name).unwrap_or("").trim_end_matches('\0');
-                let nb = std::str::from_utf8(&b.name).unwrap_or("").trim_end_matches('\0');
+                let na = std::str::from_utf8(&a.name)
+                    .unwrap_or("")
+                    .trim_end_matches('\0');
+                let nb = std::str::from_utf8(&b.name)
+                    .unwrap_or("")
+                    .trim_end_matches('\0');
                 na.cmp(nb)
             }
         };
-        if ascending { ord } else { ord.reverse() }
+        if ascending {
+            ord
+        } else {
+            ord.reverse()
+        }
     });
 }
 
@@ -1368,12 +1938,7 @@ pub unsafe extern "C" fn appstore_submit_rating(
         Err(_) => return ESP_FAIL,
     };
 
-    let client = http_client_init(
-        endpoint_cstr.as_ptr(),
-        10000,
-        None,
-        std::ptr::null_mut(),
-    );
+    let client = http_client_init(endpoint_cstr.as_ptr(), 10000, None, std::ptr::null_mut());
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -1446,12 +2011,7 @@ pub unsafe extern "C" fn appstore_report_download(
         Err(_) => return ESP_FAIL,
     };
 
-    let client = http_client_init(
-        endpoint_cstr.as_ptr(),
-        10000,
-        None,
-        std::ptr::null_mut(),
-    );
+    let client = http_client_init(endpoint_cstr.as_ptr(), 10000, None, std::ptr::null_mut());
     if client.is_null() {
         return ESP_FAIL;
     }
@@ -1503,6 +2063,231 @@ pub unsafe extern "C" fn appstore_report_download(
 mod tests {
     use super::*;
     use std::ffi::CStr;
+    use std::io;
+
+    fn transaction_test_dir(label: &str) -> PathBuf {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "thistle-appstore-{label}-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        path
+    }
+
+    fn stage_bytes(destination: &Path, bytes: &[u8]) -> StagedFile {
+        let mut staged = StagedFile::create_for(destination).unwrap();
+        staged.writer().write_all(bytes).unwrap();
+        staged.sync_and_close().unwrap();
+        staged
+    }
+
+    fn assert_no_transaction_debris(dir: &Path) {
+        let debris: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".thistle-tmp-") || name.contains(".thistle-backup-"))
+            .collect();
+        assert!(debris.is_empty(), "transaction debris remains: {debris:?}");
+    }
+
+    #[test]
+    fn stream_validator_rejects_bad_status_length_and_size() {
+        assert!(matches!(
+            StreamValidator::new(404, 4, Some(4), 8),
+            Err(StreamValidationError::HttpStatus)
+        ));
+        assert!(matches!(
+            StreamValidator::new(200, -1, None, 8),
+            Err(StreamValidationError::MissingLength)
+        ));
+        assert!(matches!(
+            StreamValidator::new(200, 3, Some(4), 8),
+            Err(StreamValidationError::SizeMismatch)
+        ));
+        assert!(matches!(
+            StreamValidator::new(200, 9, None, 8),
+            Err(StreamValidationError::Oversized)
+        ));
+    }
+
+    #[test]
+    fn stream_validator_rejects_read_errors_truncation_and_overrun() {
+        let mut negative = StreamValidator::new(200, 4, Some(4), 8).unwrap();
+        assert_eq!(negative.observe_read(-1), Err(StreamValidationError::Read));
+
+        let mut truncated = StreamValidator::new(200, 4, Some(4), 8).unwrap();
+        assert_eq!(truncated.observe_read(2), Ok(true));
+        assert_eq!(
+            truncated.observe_read(0),
+            Err(StreamValidationError::SizeMismatch)
+        );
+
+        let mut overrun = StreamValidator::new(200, 4, Some(4), 8).unwrap();
+        assert_eq!(
+            overrun.observe_read(5),
+            Err(StreamValidationError::SizeMismatch)
+        );
+    }
+
+    #[test]
+    fn stream_validator_accepts_only_exact_complete_response() {
+        let mut validator = StreamValidator::new(200, 4, Some(4), 8).unwrap();
+        assert_eq!(validator.observe_read(2), Ok(true));
+        assert_eq!(validator.observe_read(2), Ok(true));
+        assert_eq!(validator.observe_read(0), Ok(false));
+    }
+
+    #[test]
+    fn stream_validator_detects_counter_overflow() {
+        let mut validator = StreamValidator::new(200, 1, None, u64::MAX).unwrap();
+        validator.received = u64::MAX;
+        assert_eq!(
+            validator.observe_read(1),
+            Err(StreamValidationError::CounterOverflow)
+        );
+    }
+
+    #[test]
+    fn staged_failure_preserves_active_artifact_and_cleans_temp() {
+        let dir = transaction_test_dir("staged-failure");
+        let destination = dir.join("app.elf");
+        std::fs::write(&destination, b"active").unwrap();
+
+        for failure in [
+            "client_init",
+            "open",
+            "http_status",
+            "content_length",
+            "read",
+            "write",
+            "declared_size",
+            "oversized",
+            "counter_overflow",
+            "hash",
+            "signature",
+        ] {
+            let staged = stage_bytes(&destination, failure.as_bytes());
+            drop(staged);
+            assert_eq!(std::fs::read(&destination).unwrap(), b"active");
+            assert_no_transaction_debris(&dir);
+        }
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_replace_commits_verified_staging_file() {
+        let dir = transaction_test_dir("replace-success");
+        let destination = dir.join("app.elf");
+        std::fs::write(&destination, b"old").unwrap();
+        let staged = stage_bytes(&destination, b"new");
+
+        atomic_replace(&staged, &destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new");
+        drop(staged);
+        assert_no_transaction_debris(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_replace_restores_active_artifact_when_commit_rename_fails() {
+        let dir = transaction_test_dir("replace-rollback");
+        let destination = dir.join("app.elf");
+        std::fs::write(&destination, b"old").unwrap();
+        let staged = stage_bytes(&destination, b"new");
+        let mut calls = 0;
+
+        let result = atomic_replace_with(&staged, &destination, |from, to| {
+            calls += 1;
+            if calls == 2 {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "injected rename failure",
+                ))
+            } else {
+                std::fs::rename(from, to)
+            }
+        });
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"old");
+        drop(staged);
+        assert_no_transaction_debris(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_pair_replace_rolls_back_every_commit_failure() {
+        for fail_at in 1..=4 {
+            let dir = transaction_test_dir(&format!("pair-rollback-{fail_at}"));
+            let payload = dir.join("app.elf");
+            let signature = dir.join("app.elf.sig");
+            std::fs::write(&payload, b"old-payload").unwrap();
+            std::fs::write(&signature, b"old-signature").unwrap();
+            let staged_payload = stage_bytes(&payload, b"new-payload");
+            let staged_signature = stage_bytes(&signature, b"new-signature");
+            let mut calls = 0;
+
+            let result = atomic_replace_pair_with(
+                &staged_payload,
+                &payload,
+                &staged_signature,
+                &signature,
+                |from, to| {
+                    calls += 1;
+                    if calls == fail_at {
+                        Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "injected rename failure",
+                        ))
+                    } else {
+                        std::fs::rename(from, to)
+                    }
+                },
+            );
+
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&payload).unwrap(), b"old-payload");
+            assert_eq!(std::fs::read(&signature).unwrap(), b"old-signature");
+            drop(staged_payload);
+            drop(staged_signature);
+            assert_no_transaction_debris(&dir);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn atomic_pair_replace_commits_payload_and_signature_together() {
+        let dir = transaction_test_dir("pair-success");
+        let payload = dir.join("app.elf");
+        let signature = dir.join("app.elf.sig");
+        std::fs::write(&payload, b"old-payload").unwrap();
+        std::fs::write(&signature, b"old-signature").unwrap();
+        let staged_payload = stage_bytes(&payload, b"new-payload");
+        let staged_signature = stage_bytes(&signature, b"new-signature");
+
+        atomic_replace_pair(
+            &staged_payload,
+            &payload,
+            &staged_signature,
+            &signature,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&payload).unwrap(), b"new-payload");
+        assert_eq!(std::fs::read(&signature).unwrap(), b"new-signature");
+        drop(staged_payload);
+        drop(staged_signature);
+        assert_no_transaction_debris(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sha256_validation_accepts_uppercase_hex() {
+        assert!(valid_sha256_hex(&"A".repeat(64)));
+    }
 
     #[test]
     fn test_http_ffi_has_no_approximate_esp_idf_structs() {
@@ -1515,19 +2300,41 @@ mod tests {
 
     #[test]
     fn test_catalog_id_rejects_traversal_and_unsafe_components() {
-        for invalid in ["", "..", "../wm/target", "safe..target", "/absolute", "a/b", "a\\b", "C:target", "bad\nname"] {
+        for invalid in [
+            "",
+            "..",
+            "../wm/target",
+            "safe..target",
+            "/absolute",
+            "a/b",
+            "a\\b",
+            "C:target",
+            "bad\nname",
+        ] {
             let mut id = [0u8; 64];
             copy_str_to_buf(invalid, &mut id);
-            assert_eq!(validated_catalog_id(&id), Err(ESP_ERR_INVALID_ARG), "accepted {invalid:?}");
+            assert_eq!(
+                validated_catalog_id(&id),
+                Err(ESP_ERR_INVALID_ARG),
+                "accepted {invalid:?}"
+            );
         }
 
         let unterminated = [b'a'; 64];
-        assert_eq!(validated_catalog_id(&unterminated), Err(ESP_ERR_INVALID_ARG));
+        assert_eq!(
+            validated_catalog_id(&unterminated),
+            Err(ESP_ERR_INVALID_ARG)
+        );
     }
 
     #[test]
     fn test_catalog_id_accepts_strict_identifiers() {
-        for valid in ["weather", "com.thistle.weather", "driver_sx1262", "wm-dark-2"] {
+        for valid in [
+            "weather",
+            "com.thistle.weather",
+            "driver_sx1262",
+            "wm-dark-2",
+        ] {
             let mut id = [0u8; 64];
             copy_str_to_buf(valid, &mut id);
             assert_eq!(validated_catalog_id(&id), Ok(valid));
@@ -1554,11 +2361,50 @@ mod tests {
         let mut entry = CatalogEntry::default();
         copy_str_to_buf("../../config/system", &mut entry.id);
         copy_str_to_buf("https://example.invalid/app.elf", &mut entry.url);
+        copy_str_to_buf(&"a".repeat(64), &mut entry.sha256_hex);
+        entry.size_bytes = 1;
 
         assert_eq!(
             unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
             ESP_ERR_INVALID_ARG
         );
+    }
+
+    #[test]
+    fn test_install_requires_valid_sha256_and_declared_size_before_io() {
+        let mut entry = CatalogEntry::default();
+        copy_str_to_buf("safe-app", &mut entry.id);
+        copy_str_to_buf("https://example.invalid/app.elf", &mut entry.url);
+        entry.size_bytes = 1;
+
+        let invalid_hashes = [String::new(), "abc".into(), "g".repeat(64), "a".repeat(63)];
+        for hash in invalid_hashes {
+            entry.sha256_hex.fill(0);
+            copy_str_to_buf(&hash, &mut entry.sha256_hex);
+            assert_eq!(
+                unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
+                ESP_ERR_INVALID_ARG
+            );
+        }
+
+        copy_str_to_buf(&"a".repeat(64), &mut entry.sha256_hex);
+        entry.size_bytes = 0;
+        assert_eq!(
+            unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
+            ESP_ERR_INVALID_SIZE
+        );
+    }
+
+    #[test]
+    fn test_catalog_parser_does_not_wrap_oversized_size() {
+        let mut entries = Vec::new();
+        parse_catalog_entries(
+            r#"[{"id":"safe","size_bytes":4294967296}]"#,
+            "all",
+            &mut entries,
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].size_bytes, 0);
     }
 
     // -----------------------------------------------------------------------
@@ -1569,11 +2415,15 @@ mod tests {
     #[test]
     fn test_get_catalog_url_contains_thistle_apps() {
         let ptr = appstore_get_catalog_url();
-        assert!(!ptr.is_null(), "appstore_get_catalog_url() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "appstore_get_catalog_url() must not return NULL"
+        );
         let url = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
         assert!(
             url.contains("thistle-apps"),
-            "catalog URL must contain \"thistle-apps\", got: {}", url
+            "catalog URL must contain \"thistle-apps\", got: {}",
+            url
         );
     }
 
@@ -1597,7 +2447,7 @@ mod tests {
     #[test]
     fn test_json_str_extract_simple() {
         let json = r#"{"name":"my_app","version":"1.2.3"}"#;
-        assert_eq!(json_str_extract(json, "name"),    Some("my_app".to_string()));
+        assert_eq!(json_str_extract(json, "name"), Some("my_app".to_string()));
         assert_eq!(json_str_extract(json, "version"), Some("1.2.3".to_string()));
         assert_eq!(json_str_extract(json, "missing"), None);
     }
@@ -1623,7 +2473,7 @@ mod tests {
         let json = r#"{"size_bytes":102400,"entry_type":0}"#;
         assert_eq!(json_int_extract(json, "size_bytes"), Some(102400i64));
         assert_eq!(json_int_extract(json, "entry_type"), Some(0i64));
-        assert_eq!(json_int_extract(json, "missing"),    None);
+        assert_eq!(json_int_extract(json, "missing"), None);
     }
 
     // -----------------------------------------------------------------------
@@ -1670,17 +2520,41 @@ mod tests {
     #[test]
     fn test_catalog_entry_field_sizes() {
         let e = CatalogEntry::default();
-        assert_eq!(e.url.len(),              APPSTORE_URL_MAX, "url field must be APPSTORE_URL_MAX bytes");
-        assert_eq!(e.sig_url.len(),          APPSTORE_URL_MAX, "sig_url field must be APPSTORE_URL_MAX bytes");
-        assert_eq!(e.sha256_hex.len(),       65,               "sha256_hex must be 65 bytes (64 hex + NUL)");
-        assert_eq!(e.compatible_boards.len(), 128,             "compatible_boards field must be 128 bytes");
-        assert_eq!(e.detection_bus.len(),    8,                "detection_bus field must be 8 bytes");
-        assert_eq!(e.category.len(),         32,               "category field must be 32 bytes");
-        assert_eq!(e.icon_url.len(),         256,              "icon_url field must be 256 bytes");
-        assert_eq!(e.screenshots.len(),      3,                "screenshots must hold 3 entries");
-        assert_eq!(e.screenshots[0].len(),   256,              "each screenshot URL must be 256 bytes");
-        assert_eq!(e.updated_date.len(),     11,               "updated_date must be 11 bytes");
-        assert_eq!(e.changelog.len(),        512,              "changelog must be 512 bytes");
+        assert_eq!(
+            e.url.len(),
+            APPSTORE_URL_MAX,
+            "url field must be APPSTORE_URL_MAX bytes"
+        );
+        assert_eq!(
+            e.sig_url.len(),
+            APPSTORE_URL_MAX,
+            "sig_url field must be APPSTORE_URL_MAX bytes"
+        );
+        assert_eq!(
+            e.sha256_hex.len(),
+            65,
+            "sha256_hex must be 65 bytes (64 hex + NUL)"
+        );
+        assert_eq!(
+            e.compatible_boards.len(),
+            128,
+            "compatible_boards field must be 128 bytes"
+        );
+        assert_eq!(
+            e.detection_bus.len(),
+            8,
+            "detection_bus field must be 8 bytes"
+        );
+        assert_eq!(e.category.len(), 32, "category field must be 32 bytes");
+        assert_eq!(e.icon_url.len(), 256, "icon_url field must be 256 bytes");
+        assert_eq!(e.screenshots.len(), 3, "screenshots must hold 3 entries");
+        assert_eq!(
+            e.screenshots[0].len(),
+            256,
+            "each screenshot URL must be 256 bytes"
+        );
+        assert_eq!(e.updated_date.len(), 11, "updated_date must be 11 bytes");
+        assert_eq!(e.changelog.len(), 512, "changelog must be 512 bytes");
     }
 
     // -----------------------------------------------------------------------
@@ -1700,7 +2574,10 @@ mod tests {
                 &mut count as *mut c_int,
             )
         };
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "NULL entries must return ESP_ERR_INVALID_ARG");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "NULL entries must return ESP_ERR_INVALID_ARG"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1718,7 +2595,10 @@ mod tests {
                 std::ptr::null_mut(),
             )
         };
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "NULL out_count must return ESP_ERR_INVALID_ARG");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "NULL out_count must return ESP_ERR_INVALID_ARG"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1759,16 +2639,22 @@ mod tests {
     #[test]
     fn test_board_compatible_empty_is_universal() {
         let e = make_empty_entry();
-        assert!(catalog_entry_is_board_compatible(&e, "tdeck-pro"), "empty = universal");
-        assert!(catalog_entry_is_board_compatible(&e, "any-board"),  "empty = universal");
+        assert!(
+            catalog_entry_is_board_compatible(&e, "tdeck-pro"),
+            "empty = universal"
+        );
+        assert!(
+            catalog_entry_is_board_compatible(&e, "any-board"),
+            "empty = universal"
+        );
     }
 
     #[test]
     fn test_board_compatible_match() {
         let mut e = make_empty_entry();
         copy_str_to_buf("tdeck-pro,tdeck", &mut e.compatible_boards);
-        assert!( catalog_entry_is_board_compatible(&e, "tdeck-pro"));
-        assert!( catalog_entry_is_board_compatible(&e, "tdeck"));
+        assert!(catalog_entry_is_board_compatible(&e, "tdeck-pro"));
+        assert!(catalog_entry_is_board_compatible(&e, "tdeck"));
         assert!(!catalog_entry_is_board_compatible(&e, "esp32-devkit"));
     }
 
@@ -1792,7 +2678,7 @@ mod tests {
     fn test_extract_detection_field_spi() {
         let obj = r#"{"id":"x","detection":{"bus":"spi","chip_id_reg":"0x0320","chip_id_value":"0x0058"}}"#;
         assert_eq!(extract_detection_field(obj, "bus"), Some("spi".to_string()));
-        assert_eq!(extract_detection_u16(obj, "chip_id_reg"),   0x0320);
+        assert_eq!(extract_detection_u16(obj, "chip_id_reg"), 0x0320);
         assert_eq!(extract_detection_u16(obj, "chip_id_value"), 0x0058);
     }
 
@@ -1808,7 +2694,7 @@ mod tests {
         let mut e = make_empty_entry();
         copy_str_to_buf("i2c", &mut e.detection_bus);
         e.detection_address = 0x34;
-        assert!( catalog_entry_detection_matches(&e, "i2c", 0x34));
+        assert!(catalog_entry_detection_matches(&e, "i2c", 0x34));
         assert!(!catalog_entry_detection_matches(&e, "i2c", 0x1A));
         assert!(!catalog_entry_detection_matches(&e, "spi", 0x34));
     }
@@ -1878,18 +2764,27 @@ mod tests {
         let id = std::str::from_utf8(&e.id).unwrap().trim_end_matches('\0');
         assert_eq!(id, "com.thistle.messenger");
 
-        let cat = std::str::from_utf8(&e.category).unwrap().trim_end_matches('\0');
+        let cat = std::str::from_utf8(&e.category)
+            .unwrap()
+            .trim_end_matches('\0');
         assert_eq!(cat, "communication");
 
         // 4.5 × 100 = 450
-        assert_eq!(e.rating_stars, 450, "rating_stars should be 450 for 4.5 stars");
+        assert_eq!(
+            e.rating_stars, 450,
+            "rating_stars should be 450 for 4.5 stars"
+        );
         assert_eq!(e.rating_count, 127);
         assert_eq!(e.download_count, 1523);
 
-        let date = std::str::from_utf8(&e.updated_date).unwrap().trim_end_matches('\0');
+        let date = std::str::from_utf8(&e.updated_date)
+            .unwrap()
+            .trim_end_matches('\0');
         assert_eq!(date, "2026-03-22");
 
-        let cl = std::str::from_utf8(&e.changelog).unwrap().trim_end_matches('\0');
+        let cl = std::str::from_utf8(&e.changelog)
+            .unwrap()
+            .trim_end_matches('\0');
         assert_eq!(cl, "Added LoRa mesh support");
 
         assert_eq!(e.size_bytes, 65536);
@@ -1911,11 +2806,19 @@ mod tests {
 
         let mut entries_all = Vec::new();
         parse_catalog_entries(json, "all", &mut entries_all);
-        assert_eq!(entries_all.len(), 3, "filter=all should return all 3 entries");
+        assert_eq!(
+            entries_all.len(),
+            3,
+            "filter=all should return all 3 entries"
+        );
 
         let mut entries_empty = Vec::new();
         parse_catalog_entries(json, "", &mut entries_empty);
-        assert_eq!(entries_empty.len(), 3, "empty filter should return all 3 entries");
+        assert_eq!(
+            entries_empty.len(),
+            3,
+            "empty filter should return all 3 entries"
+        );
     }
 
     // test_parse_catalog_entries_old_format_compat — entries without new fields parse fine
@@ -1937,9 +2840,18 @@ mod tests {
         assert_eq!(entries.len(), 1);
 
         let e = &entries[0];
-        assert_eq!(e.rating_stars, 0, "old entries must default rating_stars to 0");
-        assert_eq!(e.download_count, 0, "old entries must default download_count to 0");
-        assert_eq!(e.category[0], 0, "old entries must default category to empty");
+        assert_eq!(
+            e.rating_stars, 0,
+            "old entries must default rating_stars to 0"
+        );
+        assert_eq!(
+            e.download_count, 0,
+            "old entries must default download_count to 0"
+        );
+        assert_eq!(
+            e.category[0], 0,
+            "old entries must default category to empty"
+        );
     }
 
     // test_sort_entries_by_rating
@@ -1967,15 +2879,17 @@ mod tests {
         ];
 
         sort_entries_slice(&mut entries, SORT_BY_RATING, false); // high → low
-        let ids: Vec<&str> = entries.iter().map(|e| {
-            std::str::from_utf8(&e.id).unwrap().trim_end_matches('\0')
-        }).collect();
+        let ids: Vec<&str> = entries
+            .iter()
+            .map(|e| std::str::from_utf8(&e.id).unwrap().trim_end_matches('\0'))
+            .collect();
         assert_eq!(ids, vec!["app_b", "app_c", "app_a"], "sort by rating desc");
 
         sort_entries_slice(&mut entries, SORT_BY_RATING, true); // low → high
-        let ids: Vec<&str> = entries.iter().map(|e| {
-            std::str::from_utf8(&e.id).unwrap().trim_end_matches('\0')
-        }).collect();
+        let ids: Vec<&str> = entries
+            .iter()
+            .map(|e| std::str::from_utf8(&e.id).unwrap().trim_end_matches('\0'))
+            .collect();
         assert_eq!(ids, vec!["app_a", "app_c", "app_b"], "sort by rating asc");
     }
 
@@ -2013,26 +2927,39 @@ mod tests {
     #[test]
     fn test_sort_entries_by_name() {
         let mut entries = vec![
-            { let mut e = CatalogEntry::default(); copy_str_to_buf("Zebra", &mut e.name); e },
-            { let mut e = CatalogEntry::default(); copy_str_to_buf("Apple", &mut e.name); e },
-            { let mut e = CatalogEntry::default(); copy_str_to_buf("Mango", &mut e.name); e },
+            {
+                let mut e = CatalogEntry::default();
+                copy_str_to_buf("Zebra", &mut e.name);
+                e
+            },
+            {
+                let mut e = CatalogEntry::default();
+                copy_str_to_buf("Apple", &mut e.name);
+                e
+            },
+            {
+                let mut e = CatalogEntry::default();
+                copy_str_to_buf("Mango", &mut e.name);
+                e
+            },
         ];
 
         sort_entries_slice(&mut entries, SORT_BY_NAME, true);
-        let names: Vec<&str> = entries.iter().map(|e| {
-            std::str::from_utf8(&e.name).unwrap().trim_end_matches('\0')
-        }).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| std::str::from_utf8(&e.name).unwrap().trim_end_matches('\0'))
+            .collect();
         assert_eq!(names, vec!["Apple", "Mango", "Zebra"]);
     }
 
     // test_format_download_count — <1000, >=1000, >=1000000
     #[test]
     fn test_format_download_count() {
-        assert_eq!(format_download_count(0),       "0");
-        assert_eq!(format_download_count(999),     "999");
-        assert_eq!(format_download_count(1000),    "1.0K");
-        assert_eq!(format_download_count(1523),    "1.5K");
-        assert_eq!(format_download_count(2341),    "2.3K");
+        assert_eq!(format_download_count(0), "0");
+        assert_eq!(format_download_count(999), "999");
+        assert_eq!(format_download_count(1000), "1.0K");
+        assert_eq!(format_download_count(1523), "1.5K");
+        assert_eq!(format_download_count(2341), "2.3K");
         assert_eq!(format_download_count(1_000_000), "1.0M");
         assert_eq!(format_download_count(1_200_000), "1.2M");
     }
@@ -2050,7 +2977,7 @@ mod tests {
         // 3 stars
         assert_eq!(format_star_rating(300), "★★★☆☆");
         // 0 stars
-        assert_eq!(format_star_rating(0),   "☆☆☆☆☆");
+        assert_eq!(format_star_rating(0), "☆☆☆☆☆");
         // 1 star
         assert_eq!(format_star_rating(100), "★☆☆☆☆");
     }
@@ -2096,13 +3023,30 @@ mod tests {
     #[test]
     fn test_appstore_sort_entries_c_api() {
         let mut entries = vec![
-            { let mut e = CatalogEntry::default(); e.download_count = 100; e },
-            { let mut e = CatalogEntry::default(); e.download_count = 500; e },
-            { let mut e = CatalogEntry::default(); e.download_count = 200; e },
+            {
+                let mut e = CatalogEntry::default();
+                e.download_count = 100;
+                e
+            },
+            {
+                let mut e = CatalogEntry::default();
+                e.download_count = 500;
+                e
+            },
+            {
+                let mut e = CatalogEntry::default();
+                e.download_count = 200;
+                e
+            },
         ];
 
         let rc = unsafe {
-            appstore_sort_entries(entries.as_mut_ptr(), entries.len() as u32, SORT_BY_DOWNLOADS, false)
+            appstore_sort_entries(
+                entries.as_mut_ptr(),
+                entries.len() as u32,
+                SORT_BY_DOWNLOADS,
+                false,
+            )
         };
         assert_eq!(rc, ESP_OK);
         assert_eq!(entries[0].download_count, 500);
@@ -2121,7 +3065,7 @@ mod tests {
     #[test]
     fn test_appstore_submit_rating_invalid_stars() {
         let url = b"https://example.com/api\0";
-        let id  = b"com.thistle.test\0";
+        let id = b"com.thistle.test\0";
         let rc = unsafe {
             appstore_submit_rating(
                 url.as_ptr() as *const c_char,
@@ -2135,9 +3079,7 @@ mod tests {
     // test_appstore_report_download_null_args
     #[test]
     fn test_appstore_report_download_null_args() {
-        let rc = unsafe {
-            appstore_report_download(std::ptr::null(), std::ptr::null())
-        };
+        let rc = unsafe { appstore_report_download(std::ptr::null(), std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 }
