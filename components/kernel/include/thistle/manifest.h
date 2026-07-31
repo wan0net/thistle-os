@@ -4,8 +4,9 @@
 #pragma once
 
 #include "esp_err.h"
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /* Manifest types — apps, drivers, and firmware share the same schema */
 typedef enum {
@@ -52,6 +53,37 @@ typedef struct {
     /* Firmware-specific */
     char changelog[256];       /* What changed in this version */
 } thistle_manifest_t;
+
+/* Keep the public C layout synchronized with Rust's #[repr(C)] CManifest. */
+#if defined(__cplusplus)
+#define THISTLE_MANIFEST_STATIC_ASSERT(condition, message) static_assert(condition, message)
+#define THISTLE_MANIFEST_ALIGNOF(type) alignof(type)
+#else
+#define THISTLE_MANIFEST_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
+#define THISTLE_MANIFEST_ALIGNOF(type) _Alignof(type)
+#endif
+
+THISTLE_MANIFEST_STATIC_ASSERT(sizeof(manifest_type_t) == 4,
+                               "manifest_type_t ABI must remain 4 bytes");
+THISTLE_MANIFEST_STATIC_ASSERT(sizeof(thistle_manifest_t) == 720,
+                               "thistle_manifest_t ABI size mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(THISTLE_MANIFEST_ALIGNOF(thistle_manifest_t) == 4,
+                               "thistle_manifest_t ABI alignment mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, id) == 4,
+                               "thistle_manifest_t.id ABI offset mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, permissions) == 436,
+                               "thistle_manifest_t.permissions ABI offset mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, background) == 440,
+                               "thistle_manifest_t.background ABI offset mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, min_memory_kb) == 444,
+                               "thistle_manifest_t.min_memory_kb ABI offset mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, hal_interface) == 448,
+                               "thistle_manifest_t.hal_interface ABI offset mismatch");
+THISTLE_MANIFEST_STATIC_ASSERT(offsetof(thistle_manifest_t, changelog) == 464,
+                               "thistle_manifest_t.changelog ABI offset mismatch");
+
+#undef THISTLE_MANIFEST_STATIC_ASSERT
+#undef THISTLE_MANIFEST_ALIGNOF
 
 /* Parse a manifest.json file from the given path.
  * Returns ESP_OK on success, ESP_ERR_NOT_FOUND if file missing,
