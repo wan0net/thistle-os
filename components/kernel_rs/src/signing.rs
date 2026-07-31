@@ -211,7 +211,8 @@ pub extern "C" fn signing_get_public_key_hex() -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
+    use ed25519_dalek::{Signer, SigningKey};
+    use std::ffi::CString;
 
     /// Reset global state between tests so they are independent.
     fn reset() {
@@ -227,6 +228,19 @@ mod tests {
         let seed = [0x42u8; 32];
         let signing_key = SigningKey::from_bytes(&seed);
         signing_key.verifying_key().to_bytes()
+    }
+
+    fn temp_payload_path(case: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "thistle-signing-{case}-{}-{}.elf",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ))
+    }
+
+    fn remove_payload_fixture(path: &std::path::Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(sig_path_for(path.to_string_lossy().as_ref()));
     }
 
     #[test]
@@ -402,6 +416,71 @@ mod tests {
             result, ESP_ERR_NOT_FOUND,
             "signing_verify_file on missing path must return ESP_ERR_NOT_FOUND"
         );
+    }
+
+    #[test]
+    fn test_verify_file_rejects_63_and_65_byte_signatures() {
+        reset();
+        let payload_path = temp_payload_path("bad-length");
+        remove_payload_fixture(&payload_path);
+        let signature_path = sig_path_for(payload_path.to_string_lossy().as_ref());
+        std::fs::write(&payload_path, b"signed payload").unwrap();
+        let c_path = CString::new(payload_path.to_string_lossy().as_bytes()).unwrap();
+
+        for length in [63, 65] {
+            std::fs::write(&signature_path, vec![0u8; length]).unwrap();
+            assert_eq!(
+                unsafe { signing_verify_file(c_path.as_ptr()) },
+                ESP_ERR_INVALID_SIZE,
+                "{length}-byte signature must fail closed"
+            );
+        }
+
+        remove_payload_fixture(&payload_path);
+    }
+
+    #[test]
+    fn test_verify_file_rejects_unreadable_payload() {
+        reset();
+        let payload_path = temp_payload_path("unreadable");
+        remove_payload_fixture(&payload_path);
+        std::fs::create_dir(&payload_path).unwrap();
+        let signature_path = sig_path_for(payload_path.to_string_lossy().as_ref());
+        std::fs::write(&signature_path, [0u8; 64]).unwrap();
+        let c_path = CString::new(payload_path.to_string_lossy().as_bytes()).unwrap();
+
+        assert_eq!(
+            unsafe { signing_verify_file(c_path.as_ptr()) },
+            ESP_ERR_NOT_FOUND
+        );
+
+        let _ = std::fs::remove_file(signature_path);
+        let _ = std::fs::remove_dir(payload_path);
+    }
+
+    #[test]
+    fn test_verify_file_accepts_valid_and_rejects_tampered_payload() {
+        reset();
+        let payload_path = temp_payload_path("valid-and-tampered");
+        remove_payload_fixture(&payload_path);
+        let signature_path = sig_path_for(payload_path.to_string_lossy().as_ref());
+        let payload = b"production driver or firmware payload";
+        let signing_key = SigningKey::from_bytes(&[0x77; 32]);
+        let verifying_key = signing_key.verifying_key().to_bytes();
+        assert_eq!(unsafe { signing_init(verifying_key.as_ptr()) }, ESP_OK);
+
+        std::fs::write(&payload_path, payload).unwrap();
+        std::fs::write(&signature_path, signing_key.sign(payload).to_bytes()).unwrap();
+        let c_path = CString::new(payload_path.to_string_lossy().as_bytes()).unwrap();
+        assert_eq!(unsafe { signing_verify_file(c_path.as_ptr()) }, ESP_OK);
+
+        std::fs::write(&payload_path, b"tampered payload").unwrap();
+        assert_eq!(
+            unsafe { signing_verify_file(c_path.as_ptr()) },
+            ESP_ERR_INVALID_CRC
+        );
+
+        remove_payload_fixture(&payload_path);
     }
 
     // -----------------------------------------------------------------------
