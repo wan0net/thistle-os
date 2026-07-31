@@ -24,45 +24,74 @@ jobs:
           fetch-depth: 0
 
       - name: Validate tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
+          python3 tools/validate_release.py tag "$RELEASE_TAG"
+          git check-ref-format "refs/tags/$RELEASE_TAG"
           git fetch --tags
-          git rev-parse "${{ inputs.tag }}^{}" >/dev/null
+          tag_commit="$(git rev-parse --verify "$RELEASE_TAG^{commit}")"
+          echo "RELEASE_TAG_COMMIT=$tag_commit" >> "$GITHUB_ENV"
+
+      - name: Validate CI artifact provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: run_id must be numeric" >&2
+            exit 1
+          fi
+          metadata="$RUNNER_TEMP/release-source-run.json"
+          gh api \
+            "repos/$EXPECTED_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$metadata"
+          python3 tools/validate_release.py run "$metadata" \
+            --repository "$EXPECTED_REPOSITORY" \
+            --commit "$RELEASE_TAG_COMMIT"
 
       - name: Download CI artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download "${{ inputs.run_id }}" --dir release-artifacts
-
-      - name: Stage versioned assets
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag }}"
+          gh run download "$SOURCE_RUN_ID" --dir release-artifacts
+
+      - name: Stage versioned assets
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
           mkdir -p dist
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin "dist/thistle_os-${tag}.bin"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.sig "dist/thistle_os-${tag}.bin.sig"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.pub "dist/thistle_os-${tag}.bin.pub"
-          cp release-artifacts/thistle-recovery/thistle-recovery "dist/thistle-recovery-${tag}"
+          cp release-artifacts/thistle-os-firmware/thistle_os.bin "dist/thistle_os-${RELEASE_TAG}.bin"
+          cp release-artifacts/thistle-os-firmware/thistle_os.bin.sig "dist/thistle_os-${RELEASE_TAG}.bin.sig"
+          cp release-artifacts/thistle-os-firmware/thistle_os.bin.pub "dist/thistle_os-${RELEASE_TAG}.bin.pub"
+          cp release-artifacts/thistle-recovery/thistle-recovery "dist/thistle-recovery-${RELEASE_TAG}"
           cd dist
           sha256sum * > SHA256SUMS
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag }}"
           notes="$(mktemp)"
-          awk -v tag="$tag" '
+          awk -v tag="$RELEASE_TAG" '
             $0 ~ "^## " tag "($| - )" { capture=1; print; next }
             capture && /^## / { exit }
             capture { print }
           ' CHANGELOG.md > "$notes"
           if [ ! -s "$notes" ]; then
-            printf "Release %s\n" "$tag" > "$notes"
+            printf "Release %s\n" "$RELEASE_TAG" > "$notes"
           fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/* --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
           else
-            gh release create "$tag" dist/* --title "ThistleOS ${tag}" --notes-file "$notes"
+            gh release create "$RELEASE_TAG" dist/* \
+              --title "ThistleOS ${RELEASE_TAG}" --notes-file "$notes"
           fi
