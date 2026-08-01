@@ -19,6 +19,11 @@ def validate_entries(entries: list[dict]) -> list[str]:
             continue
         package_id = entry.get("id", "<missing id>")
         arch = entry.get("arch")
+        # Preserve pre-matrix catalog entries without pretending they target a
+        # specific CPU. They remain installable for legacy clients, but do not
+        # count toward (or weaken) current architecture coverage.
+        if not arch:
+            continue
         if arch not in SUPPORTED_ARCHES:
             errors.append(f"{package_id}: unsupported architecture {arch!r}")
             continue

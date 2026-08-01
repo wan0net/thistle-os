@@ -38,6 +38,20 @@ class PackageMatrixValidationTests(unittest.TestCase):
         self.assertTrue(any("not signed" in error for error in errors))
         self.assertTrue(any("esp32c6: missing" in error for error in errors))
 
+    def test_legacy_unqualified_entries_do_not_break_current_matrix(self):
+        entries = [
+            entry(arch, package_type)
+            for arch in SUPPORTED_ARCHES
+            for package_type in ["app", "driver"]
+        ]
+        entries.append({
+            "id": "com.thistle.legacy",
+            "type": "app",
+            "url": "https://example.test/apps/legacy.app.elf",
+        })
+
+        self.assertEqual(validate_entries(entries), [])
+
 
 if __name__ == "__main__":
     unittest.main()
