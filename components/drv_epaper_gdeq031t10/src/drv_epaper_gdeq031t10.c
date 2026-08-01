@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "packed_blit.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -300,17 +301,7 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
     }
 
     /* Slow path: arbitrary rectangle, bit-by-bit. */
-    uint16_t src_w = x2 - x1 + 1;
-    for (uint16_t row = y1; row <= y2; row++) {
-        for (uint16_t col = x1; col <= x2; col++) {
-            uint32_t src_bit_idx = (uint32_t)(row - y1) * src_w + (col - x1);
-            uint8_t  src_bit     = (color_data[src_bit_idx >> 3] >> (7 - (src_bit_idx & 7))) & 1;
-            uint32_t dst_bit_idx = (uint32_t)row * EPD_WIDTH + col;
-            uint8_t  dst_mask    = 0x80u >> (dst_bit_idx & 7);
-            if (src_bit) s_epd.fb[dst_bit_idx >> 3] |=  dst_mask;
-            else         s_epd.fb[dst_bit_idx >> 3] &= ~dst_mask;
-        }
-    }
+    epaper_blit_packed_rect(s_epd.fb, EPD_WIDTH, x1, y1, x2, y2, color_data);
     return ESP_OK;
 }
 
