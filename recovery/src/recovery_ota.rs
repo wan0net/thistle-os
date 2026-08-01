@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Recovery OTA — check/flash firmware from SD card or HTTP
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_sys::*;
 use log::*;
-use std::io;
+use sha2::{Digest, Sha256};
+use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::bounded_io;
 use crate::bundle_transaction::{self, Boundary, BundleFile, RecoveryAction};
 use crate::catalog_path::{catalog_destination, validate_catalog_id};
 
@@ -83,6 +85,10 @@ pub fn catalog_entry_arch_matches(obj: &str, chip: &str) -> bool {
 const SD_FIRMWARE_PATH: &str = "/sdcard/update/thistle_os.bin";
 const BUNDLE_DOWNLOAD_DIR: &str = "/sdcard/.thistle-bundle-download";
 const MAX_FIRMWARE_SIZE: usize = 4 * 1024 * 1024; // 4MB
+const MAX_CATALOG_SIZE: usize = 256 * 1024;
+const MAX_BOARD_PROFILE_SIZE: usize = 64 * 1024;
+const MAX_EXECUTABLE_SIZE: usize = 2 * 1024 * 1024;
+const MAX_SIGNATURE_SIZE: usize = 64;
 const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
 
 #[cfg(not(debug_assertions))]
@@ -156,15 +162,19 @@ pub fn check_sd_firmware() -> bool {
 pub fn apply_sd_firmware() -> anyhow::Result<()> {
     info!("Applying firmware from SD: {}", SD_FIRMWARE_PATH);
 
-    let data = std::fs::read(SD_FIRMWARE_PATH)?;
-    if data.is_empty() || data.len() > MAX_FIRMWARE_SIZE {
-        anyhow::bail!("Invalid firmware size: {} bytes", data.len());
+    let mut firmware = std::fs::File::open(SD_FIRMWARE_PATH)?;
+    let firmware_size = usize::try_from(firmware.metadata()?.len())
+        .map_err(|_| anyhow::anyhow!("Firmware size cannot be represented"))?;
+    if firmware_size == 0 || firmware_size > MAX_FIRMWARE_SIZE {
+        anyhow::bail!("Invalid firmware size: {} bytes", firmware_size);
     }
-    let sig = std::fs::read(format!("{}.sig", SD_FIRMWARE_PATH))
-        .map_err(|_| anyhow::anyhow!("Missing SD firmware signature"))?;
-    verify_ed25519(&data, &sig)?;
+    let sig = read_signature_file(Path::new(&format!("{}.sig", SD_FIRMWARE_PATH)))
+        .map_err(|_| anyhow::anyhow!("Missing or invalid SD firmware signature"))?;
+    verify_ed25519_reader(&mut firmware, &sig)?;
+    firmware.rewind()?;
 
-    flash_to_ota1(&data)?;
+    write_ota1_reader(&mut firmware, firmware_size)?;
+    select_ota1_for_boot()?;
     Ok(())
 }
 
@@ -173,7 +183,7 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
     info!("Fetching catalog: {}", catalog_url);
 
     // Fetch catalog JSON
-    let catalog_json = http_get_string(catalog_url)?;
+    let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
 
     // Find the firmware entry (type = "firmware")
     let fw_entry = find_catalog_entry_by_type(&catalog_json, "firmware")
@@ -187,25 +197,38 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
     info!("Downloading firmware: {}", fw_url);
     println!("Downloading: {}", fw_url);
 
-    // Download and verify firmware binary before writing ota_1.
-    let (firmware_data, _) = download_catalog_entry_bytes(
+    let download_stage = DownloadStage::new(Path::new(BUNDLE_DOWNLOAD_DIR))?;
+    let firmware_path = download_stage.path("firmware.bin")?;
+    download_catalog_entry_to_file(
         &fw_url,
         Some(&expected_sha),
         sig_url.as_deref(),
         REQUIRE_EXECUTABLE_SIGNATURES,
+        MAX_FIRMWARE_SIZE,
+        &firmware_path,
     )?;
-    info!("Downloaded {} bytes", firmware_data.len());
-    println!("Downloaded {} bytes. Flashing...", firmware_data.len());
+    let firmware_size = usize::try_from(std::fs::metadata(&firmware_path)?.len())?;
+    info!("Downloaded {} bytes", firmware_size);
+    println!("Downloaded {} bytes. Flashing...", firmware_size);
 
-    // Flash to ota_1
-    flash_to_ota1(&firmware_data)?;
+    write_ota1_file(&firmware_path)?;
+    select_ota1_for_boot()?;
 
     info!("Firmware flashed successfully");
     Ok(())
 }
 
-/// Write firmware data to the inactive OTA partition without selecting it.
-fn write_ota1(data: &[u8]) -> anyhow::Result<()> {
+fn write_ota1_file(path: &Path) -> anyhow::Result<()> {
+    let mut file = std::fs::File::open(path)?;
+    let size = usize::try_from(file.metadata()?.len())
+        .map_err(|_| anyhow::anyhow!("Firmware size cannot be represented"))?;
+    write_ota1_reader(&mut file, size)
+}
+
+fn write_ota1_reader(reader: &mut impl Read, total: usize) -> anyhow::Result<()> {
+    if total == 0 || total > MAX_FIRMWARE_SIZE {
+        anyhow::bail!("Invalid firmware size: {} bytes", total);
+    }
     unsafe {
         let part = esp_ota_get_next_update_partition(std::ptr::null());
         if part.is_null() {
@@ -213,27 +236,32 @@ fn write_ota1(data: &[u8]) -> anyhow::Result<()> {
         }
 
         let mut handle: esp_ota_handle_t = 0;
-        let ret = esp_ota_begin(part, data.len(), &mut handle);
+        let ret = esp_ota_begin(part, total, &mut handle);
         if ret != ESP_OK as i32 {
             anyhow::bail!("esp_ota_begin failed: {}", ret);
         }
 
-        // Write in 4KB chunks
-        let chunk_size = 4096;
-        let total = data.len();
+        let mut chunk = [0u8; 4096];
         let mut written = 0;
         while written < total {
-            let end = std::cmp::min(written + chunk_size, total);
-            let ret = esp_ota_write(
-                handle,
-                data[written..end].as_ptr() as *const _,
-                end - written,
-            );
+            let wanted = chunk.len().min(total - written);
+            let count = match reader.read(&mut chunk[..wanted]) {
+                Ok(count) => count,
+                Err(error) => {
+                    esp_ota_abort(handle);
+                    anyhow::bail!("Firmware read failed at offset {}: {}", written, error);
+                }
+            };
+            if count == 0 {
+                esp_ota_abort(handle);
+                anyhow::bail!("Firmware ended at {} of {} bytes", written, total);
+            }
+            let ret = esp_ota_write(handle, chunk[..count].as_ptr() as *const _, count);
             if ret != ESP_OK as i32 {
                 esp_ota_abort(handle);
                 anyhow::bail!("esp_ota_write failed at offset {}: {}", written, ret);
             }
-            written = end;
+            written += count;
 
             // Progress every 10%
             let pct = written * 100 / total;
@@ -269,12 +297,6 @@ fn select_ota1_for_boot() -> anyhow::Result<()> {
         info!("OTA boot partition selected");
         Ok(())
     }
-}
-
-/// Write and select firmware for single-image update workflows.
-fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
-    write_ota1(data)?;
-    select_ota1_for_boot()
 }
 
 // ---------------------------------------------------------------------------
@@ -736,8 +758,6 @@ extern "C" {
     // FreeRTOS
     fn vTaskDelay(ticks: u32);
 
-    // mbedTLS
-    fn mbedtls_sha256(input: *const u8, ilen: usize, output: *mut u8, is224: i32) -> i32;
 }
 
 // ---------------------------------------------------------------------------
@@ -961,7 +981,7 @@ fn json_escape(s: &str) -> String {
 
 /// Fetch board metadata from a catalog and return web-ready JSON objects.
 pub fn catalog_board_options_json(catalog_url: &str, chip: &str) -> anyhow::Result<String> {
-    let catalog_json = http_get_string(catalog_url)?;
+    let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
     let mut boards: Vec<String> = Vec::new();
 
     for obj in iter_json_objects(&catalog_json) {
@@ -998,7 +1018,7 @@ pub fn catalog_contains_board(catalog_url: &str, chip: &str, board_id: &str) -> 
         return false;
     }
 
-    let catalog_json = match http_get_string(catalog_url) {
+    let catalog_json = match http_get_string(catalog_url, MAX_CATALOG_SIZE) {
         Ok(json) => json,
         Err(_) => return false,
     };
@@ -1072,73 +1092,53 @@ impl<'a> Iterator for JsonObjects<'a> {
     }
 }
 
-/// Download a single catalog entry, verify it, and write it to `dest_path`.
-fn download_file(
+fn download_catalog_entry_to_file(
     url: &str,
     expected_sha256: Option<&str>,
     sig_url: Option<&str>,
     require_signature: bool,
-    dest_path: &str,
-) -> anyhow::Result<()> {
-    let (data, sig) =
-        download_catalog_entry_bytes(url, expected_sha256, sig_url, require_signature)?;
-    std::fs::create_dir_all(
-        std::path::Path::new(dest_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/")),
-    )?;
-    std::fs::write(dest_path, &data)?;
-    if let Some(sig_bytes) = sig {
-        std::fs::write(format!("{}.sig", dest_path), &sig_bytes)?;
-    }
-    Ok(())
-}
-
-fn download_catalog_entry_bytes(
-    url: &str,
-    expected_sha256: Option<&str>,
-    sig_url: Option<&str>,
-    require_signature: bool,
-) -> anyhow::Result<(Vec<u8>, Option<Vec<u8>>)> {
-    let data = http_get_bytes(url)?;
+    max_size: usize,
+    destination: &Path,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    http_get_to_file(url, max_size, destination)?;
     match expected_sha256.filter(|s| !s.trim().is_empty()) {
-        Some(expected) => verify_sha256(&data, expected)?,
+        Some(expected) => verify_sha256_file(destination, expected)?,
         None => anyhow::bail!("Catalog entry missing sha256 for {}", url),
     }
 
     let sig = match sig_url.filter(|s| !s.trim().is_empty()) {
         Some(sig_url) => {
-            let sig = http_get_bytes(sig_url)?;
-            verify_ed25519(&data, &sig)?;
+            let sig = http_get_bytes(sig_url, MAX_SIGNATURE_SIZE)?;
+            verify_ed25519_file(destination, &sig)?;
             Some(sig)
         }
         None if require_signature => anyhow::bail!("Catalog entry missing sig_url for {}", url),
         None => None,
     };
 
-    Ok((data, sig))
+    Ok(sig)
 }
 
-fn verify_sha256(data: &[u8], expected_sha256: &str) -> anyhow::Result<()> {
+fn verify_sha256_file(path: &Path, expected_sha256: &str) -> anyhow::Result<()> {
     let expected = expected_sha256.trim().to_ascii_lowercase();
-    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         anyhow::bail!("Invalid catalog sha256 '{}'", expected_sha256);
     }
-
-    let actual = sha256_hex(data)?;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let actual = hex_lower(&hasher.finalize());
     if actual != expected {
         anyhow::bail!("SHA-256 mismatch: expected {}, got {}", expected, actual);
     }
     Ok(())
-}
-
-fn sha256_hex(data: &[u8]) -> anyhow::Result<String> {
-    let mut digest = [0u8; 32];
-    let ret = unsafe { mbedtls_sha256(data.as_ptr(), data.len(), digest.as_mut_ptr(), 0) };
-    if ret != 0 {
-        anyhow::bail!("mbedtls_sha256 failed: {}", ret);
-    }
-    Ok(hex_lower(&digest))
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
@@ -1151,7 +1151,20 @@ fn hex_lower(bytes: &[u8]) -> String {
     out
 }
 
-fn verify_ed25519(data: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+fn verify_ed25519_file(path: &Path, signature: &[u8]) -> anyhow::Result<()> {
+    let mut file = std::fs::File::open(path)?;
+    verify_ed25519_reader(&mut file, signature)
+}
+
+fn read_signature_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() != MAX_SIGNATURE_SIZE as u64 {
+        anyhow::bail!("Invalid Ed25519 signature size: {} bytes", metadata.len());
+    }
+    Ok(std::fs::read(path)?)
+}
+
+fn verify_ed25519_reader(reader: &mut impl Read, signature: &[u8]) -> anyhow::Result<()> {
     if signature.len() != 64 {
         anyhow::bail!("Invalid Ed25519 signature size: {} bytes", signature.len());
     }
@@ -1163,8 +1176,19 @@ fn verify_ed25519(data: &[u8], signature: &[u8]) -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
     let signature = Signature::from_bytes(&sig_bytes);
 
-    verifying_key
-        .verify(data, &signature)
+    let mut verifier = verifying_key
+        .verify_stream(&signature)
+        .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
+    let mut buffer = [0u8; 4096];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        verifier.update(&buffer[..count]);
+    }
+    verifier
+        .finalize_and_verify()
         .map_err(|_| anyhow::anyhow!("Ed25519 signature verification failed"))
 }
 
@@ -1203,7 +1227,7 @@ pub fn recovery_download_board_bundle_for(
     BUNDLE_PROGRESS.store(0, Ordering::Relaxed);
 
     info!("Fetching catalog: {}", catalog_url);
-    let catalog_json = http_get_string(catalog_url)?;
+    let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
 
     // Detect the running chip once so arch filtering can be applied to every entry.
     let chip = detect_chip();
@@ -1289,28 +1313,37 @@ pub fn recovery_download_board_bundle_for(
                 anyhow::bail!("Catalog contains multiple compatible firmware images");
             }
             info!("Downloading and verifying firmware {}", name);
-            println!("  {} [firmware, staged in memory]", name);
-            let (data, _) = download_catalog_entry_bytes(
+            println!("  {} [firmware, staged on SD]", name);
+            let staged = download_stage.path(&format!("{}-firmware.bin", downloaded))?;
+            download_catalog_entry_to_file(
                 &url,
                 Some(expected_sha),
                 sig_url.as_deref(),
                 REQUIRE_EXECUTABLE_SIGNATURES,
+                MAX_FIRMWARE_SIZE,
+                &staged,
             )?;
-            let staged = download_stage.write(&format!("{}-firmware.bin", downloaded), &data)?;
             firmware_path = Some(staged);
         } else {
             info!("Downloading and verifying {} -> {}", name, dest_path);
             println!("  {} [{}]", name, entry_type);
             let require_signature =
                 matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
-            let (data, signature) = download_catalog_entry_bytes(
+            let staged = download_stage.path(&format!("{}-payload", downloaded))?;
+            let max_size = if entry_type == "board" {
+                MAX_BOARD_PROFILE_SIZE
+            } else {
+                MAX_EXECUTABLE_SIZE
+            };
+            let signature = download_catalog_entry_to_file(
                 &url,
                 expected_sha.as_deref(),
                 sig_url.as_deref(),
                 require_signature,
+                max_size,
+                &staged,
             )?;
             let relative = sdcard_relative_path(&dest_path)?;
-            let staged = download_stage.write(&format!("{}-payload", downloaded), &data)?;
             if entry_type == "board" {
                 bundle_files.push(BundleFile::from_file("config/board.json", &staged)?);
             }
@@ -1340,10 +1373,7 @@ pub fn recovery_download_board_bundle_for(
     bundle_transaction::install(
         sdcard_root,
         &bundle_files,
-        || {
-            let firmware_data = std::fs::read(&firmware_path)?;
-            write_ota1(&firmware_data).map_err(transaction_io_error)
-        },
+        || write_ota1_file(&firmware_path).map_err(transaction_io_error),
         || select_ota1_for_boot().map_err(transaction_io_error),
         |boundary| {
             log_transaction_boundary(boundary);
@@ -1387,11 +1417,26 @@ impl DownloadStage {
     }
 
     fn write(&self, name: &str, data: &[u8]) -> io::Result<std::path::PathBuf> {
-        let path = self.root.join(name);
+        let path = self.path(name)?;
         let mut file = std::fs::File::create(&path)?;
-        std::io::Write::write_all(&mut file, data)?;
+        file.write_all(data)?;
         file.sync_all()?;
         Ok(path)
+    }
+
+    fn path(&self, name: &str) -> io::Result<std::path::PathBuf> {
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name == "."
+            || name == ".."
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid download staging name",
+            ));
+        }
+        Ok(self.root.join(name))
     }
 }
 
@@ -1442,7 +1487,7 @@ fn ota1_is_boot_partition() -> bool {
 /// This uses the same catalog, chip, and board matching rules as the installer,
 /// but does not write to flash or SD card.
 pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow::Result<String> {
-    let catalog_json = http_get_string(catalog_url)?;
+    let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
     let chip = detect_chip();
     let mut entries: Vec<String> = Vec::new();
 
@@ -1490,14 +1535,64 @@ fn find_catalog_entry_by_type<'a>(json: &'a str, entry_type: &str) -> Option<&'a
         .find(|obj| json_extract_string(obj, "type").as_deref() == Some(entry_type))
 }
 
-/// HTTP GET returning a string
-fn http_get_string(url: &str) -> anyhow::Result<String> {
-    let bytes = http_get_bytes(url)?;
+/// HTTP GET returning a bounded string.
+fn http_get_string(url: &str, max_size: usize) -> anyhow::Result<String> {
+    let bytes = http_get_bytes(url, max_size)?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// HTTP GET returning bytes
-fn http_get_bytes(url: &str) -> anyhow::Result<Vec<u8>> {
+fn http_get_bytes(url: &str, max_size: usize) -> anyhow::Result<Vec<u8>> {
+    with_http_response(url, max_size, |mut response, declared| {
+        let mut body = Vec::with_capacity(declared.unwrap_or(0).min(max_size));
+        let mut limit = bounded_io::BodyLimit::new(declared, max_size)?;
+        let mut buffer = [0u8; 4096];
+        loop {
+            let count = response
+                .read(&mut buffer)
+                .map_err(|error| anyhow::anyhow!("HTTP read failed: {}", error))?;
+            if count == 0 {
+                break;
+            }
+            limit.observe(count)?;
+            body.extend_from_slice(&buffer[..count]);
+        }
+        limit.finish()?;
+        Ok(body)
+    })
+}
+
+fn http_get_to_file(url: &str, max_size: usize, destination: &Path) -> anyhow::Result<usize> {
+    with_http_response(url, max_size, |mut response, declared| {
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::File::create(destination)?;
+        let mut limit = bounded_io::BodyLimit::new(declared, max_size)?;
+        let mut buffer = [0u8; 4096];
+        loop {
+            let count = response
+                .read(&mut buffer)
+                .map_err(|error| anyhow::anyhow!("HTTP read failed: {}", error))?;
+            if count == 0 {
+                break;
+            }
+            limit.observe(count)?;
+            file.write_all(&buffer[..count])?;
+        }
+        let written = limit.finish()?;
+        file.sync_all()?;
+        Ok(written)
+    })
+}
+
+fn with_http_response<T>(
+    url: &str,
+    max_size: usize,
+    consume: impl FnOnce(
+        embedded_svc::http::client::Response<&mut EspHttpConnection>,
+        Option<usize>,
+    ) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     use embedded_svc::http::client::Client;
 
     let connection = EspHttpConnection::new(&HttpConfig {
@@ -1513,16 +1608,10 @@ fn http_get_bytes(url: &str) -> anyhow::Result<Vec<u8>> {
         anyhow::bail!("HTTP {} for {}", status, url);
     }
 
-    let mut body = Vec::new();
-    let mut reader = response;
-    let mut buf = [0u8; 4096];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => body.extend_from_slice(&buf[..n]),
-            Err(e) => anyhow::bail!("Read error: {}", e),
-        }
-    }
-
-    Ok(body)
+    let declared = bounded_io::validate_framing(
+        response.header("Content-Length"),
+        response.header("Transfer-Encoding"),
+        max_size,
+    )?;
+    consume(response, declared)
 }

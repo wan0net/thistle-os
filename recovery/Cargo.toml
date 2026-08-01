@@ -12,7 +12,8 @@ esp-idf-sys = { version = "0.37", features = ["binstart"] }
 log = "0.4"
 embedded-svc = "0.29"
 anyhow = "1"
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "hazmat"] }
+sha2 = "0.10"
 
 [build-dependencies]
 embuild = "0.33"

@@ -1580,6 +1580,7 @@ dependencies = [
  "esp-idf-svc",
  "esp-idf-sys",
  "log",
+ "sha2",
 ]
 
 [[package]]
