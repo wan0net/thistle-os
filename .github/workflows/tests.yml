@@ -128,6 +128,14 @@ jobs:
           /tmp/test_artifact_manifest
           grep -q "manifest_url" recovery/src/recovery_ota.rs
 
+      - name: Test Recovery firmware anti-rollback
+        run: |
+          rustc --edition=2021 --test recovery/src/anti_rollback.rs \
+            -o /tmp/test_anti_rollback
+          /tmp/test_anti_rollback
+          grep -q "advance_security_version_and_select" recovery/src/recovery_ota.rs
+          grep -q "EspDefaultNvsPartition::take_with(false)" recovery/src/main.rs
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

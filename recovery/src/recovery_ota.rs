@@ -3,13 +3,16 @@
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
+use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition};
 use esp_idf_sys::*;
 use log::*;
 use sha2::{Digest, Sha256};
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex;
 
+use crate::anti_rollback;
 use crate::artifact_manifest::{ArtifactManifest, ArtifactType};
 use crate::bounded_io;
 use crate::bundle_transaction::{self, Boundary, BundleFile, RecoveryAction};
@@ -92,6 +95,10 @@ const MAX_EXECUTABLE_SIZE: usize = 2 * 1024 * 1024;
 const MAX_SIGNATURE_SIZE: usize = 64;
 const MAX_ARTIFACT_MANIFEST_SIZE: usize = 4096;
 const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
+const SECURITY_NVS_NAMESPACE: &str = "thistle_sec";
+const SECURITY_VERSION_KEY: &str = "fw_sec_ver";
+
+static SECURITY_NVS: Mutex<Option<EspDefaultNvs>> = Mutex::new(None);
 
 #[cfg(not(debug_assertions))]
 const RECOVERY_SIGNING_KEY: [u8; 32] = [
@@ -108,6 +115,57 @@ const RECOVERY_SIGNING_KEY: [u8; 32] = [
 /// Global progress counter (0-100) for the active bundle download.
 /// Updated by `recovery_download_board_bundle_for`; read by the web handler.
 pub static BUNDLE_PROGRESS: AtomicU8 = AtomicU8::new(0);
+
+pub fn init_anti_rollback(partition: EspDefaultNvsPartition) -> anyhow::Result<()> {
+    let nvs = EspDefaultNvs::new(partition, SECURITY_NVS_NAMESPACE, true)
+        .map_err(|error| anyhow::anyhow!("Failed to open anti-rollback state: {error}"))?;
+    let mut slot = SECURITY_NVS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Anti-rollback state lock is poisoned"))?;
+    if slot.is_some() {
+        anyhow::bail!("Anti-rollback state is already initialized");
+    }
+    *slot = Some(nvs);
+    Ok(())
+}
+
+fn load_security_version() -> Result<Option<u32>, String> {
+    let slot = SECURITY_NVS
+        .lock()
+        .map_err(|_| "state lock is poisoned".to_string())?;
+    let nvs = slot
+        .as_ref()
+        .ok_or_else(|| "state is not initialized".to_string())?;
+    nvs.get_u32(SECURITY_VERSION_KEY)
+        .map_err(|error| error.to_string())
+}
+
+fn store_security_version(value: u32) -> Result<(), String> {
+    let slot = SECURITY_NVS
+        .lock()
+        .map_err(|_| "state lock is poisoned".to_string())?;
+    let nvs = slot
+        .as_ref()
+        .ok_or_else(|| "state is not initialized".to_string())?;
+    nvs.set_u32(SECURITY_VERSION_KEY, value)
+        .map_err(|error| error.to_string())
+}
+
+fn require_newer_firmware(candidate: u32) -> anyhow::Result<()> {
+    anti_rollback::require_newer(candidate, load_security_version)
+        .map(|_| ())
+        .map_err(anyhow::Error::msg)
+}
+
+fn advance_security_version_and_select(candidate: u32) -> anyhow::Result<()> {
+    anti_rollback::advance_before_activation(
+        candidate,
+        load_security_version,
+        store_security_version,
+        || select_ota1_for_boot().map_err(|error| error.to_string()),
+    )
+    .map_err(anyhow::Error::msg)
+}
 
 #[derive(Debug)]
 pub enum Ota1State {
@@ -164,72 +222,66 @@ pub fn check_sd_firmware() -> bool {
 pub fn apply_sd_firmware() -> anyhow::Result<()> {
     info!("Applying firmware from SD: {}", SD_FIRMWARE_PATH);
 
+    let manifest_path = format!("{}.manifest", SD_FIRMWARE_PATH);
+    let manifest_signature_path = format!("{}.manifest.sig", SD_FIRMWARE_PATH);
+    let canonical = read_bounded_file(Path::new(&manifest_path), MAX_ARTIFACT_MANIFEST_SIZE)?;
+    let signature = read_signature_file(Path::new(&manifest_signature_path))?;
+    verify_ed25519_reader(&mut std::io::Cursor::new(&canonical), &signature)?;
+    let manifest =
+        ArtifactManifest::parse(std::str::from_utf8(&canonical)?).map_err(anyhow::Error::msg)?;
+    if manifest.artifact_type != ArtifactType::Firmware {
+        anyhow::bail!("SD manifest is not a firmware manifest");
+    }
+    let board = read_board_name();
+    manifest
+        .validate_for_device(detect_chip(), &board, 1)
+        .map_err(anyhow::Error::msg)?;
+    require_newer_firmware(manifest.security_version)?;
+
     let mut firmware = std::fs::File::open(SD_FIRMWARE_PATH)?;
     let firmware_size = usize::try_from(firmware.metadata()?.len())
         .map_err(|_| anyhow::anyhow!("Firmware size cannot be represented"))?;
-    if firmware_size == 0 || firmware_size > MAX_FIRMWARE_SIZE {
-        anyhow::bail!("Invalid firmware size: {} bytes", firmware_size);
+    if firmware_size != manifest.size || firmware_size > MAX_FIRMWARE_SIZE {
+        anyhow::bail!(
+            "SD firmware size does not match signed manifest: expected {}, found {}",
+            manifest.size,
+            firmware_size
+        );
     }
-    let sig = read_signature_file(Path::new(&format!("{}.sig", SD_FIRMWARE_PATH)))
-        .map_err(|_| anyhow::anyhow!("Missing or invalid SD firmware signature"))?;
-    verify_ed25519_reader(&mut firmware, &sig)?;
+    verify_sha256_file(Path::new(SD_FIRMWARE_PATH), &manifest.sha256)?;
     firmware.rewind()?;
 
-    write_ota1_reader(&mut firmware, firmware_size)?;
-    select_ota1_for_boot()?;
+    write_ota1_reader(&mut firmware, firmware_size, &manifest.sha256)?;
+    advance_security_version_and_select(manifest.security_version)?;
     Ok(())
 }
 
 /// Download firmware from app store catalog and flash to ota_1
 pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
-    info!("Fetching catalog: {}", catalog_url);
-
-    // Fetch catalog JSON
-    let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
-
-    // Find the firmware entry (type = "firmware")
-    let fw_entry = find_catalog_entry_by_type(&catalog_json, "firmware")
-        .ok_or_else(|| anyhow::anyhow!("No firmware entry in catalog"))?;
-    let fw_url = json_extract_string(fw_entry, "url")
-        .ok_or_else(|| anyhow::anyhow!("Firmware entry missing url"))?;
-    let expected_sha = json_extract_string(fw_entry, "sha256")
-        .ok_or_else(|| anyhow::anyhow!("Firmware entry missing sha256"))?;
-    let sig_url = json_extract_string(fw_entry, "sig_url");
-
-    info!("Downloading firmware: {}", fw_url);
-    println!("Downloading: {}", fw_url);
-
-    let download_stage = DownloadStage::new(Path::new(BUNDLE_DOWNLOAD_DIR))?;
-    let firmware_path = download_stage.path("firmware.bin")?;
-    download_catalog_entry_to_file(
-        &fw_url,
-        Some(&expected_sha),
-        sig_url.as_deref(),
-        REQUIRE_EXECUTABLE_SIGNATURES,
-        MAX_FIRMWARE_SIZE,
-        &firmware_path,
-    )?;
-    let firmware_size = usize::try_from(std::fs::metadata(&firmware_path)?.len())?;
-    info!("Downloaded {} bytes", firmware_size);
-    println!("Downloaded {} bytes. Flashing...", firmware_size);
-
-    write_ota1_file(&firmware_path)?;
-    select_ota1_for_boot()?;
-
-    info!("Firmware flashed successfully");
-    Ok(())
+    recovery_download_board_bundle_for(catalog_url, &read_board_name()).map(|_| ())
 }
 
-fn write_ota1_file(path: &Path) -> anyhow::Result<()> {
+fn write_ota1_file(path: &Path, expected_sha256: &str) -> anyhow::Result<()> {
     let mut file = std::fs::File::open(path)?;
     let size = usize::try_from(file.metadata()?.len())
         .map_err(|_| anyhow::anyhow!("Firmware size cannot be represented"))?;
-    write_ota1_reader(&mut file, size)
+    write_ota1_reader(&mut file, size, expected_sha256)
 }
 
-fn write_ota1_reader(reader: &mut impl Read, total: usize) -> anyhow::Result<()> {
+fn write_ota1_reader(
+    reader: &mut impl Read,
+    total: usize,
+    expected_sha256: &str,
+) -> anyhow::Result<()> {
     if total == 0 || total > MAX_FIRMWARE_SIZE {
         anyhow::bail!("Invalid firmware size: {} bytes", total);
+    }
+    if expected_sha256.len() != 64
+        || !expected_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        anyhow::bail!("Invalid signed firmware SHA-256");
     }
     unsafe {
         let part = esp_ota_get_next_update_partition(std::ptr::null());
@@ -245,6 +297,7 @@ fn write_ota1_reader(reader: &mut impl Read, total: usize) -> anyhow::Result<()>
 
         let mut chunk = [0u8; 4096];
         let mut written = 0;
+        let mut hasher = Sha256::new();
         while written < total {
             let wanted = chunk.len().min(total - written);
             let count = match reader.read(&mut chunk[..wanted]) {
@@ -258,6 +311,10 @@ fn write_ota1_reader(reader: &mut impl Read, total: usize) -> anyhow::Result<()>
                 esp_ota_abort(handle);
                 anyhow::bail!("Firmware ended at {} of {} bytes", written, total);
             }
+            // Hash the exact bytes passed to esp_ota_write. A pathname swap or
+            // in-place SD mutation can only leave unselected bytes in ota_1;
+            // it cannot pass this digest gate and reach the boot selector.
+            hasher.update(&chunk[..count]);
             let ret = esp_ota_write(handle, chunk[..count].as_ptr() as *const _, count);
             if ret != ESP_OK as i32 {
                 esp_ota_abort(handle);
@@ -273,6 +330,16 @@ fn write_ota1_reader(reader: &mut impl Read, total: usize) -> anyhow::Result<()>
             }
         }
         println!("\r  Progress: 100%");
+
+        let actual_sha256 = hex_lower(&hasher.finalize());
+        if actual_sha256 != expected_sha256 {
+            esp_ota_abort(handle);
+            anyhow::bail!(
+                "Flashed firmware digest mismatch: expected {}, got {}",
+                expected_sha256,
+                actual_sha256
+            );
+        }
 
         let ret = esp_ota_end(handle);
         if ret != ESP_OK as i32 {
@@ -1166,6 +1233,19 @@ fn read_signature_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     Ok(std::fs::read(path)?)
 }
 
+fn read_bounded_file(path: &Path, max_size: usize) -> anyhow::Result<Vec<u8>> {
+    let size = usize::try_from(std::fs::metadata(path)?.len())
+        .map_err(|_| anyhow::anyhow!("File size cannot be represented"))?;
+    if size == 0 || size > max_size {
+        anyhow::bail!(
+            "File size {} is outside the 1..={} byte limit",
+            size,
+            max_size
+        );
+    }
+    Ok(std::fs::read(path)?)
+}
+
 fn verify_ed25519_reader(reader: &mut impl Read, signature: &[u8]) -> anyhow::Result<()> {
     if signature.len() != 64 {
         anyhow::bail!("Invalid Ed25519 signature size: {} bytes", signature.len());
@@ -1359,11 +1439,20 @@ pub fn recovery_download_board_bundle_for(
     if firmware_count != 1 || board_count != 1 {
         anyhow::bail!("Signed bundle must contain exactly one firmware and one board profile");
     }
+    let firmware_security_version = selected
+        .iter()
+        .find(|artifact| artifact.manifest.artifact_type == ArtifactType::Firmware)
+        .map(|artifact| artifact.manifest.security_version)
+        .ok_or_else(|| anyhow::anyhow!("Signed bundle has no firmware security version"))?;
+
+    // Reject rollback and replay before downloading or writing any artifact.
+    require_newer_firmware(firmware_security_version)?;
 
     let mut downloaded = 0u32;
     let download_stage = DownloadStage::new(Path::new(BUNDLE_DOWNLOAD_DIR))?;
     let mut bundle_files = Vec::new();
     let mut firmware_path: Option<std::path::PathBuf> = None;
+    let mut firmware_sha256: Option<String> = None;
 
     let mut destinations = std::collections::BTreeSet::new();
     for artifact in selected {
@@ -1399,6 +1488,7 @@ pub fn recovery_download_board_bundle_for(
                 staged_signature,
             )?);
             firmware_path = Some(staged);
+            firmware_sha256 = Some(manifest.sha256.clone());
         } else {
             info!(
                 "Downloading signed {} -> {}",
@@ -1450,12 +1540,17 @@ pub fn recovery_download_board_bundle_for(
 
     let firmware_path =
         firmware_path.ok_or_else(|| anyhow::anyhow!("Catalog has no compatible firmware image"))?;
+    let firmware_sha256 =
+        firmware_sha256.ok_or_else(|| anyhow::anyhow!("Catalog firmware has no signed SHA-256"))?;
     let sdcard_root = Path::new("/sdcard");
     bundle_transaction::install(
         sdcard_root,
         &bundle_files,
-        || write_ota1_file(&firmware_path).map_err(transaction_io_error),
-        || select_ota1_for_boot().map_err(transaction_io_error),
+        || write_ota1_file(&firmware_path, &firmware_sha256).map_err(transaction_io_error),
+        || {
+            advance_security_version_and_select(firmware_security_version)
+                .map_err(transaction_io_error)
+        },
         |boundary| {
             log_transaction_boundary(boundary);
             Ok(())
@@ -1571,6 +1666,7 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
     let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
     let chip = detect_chip();
     let mut entries: Vec<String> = Vec::new();
+    let mut firmware_security_versions = Vec::new();
 
     for artifact in fetch_verified_manifests(&catalog_json)? {
         let manifest = artifact.manifest;
@@ -1586,6 +1682,9 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
         manifest
             .validate_for_device(chip, board_name, 1)
             .map_err(anyhow::Error::msg)?;
+        if manifest.artifact_type == ArtifactType::Firmware {
+            firmware_security_versions.push(manifest.security_version);
+        }
         entries.push(format!(
             r#"{{"id":"{}","type":"{}","version":"{}","destination":"{}"}}"#,
             manifest.id,
@@ -1594,6 +1693,11 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
             manifest.destination,
         ));
     }
+
+    if firmware_security_versions.len() != 1 {
+        anyhow::bail!("Signed bundle plan must contain exactly one firmware image");
+    }
+    require_newer_firmware(firmware_security_versions[0])?;
 
     Ok(format!(
         r#"{{"ok":true,"board":"{}","chip":"{}","catalog_source":"{}","count":{},"entries":[{}]}}"#,
