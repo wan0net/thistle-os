@@ -100,6 +100,13 @@ jobs:
             -o /tmp/test_sx1262_lifecycle
           /tmp/test_sx1262_lifecycle
 
+      - name: Test e-paper packed-row blitting
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            components/drv_epaper_gdeq031t10/tests/test_packed_blit.c \
+            -o /tmp/test_epaper_packed_blit
+          /tmp/test_epaper_packed_blit
+
       - name: Test assistant request bounds under sanitizers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \

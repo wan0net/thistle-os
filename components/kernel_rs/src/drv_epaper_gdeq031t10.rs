@@ -662,7 +662,8 @@ pub unsafe extern "C" fn gdeq031t10_deinit() {
 /// Flush — copy pixel data from `color_data` into the in-memory framebuffer.
 ///
 /// `area` defines the rectangular region being updated. Data format is
-/// 1-bit packed (MSB first), matching the native panel and LVGL 1bpp mode.
+/// 1-bit packed (MSB first), with each source row padded to `(width + 7) / 8`
+/// bytes, matching the native panel and LVGL 1bpp mode.
 /// The actual SPI transfer to the panel is deferred to `refresh()`.
 pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *const u8) -> i32 {
     let s = state();
@@ -691,12 +692,13 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
     // Updates only the in-memory framebuffer (fast). The actual panel refresh
     // is triggered separately via refresh().
     let src_w = x2 - x1 + 1;
+    let src_row_bytes = (src_w + 7) / 8;
     let fb = std::slice::from_raw_parts_mut(fb_ptr(), EPD_FB_BYTES);
 
     for row in y1..=y2 {
         for col in x1..=x2 {
-            let src_bit_idx = (row - y1) * src_w + (col - x1);
-            let src_byte = *color_data.add(src_bit_idx / 8);
+            let src_bit_idx = col - x1;
+            let src_byte = *color_data.add((row - y1) * src_row_bytes + src_bit_idx / 8);
             let src_bit = (src_byte >> (7 - (src_bit_idx & 7))) & 1;
 
             let dst_bit_idx = row * EPD_WIDTH + col;
@@ -1274,6 +1276,55 @@ mod tests {
         assert_eq!(unsafe { *fb_ptr() } & 0x80, 0x80, "pixel (0,0) should be white");
 
         unsafe { gdeq031t10_deinit() };
+    }
+
+    #[test]
+    fn test_flush_uses_padded_rows_for_three_by_two_rectangle() {
+        reset_state();
+        state_mut().initialized = true;
+
+        let area = HalArea { x1: 1, y1: 2, x2: 3, y2: 3 };
+        let data = [0b1010_0000, 0b0100_0000];
+        assert_eq!(unsafe { gdeq031t10_flush(&area, data.as_ptr()) }, ESP_OK);
+
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
+        let row_bytes = EPD_WIDTH / 8;
+        assert_eq!(fb[2 * row_bytes], 0b0101_0000);
+        assert_eq!(fb[3 * row_bytes], 0b0010_0000);
+    }
+
+    #[test]
+    fn test_flush_uses_padded_rows_for_nine_by_two_rectangle() {
+        reset_state();
+        state_mut().initialized = true;
+
+        let area = HalArea { x1: 8, y1: 4, x2: 16, y2: 5 };
+        let data = [0b1010_1010, 0b1000_0000, 0b0101_0101, 0b0000_0000];
+        assert_eq!(unsafe { gdeq031t10_flush(&area, data.as_ptr()) }, ESP_OK);
+
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
+        let row_bytes = EPD_WIDTH / 8;
+        assert_eq!(fb[4 * row_bytes + 1], 0b1010_1010);
+        assert_eq!(fb[4 * row_bytes + 2], 0b1000_0000);
+        assert_eq!(fb[5 * row_bytes + 1], 0b0101_0101);
+        assert_eq!(fb[5 * row_bytes + 2], 0b0000_0000);
+    }
+
+    #[test]
+    fn test_flush_keeps_aligned_full_width_rows_unchanged() {
+        reset_state();
+        state_mut().initialized = true;
+
+        let area = HalArea { x1: 0, y1: 7, x2: 239, y2: 8 };
+        let mut data = [0u8; 60];
+        data[..30].fill(0xA5);
+        data[30..].fill(0x5A);
+        assert_eq!(unsafe { gdeq031t10_flush(&area, data.as_ptr()) }, ESP_OK);
+
+        let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
+        let row_bytes = EPD_WIDTH / 8;
+        assert_eq!(&fb[7 * row_bytes..8 * row_bytes], &data[..30]);
+        assert_eq!(&fb[8 * row_bytes..9 * row_bytes], &data[30..]);
     }
 
     #[test]
