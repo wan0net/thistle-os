@@ -56,3 +56,10 @@ idf_component_register(
     PRIV_REQUIRES spi_flash
     LDFRAGMENTS "${ELF_LOADER_DIR}/linker.lf"
 )
+
+# Upstream normally injects these through its package-manager helper.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    ELF_LOADER_VER_MAJOR=1
+    ELF_LOADER_VER_MINOR=3
+    ELF_LOADER_VER_PATCH=2
+)
