@@ -91,6 +91,15 @@ jobs:
             -o /tmp/test_board_bus_init
           /tmp/test_board_bus_init
 
+      - name: Test SX1262 interrupt lifecycle
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Icomponents/drv_radio_sx1262/tests \
+            components/drv_radio_sx1262/tests/test_sx1262_lifecycle.cpp \
+            -o /tmp/test_sx1262_lifecycle
+          /tmp/test_sx1262_lifecycle
+
       - name: Test assistant request bounds under sanitizers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \
