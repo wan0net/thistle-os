@@ -13,6 +13,7 @@ idf_component_register(
     WHOLE_ARCHIVE
 )
 
+set(RUST_TARGET_FEATURES "")
 if(IDF_TARGET STREQUAL "esp32")
     set(RUST_TARGET "xtensa-esp32-espidf")
 elseif(IDF_TARGET STREQUAL "esp32s2")
@@ -21,9 +22,10 @@ elseif(IDF_TARGET STREQUAL "esp32s3")
     set(RUST_TARGET "xtensa-esp32s3-espidf")
 elseif(IDF_TARGET STREQUAL "esp32c3" OR IDF_TARGET STREQUAL "esp32c6")
     set(RUST_TARGET "riscv32imc-esp-espidf")
-    # The IMC target has no hardware atomic extension. Rust std emits GCC
-    # atomic runtime calls for Mutex/RwLock, which libatomic supplies.
-    target_link_libraries(${COMPONENT_LIB} INTERFACE atomic)
+    # ESP-IDF links these chips as rv32imac. The generic Rust ESP target omits
+    # `a`, which otherwise leaves unresolved __atomic_* runtime calls; emit the
+    # hardware atomic instructions that the selected chips support.
+    set(RUST_TARGET_FEATURES "-C target-feature=+a")
 else()
     message(FATAL_ERROR "Unsupported ThistleOS target: ${IDF_TARGET}")
 endif()
@@ -37,7 +39,7 @@ set(RUST_LIB "${RUST_BUILD_DIR}/libthistle_kernel.a")
 
 # Write a build script that sources the ESP Rust env in isolation
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_rust.sh"
-"#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\nif [ -f \"$ENV{HOME}/export-esp.sh\" ]; then . \"$ENV{HOME}/export-esp.sh\" 2>/dev/null; fi\ncd \"${CMAKE_CURRENT_SOURCE_DIR}\"\ncargo +esp build --release --target ${RUST_TARGET} --features ${RUST_FEATURES} -Zbuild-std=std,panic_abort\n")
+"#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\nif [ -f \"$ENV{HOME}/export-esp.sh\" ]; then . \"$ENV{HOME}/export-esp.sh\" 2>/dev/null; fi\ncd \"${CMAKE_CURRENT_SOURCE_DIR}\"\nexport RUSTFLAGS=\"${RUST_TARGET_FEATURES}\"\ncargo +esp build --release --target ${RUST_TARGET} --features ${RUST_FEATURES} -Zbuild-std=std,panic_abort\n")
 
 file(GLOB_RECURSE RUST_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs")
 
