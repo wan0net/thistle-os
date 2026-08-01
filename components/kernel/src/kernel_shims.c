@@ -69,14 +69,8 @@ int __attribute__((weak)) lstat(const char *path, struct stat *buf) {
     return stat(path, buf);
 }
 
-// Driver reload lifecycle hook stubs — platform-specific implementations can
-// override these symbols to provide real unload/start/stop and HAL
-// deregister/re-register behavior during hot reload.
-int __attribute__((weak)) thistle_driver_reload_unload(uint32_t driver_id) {
-    (void)driver_id;
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
+// Driver lifecycle hook stubs — platform-specific implementations can
+// override these symbols to provide start/stop and HAL transition behavior.
 int __attribute__((weak)) thistle_driver_reload_start(uint8_t hal_type) {
     (void)hal_type;
     return ESP_ERR_NOT_SUPPORTED;
