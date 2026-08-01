@@ -32,8 +32,6 @@ pub fn current_arch() -> &'static str {
     {
         #[cfg(feature = "esp32c6")]
         return "esp32c6";
-        #[cfg(feature = "esp32h2")]
-        return "esp32h2";
         // Default for riscv32 builds.
         "esp32c3"
     }

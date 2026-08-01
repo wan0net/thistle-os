@@ -191,7 +191,7 @@ def main():
     manifest_parser.add_argument("--security-version", required=True, type=int)
     manifest_parser.add_argument(
         "--arch", required=True,
-        choices=["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "esp32h2"],
+        choices=["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"],
     )
     manifest_parser.add_argument(
         "--compatible-board", required=True, action="append",

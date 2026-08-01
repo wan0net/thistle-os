@@ -163,7 +163,7 @@ impl ArtifactManifest {
         }
         if !matches!(
             self.arch.as_str(),
-            "esp32" | "esp32s2" | "esp32s3" | "esp32c3" | "esp32c6" | "esp32h2"
+            "esp32" | "esp32s2" | "esp32s3" | "esp32c3" | "esp32c6"
         ) {
             return Err(format!("unsupported architecture '{}'", self.arch));
         }
@@ -368,6 +368,9 @@ mod tests {
         ))
         .is_err());
         assert!(ArtifactManifest::parse(&canonical.replace("sha256=", "sha256=AB")).is_err());
+        assert!(
+            ArtifactManifest::parse(&canonical.replace("arch=esp32s3", "arch=esp32h2")).is_err()
+        );
         assert!(ArtifactManifest::parse(canonical.trim_end()).is_err());
         assert!(ArtifactManifest::parse(&(canonical.clone() + "extra=x\n")).is_err());
     }

@@ -924,7 +924,7 @@ cargo test --target aarch64-apple-darwin -- --test-threads=1
 # Multi-arch ESP32 targets:
 cargo +esp build --release --target xtensa-esp32s3-espidf
 cargo +esp build --release --target xtensa-esp32-espidf
-cargo +esp build --release --target riscv32imc-esp-espidf   # C3, C6, H2
+cargo +esp build --release --target riscv32imc-esp-espidf   # C3/C6 family
 
 # CMakeLists.txt links the resulting libthistle_kernel.a:
 # target_link_libraries(${COMPONENT_LIB} INTERFACE kernel_rs)

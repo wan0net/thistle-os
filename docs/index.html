@@ -65,7 +65,7 @@
   <main class="main-content">
     <div class="page-header">
       <h1>ThistleOS</h1>
-      <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 15 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6, H2 (RISC-V).</p>
+      <p class="lead">An open-source operating system for the ESP32 chip family. Dynamic app loading, 15 Rust hardware drivers, swappable window managers, and LoRa mesh networking — all on a microcontroller. Supports ESP32, S2, S3 (Xtensa) and C3, C6 (RISC-V).</p>
       <a href="https://github.com/wan0net/thistle-os" class="edit-link">
         &#9998; Edit on GitHub
       </a>
@@ -90,7 +90,7 @@
       <li><strong>Apps are ELF files on an SD card.</strong> The kernel's ELF loader resolves symbols against a syscall table at runtime. No recompilation of the OS needed to install an app.</li>
       <li><strong>BSD 3-Clause throughout.</strong> No GPL components in the ThistleOS core; swap to any commercial use case without license headaches.</li>
       <li><strong>Recovery OS provisions from board catalogs.</strong> A separate, minimal Rust firmware in <code>ota_0</code> starts a WiFi captive portal, downloads the selected board profile, verifies catalog hashes, and installs matching drivers and firmware.</li>
-      <li><strong>Multi-arch.</strong> One kernel codebase targets Xtensa (ESP32, S2, S3) and RISC-V (C3, C6, H2). Board configs in JSON — no recompilation for new boards.</li>
+      <li><strong>Multi-arch.</strong> One kernel codebase targets Xtensa (ESP32, S2, S3) and RISC-V (C3, C6). Board configs in JSON — no recompilation for new boards.</li>
     </ul>
 
     <h2>Quick Start</h2>

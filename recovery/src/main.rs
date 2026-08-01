@@ -22,6 +22,7 @@ use esp_idf_svc::wifi::{
 
 use log::*;
 
+mod anti_rollback;
 mod artifact_manifest;
 mod bounded_io;
 mod bundle_transaction;
@@ -89,6 +90,15 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Keep one default-NVS partition handle for both the monotonic firmware
+    // security counter and WiFi. Recovery must not install without this state.
+    // Do not use the convenience initializer that erases a full or newer NVS
+    // partition: losing the security counter would reopen old signed images.
+    // A previously confirmed ota_1 boots above without depending on Recovery's
+    // update state; only update/install mode requires this fail-closed gate.
+    let nvs = EspDefaultNvsPartition::take_with(false)?;
+    recovery_ota::init_anti_rollback(nvs.clone())?;
+
     // Step 2: Check SD card for firmware
     info!("Checking SD card for firmware...");
     println!("Checking SD card...");
@@ -122,7 +132,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     let sysloop = EspSystemEventLoop::take()?;
-    let nvs = EspDefaultNvsPartition::take()?;
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(
             Peripherals::take()?.modem,

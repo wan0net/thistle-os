@@ -20,13 +20,13 @@
 
 ---
 
-> **Beta Software** — Rust migration complete. 100% Rust kernel (57 modules, 51,000+ LOC, 1231 tests), 15 Rust hardware drivers, multi-board support (10 boards), and multi-arch builds (ESP32, S2, S3, C3, C6, H2). Recovery auto-detects hardware via I2C/SPI/UART scanning.
+> **Beta Software** — Rust migration complete. 100% Rust kernel (57 modules, 51,000+ LOC, 1231 tests), 15 Rust hardware drivers, multi-board support (10 boards), and multi-arch builds (ESP32, S2, S3, C3, C6). Recovery auto-detects hardware via I2C/SPI/UART scanning.
 
 ## Why ThistleOS
 
 The ESP32 ecosystem is full of great hardware — T-Deck, T-Beam, M5Stack, Heltec, custom boards — but every project starts from scratch. Different pin assignments, different displays, different radios, all requiring custom firmware.
 
-ThistleOS separates the **kernel** from the **hardware**. The kernel runs the same on every ESP32 device — ESP32, S2, S3, C3, C6, H2. Drivers are loaded at boot from the SD card. Apps are downloaded from an online store. Update your OS by dropping a file on the SD card or tapping "Update" in Settings.
+ThistleOS separates the **kernel** from the **hardware**. The kernel runs across the supported ESP32 families — ESP32, S2, S3, C3, and C6. Drivers are loaded at boot from the SD card. Apps are downloaded from an online store. Update your OS by dropping a file on the SD card or tapping "Update" in Settings.
 
 **The goal:** Flash ThistleOS once. The device figures out the rest.
 
@@ -61,7 +61,7 @@ ThistleOS separates the **kernel** from the **hardware**. The kernel runs the sa
 ├─────────────────────────────────────────────┤
 │         ESP-IDF + FreeRTOS + Hardware      │
 │  ESP32 • ESP32-S2 • ESP32-S3 (Xtensa)     │
-│  ESP32-C3 • ESP32-C6 • ESP32-H2 (RISC-V) │
+│       ESP32-C3 • ESP32-C6 (RISC-V)        │
 └─────────────────────────────────────────────┘
 ```
 
@@ -167,7 +167,7 @@ See the full [Supported Devices](https://wan0net.github.io/esp32-os/docs/devices
 | CYD ESP32-2432S028 | ESP32 | ILI9341 LCD (320×240) | Supported |
 | ESP32-C3 SuperMini | ESP32-C3 | SSD1306 OLED (128×64) | Supported |
 
-Multi-arch: ESP32 (Xtensa), ESP32-S2/S3 (Xtensa LX7), ESP32-C3/C6/H2 (RISC-V). One firmware binary per architecture. Hardware drivers auto-detected and downloaded by Recovery OS.
+Multi-arch: ESP32 (Xtensa), ESP32-S2/S3 (Xtensa LX7), ESP32-C3/C6 (RISC-V). One firmware binary per architecture. Hardware drivers auto-detected and downloaded by Recovery OS.
 
 ### LilyGo T-Deck Pro (primary target)
 
@@ -402,7 +402,7 @@ cmake .. && make -j8 && ./thistle_sim
 | Built-in apps | 14 |
 | HAL interfaces | 11 (display, input, radio, GPS, audio, power, IMU, storage, net, crypto, RTC) |
 | Supported boards | 10 |
-| Supported architectures | 6 (ESP32, S2, S3, C3, C6, H2) |
+| Supported architectures | 5 (ESP32, S2, S3, C3, C6) |
 | License | BSD 3-Clause |
 | Dependencies | All BSD/MIT/Apache-2.0 (no GPL) |
 
@@ -424,7 +424,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 - [x] 100% Rust kernel (57 modules, 51,000+ LOC, 1231 tests)
 - [x] 15 Rust hardware drivers
 - [x] Multi-board support (10 boards)
-- [x] Multi-arch builds (ESP32, S2, S3, C3, C6, H2)
+- [x] Multi-arch builds (ESP32, S2, S3, C3, C6)
 - [x] Unified manifest system for apps, drivers, firmware
 - [x] Boot-from-JSON (board.json driven hardware init)
 - [x] Display server with swappable window managers
