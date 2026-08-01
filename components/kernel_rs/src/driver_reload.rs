@@ -163,6 +163,19 @@ unsafe impl Send for DriverReloadState {}
 
 static STATE: Mutex<DriverReloadState> = Mutex::new(DriverReloadState::new());
 
+/// Hardware replacement is fail-closed while legacy C registry readers cannot
+/// participate in Rust generation lifetime tracking. Host builds retain the
+/// state-machine implementation for deterministic tests and simulation.
+#[inline]
+const fn runtime_replacement_supported() -> bool {
+    replacement_supported_for_target(cfg!(target_os = "espidf"))
+}
+
+#[inline]
+const fn replacement_supported_for_target(is_espidf: bool) -> bool {
+    !is_espidf
+}
+
 // ── Platform abstraction ───────────────────────────────────────────────
 //
 // On test / simulator builds, state transitions happen without actual ELF
@@ -192,7 +205,6 @@ fn platform_stop_driver(_hal_type: u8) -> i32 {
 #[cfg(target_os = "espidf")]
 extern "C" {
     fn driver_loader_load(path: *const c_char) -> i32;
-    fn thistle_driver_reload_unload(driver_id: u32) -> i32;
     fn thistle_driver_reload_start(hal_type: u8) -> i32;
     fn thistle_driver_reload_stop(hal_type: u8) -> i32;
     fn thistle_driver_reload_hal_pre_reload(hal_type: u8) -> i32;
@@ -229,19 +241,20 @@ fn platform_load_driver(path: &[u8], path_len: usize) -> i32 {
 }
 
 #[cfg(target_os = "espidf")]
-fn platform_unload_driver(id: u32) -> i32 {
+fn platform_unload_driver(_id: u32) -> i32 {
+    // HAL registry readers include legacy C callers that cannot yet report
+    // when they have finished with a vtable. Registry updates publish a new
+    // immutable Rust-owned generation, while the executable backing older
+    // generations remains loaded until reboot. Physical unload can return
+    // once all readers are Rust-owned and participate in lifetime tracking.
     unsafe {
-        let ret = thistle_driver_reload_unload(id);
-        if ret != ESP_OK && ret != ESP_ERR_NOT_SUPPORTED {
-            esp_log_write(
-                ESP_LOG_WARN,
-                TAG.as_ptr(),
-                b"platform_unload_driver failed: %d\0".as_ptr(),
-                ret,
-            );
-        }
-        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"retaining old driver generation until reboot\0".as_ptr(),
+        );
     }
+    ESP_OK
 }
 
 #[cfg(target_os = "espidf")]
@@ -482,6 +495,10 @@ pub extern "C" fn rs_driver_reload_unregister(id: u32) -> i32 {
 /// May be called from C.
 #[no_mangle]
 pub extern "C" fn rs_driver_reload_load(id: u32) -> i32 {
+    if !runtime_replacement_supported() {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     match STATE.lock() {
         Ok(mut s) => {
             let idx = match find_driver_index(&s, id) {
@@ -529,6 +546,10 @@ pub extern "C" fn rs_driver_reload_load(id: u32) -> i32 {
 /// May be called from C.
 #[no_mangle]
 pub extern "C" fn rs_driver_reload_unload(id: u32) -> i32 {
+    if !runtime_replacement_supported() {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     match STATE.lock() {
         Ok(mut s) => {
             let idx = match find_driver_index(&s, id) {
@@ -564,6 +585,10 @@ pub extern "C" fn rs_driver_reload_unload(id: u32) -> i32 {
 /// May be called from C.
 #[no_mangle]
 pub extern "C" fn rs_driver_reload_reload(id: u32) -> i32 {
+    if !runtime_replacement_supported() {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     match STATE.lock() {
         Ok(mut s) => {
             let idx = match find_driver_index(&s, id) {
@@ -931,6 +956,12 @@ mod tests {
         assert_eq!(rs_driver_reload_init(), ESP_OK);
         assert_eq!(rs_driver_reload_init(), ESP_OK);
         assert_eq!(rs_driver_reload_get_count(), 0);
+    }
+
+    #[test]
+    fn test_device_runtime_replacement_is_fail_closed() {
+        assert!(!replacement_supported_for_target(true));
+        assert!(replacement_supported_for_target(false));
     }
 
     // ─── Register tests ────────────────────────────────────────────────

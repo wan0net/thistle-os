@@ -45,7 +45,9 @@ typedef struct {
     const char                 *board_name;
 } hal_registry_t;
 
-/* Global HAL registry access */
+/* Global HAL registry access. The returned immutable generation remains valid
+ * for the lifetime of the program; a later registration may return a newer
+ * generation at a different address. */
 const hal_registry_t *hal_get_registry(void);
 
 /* Registration functions — called by board init */

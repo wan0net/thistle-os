@@ -8,8 +8,10 @@
 // Layout mirrors the C structs in components/thistle_hal/include/hal/ exactly
 // so that pointers passed from C are safe to dereference.
 
-use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_char, c_void};
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 // ── ESP error codes ──────────────────────────────────────────────────
 
@@ -368,6 +370,7 @@ unsafe impl Sync for HalRtcDriver {}
 // ── HAL Registry struct (hal/board.h: hal_registry_t) ─────────────────
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct HalRegistry {
     pub display: *const HalDisplayDriver,
     pub display_config: *const c_void,
@@ -431,32 +434,75 @@ impl HalRegistry {
     }
 }
 
-// ── Global static registry ─────────────────────────────────────────────
+// ── Global immutable-generation registry ──────────────────────────────
 //
-// UnsafeCell rather than Mutex: C callers retrieve a raw pointer via
-// hal_get_registry() and read fields directly, so the pointer must be stable.
-// Mutation only occurs during single-threaded board-init, mirroring the C
-// pattern of a plain file-scope static.
+// C callers receive raw pointers and cannot carry a Rust lock guard. Writers
+// therefore clone the current registry, mutate the private clone, and publish
+// it atomically. Published generations are never mutated or freed, so an
+// already-issued C or Rust reader always observes one coherent snapshot. The
+// driver reload path likewise retains old driver images until reboot, keeping
+// every function pointer in an issued generation executable.
+
+static INITIAL_REGISTRY: HalRegistry = HalRegistry::new();
 
 struct GlobalRegistry {
-    inner: UnsafeCell<HalRegistry>,
+    current: AtomicPtr<HalRegistry>,
+    writer: Mutex<()>,
 }
 
-// SAFETY: Only mutated during single-threaded board init.
-unsafe impl Sync for GlobalRegistry {}
-
 static REGISTRY: GlobalRegistry = GlobalRegistry {
-    inner: UnsafeCell::new(HalRegistry::new()),
+    current: AtomicPtr::new((&raw const INITIAL_REGISTRY).cast_mut()),
+    writer: Mutex::new(()),
 };
+
+pub struct RegistryWriteGuard {
+    _writer: MutexGuard<'static, ()>,
+    next: Option<Box<HalRegistry>>,
+}
+
+impl Deref for RegistryWriteGuard {
+    type Target = HalRegistry;
+
+    fn deref(&self) -> &Self::Target {
+        self.next.as_deref().expect("registry write generation")
+    }
+}
+
+impl DerefMut for RegistryWriteGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.next.as_deref_mut().expect("registry write generation")
+    }
+}
+
+impl Drop for RegistryWriteGuard {
+    fn drop(&mut self) {
+        if let Some(next) = self.next.take() {
+            REGISTRY
+                .current
+                .store(Box::into_raw(next), Ordering::Release);
+        }
+    }
+}
 
 #[inline]
 pub fn registry() -> &'static HalRegistry {
-    unsafe { &*REGISTRY.inner.get() }
+    let current = REGISTRY.current.load(Ordering::Acquire);
+    // SAFETY: The pointer is either INITIAL_REGISTRY or a leaked Box published
+    // under the writer mutex. Published generations are never mutated/freed.
+    unsafe { &*current }
 }
 
 #[inline]
-pub fn registry_mut() -> &'static mut HalRegistry {
-    unsafe { &mut *REGISTRY.inner.get() }
+pub fn registry_mut() -> RegistryWriteGuard {
+    let writer = REGISTRY
+        .writer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let next = Box::new(*registry());
+    RegistryWriteGuard {
+        _writer: writer,
+        next: Some(next),
+    }
 }
 
 /// Return a pointer to the crypto driver, or NULL if none is registered.
@@ -547,8 +593,8 @@ macro_rules! hal_loge {
 
 /// Return a pointer to the global HAL registry.
 ///
-/// The returned pointer is valid for the lifetime of the program and is
-/// the same value on every call. C callers read fields directly.
+/// The returned generation is immutable and valid for the lifetime of the
+/// program. A later registration may publish a different pointer.
 #[no_mangle]
 pub extern "C" fn hal_get_registry() -> *const HalRegistry {
     registry() as *const HalRegistry
@@ -566,7 +612,7 @@ pub unsafe extern "C" fn hal_display_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.display = driver;
     reg.display_config = config;
     let name = driver_name((*driver).name);
@@ -586,7 +632,7 @@ pub unsafe extern "C" fn hal_input_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     if reg.input_count as usize >= HAL_MAX_INPUT_DRIVERS {
         hal_loge!(
             b"input driver registration failed: max %d drivers already registered\0",
@@ -615,7 +661,7 @@ pub unsafe extern "C" fn hal_radio_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.radio = driver;
     reg.radio_config = config;
     let name = driver_name((*driver).name);
@@ -635,7 +681,7 @@ pub unsafe extern "C" fn hal_gps_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.gps = driver;
     reg.gps_config = config;
     let name = driver_name((*driver).name);
@@ -655,7 +701,7 @@ pub unsafe extern "C" fn hal_audio_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.audio = driver;
     reg.audio_config = config;
     let name = driver_name((*driver).name);
@@ -675,7 +721,7 @@ pub unsafe extern "C" fn hal_power_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.power = driver;
     reg.power_config = config;
     let name = driver_name((*driver).name);
@@ -695,7 +741,7 @@ pub unsafe extern "C" fn hal_imu_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.imu = driver;
     reg.imu_config = config;
     let name = driver_name((*driver).name);
@@ -715,7 +761,7 @@ pub unsafe extern "C" fn hal_storage_register(
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     if reg.storage_count as usize >= HAL_MAX_STORAGE_DRIVERS {
         hal_loge!(
             b"storage driver registration failed: max %d drivers already registered\0",
@@ -741,7 +787,7 @@ pub unsafe extern "C" fn hal_crypto_register(driver: *const HalCryptoDriver) -> 
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.crypto = driver;
     let name = driver_name((*driver).name);
     hal_logi!(b"crypto driver registered: %s\0", name.as_ptr());
@@ -757,7 +803,7 @@ pub unsafe extern "C" fn hal_rtc_register(driver: *const HalRtcDriver) -> i32 {
     if driver.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     reg.rtc = driver;
     let name = driver_name((*driver).name);
     hal_logi!(b"RTC driver registered: %s\0", name.as_ptr());
@@ -797,7 +843,7 @@ pub unsafe extern "C" fn hal_bus_register_spi(host_id: i32, bus_handle: *mut c_v
     if bus_handle.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     if reg.spi_bus_count >= 2 {
         hal_loge!(b"SPI bus registration failed: max 2 buses\0");
         return ESP_ERR_NO_MEM;
@@ -818,7 +864,7 @@ pub unsafe extern "C" fn hal_bus_register_i2c(port: i32, bus_handle: *mut c_void
     if bus_handle.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    let reg = registry_mut();
+    let mut reg = registry_mut();
     if reg.i2c_bus_count >= 2 {
         hal_loge!(b"I2C bus registration failed: max 2 buses\0");
         return ESP_ERR_NO_MEM;
@@ -1062,7 +1108,7 @@ mod tests {
         let dummy = 1usize as *const HalInputDriver;
         // Manually fill all input slots.
         {
-            let reg = registry_mut();
+            let mut reg = registry_mut();
             for i in 0..HAL_MAX_INPUT_DRIVERS {
                 reg.inputs[i] = dummy;
             }
@@ -1079,7 +1125,7 @@ mod tests {
         reset_registry();
         let dummy = 1usize as *const HalStorageDriver;
         {
-            let reg = registry_mut();
+            let mut reg = registry_mut();
             for i in 0..HAL_MAX_STORAGE_DRIVERS {
                 reg.storage[i] = dummy;
             }
@@ -1132,6 +1178,81 @@ mod tests {
         let p2 = hal_get_registry();
         assert_eq!(p1, p2);
         assert!(!p1.is_null());
+    }
+
+    #[test]
+    fn published_registry_generation_is_never_mutated_in_place() {
+        reset_registry();
+        let before = hal_get_registry();
+        assert!(!before.is_null());
+        assert!(unsafe { (*before).display }.is_null());
+
+        let driver = HalDisplayDriver {
+            init: None,
+            deinit: None,
+            flush: None,
+            refresh: None,
+            set_brightness: None,
+            sleep: None,
+            set_refresh_mode: None,
+            width: 320,
+            height: 240,
+            display_type: HalDisplayType::Lcd,
+            name: b"generation-test\0".as_ptr() as *const c_char,
+        };
+        let config = 0xA5A5u32;
+        let config_ptr = &config as *const u32 as *const c_void;
+
+        assert_eq!(unsafe { hal_display_register(&driver, config_ptr) }, ESP_OK);
+
+        let after = hal_get_registry();
+        assert_ne!(before, after, "a writer must publish a new generation");
+        assert!(
+            unsafe { (*before).display }.is_null(),
+            "an issued reader snapshot must remain immutable"
+        );
+        assert_eq!(unsafe { (*after).display }, &driver as *const _);
+        assert_eq!(unsafe { (*after).display_config }, config_ptr);
+    }
+
+    #[test]
+    fn concurrent_registration_publishes_only_coherent_generations() {
+        use std::sync::{Arc, Barrier};
+
+        reset_registry();
+        {
+            let mut reg = registry_mut();
+            reg.display = 1usize as *const HalDisplayDriver;
+            reg.display_config = 1usize as *const c_void;
+        }
+
+        let start = Arc::new(Barrier::new(5));
+        let mut readers = Vec::new();
+
+        for _ in 0..4 {
+            let start = Arc::clone(&start);
+            readers.push(std::thread::spawn(move || {
+                start.wait();
+                for _ in 0..10_000 {
+                    let snapshot = registry();
+                    assert_eq!(
+                        snapshot.display as usize, snapshot.display_config as usize,
+                        "a reader observed fields from different generations"
+                    );
+                }
+            }));
+        }
+
+        start.wait();
+        for generation in 2..=1_000usize {
+            let mut next = registry_mut();
+            next.display = generation as *const HalDisplayDriver;
+            next.display_config = generation as *const c_void;
+        }
+
+        for reader in readers {
+            reader.join().expect("registry reader thread");
+        }
     }
 
     #[test]
