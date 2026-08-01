@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Unified manifest parser for apps, drivers, and firmware.
 
+use std::ffi::CStr;
 use std::fs;
 use std::path::Path;
 
@@ -39,6 +40,22 @@ pub fn current_arch() -> &'static str {
     {
         "host" // simulator / unit tests on aarch64 or x86_64
     }
+}
+
+/// Return the canonical runtime architecture slug as a C string for loader ABI
+/// boundaries. This must stay derived from `current_arch()` so package and
+/// catalog slugs cannot drift from the loader value.
+pub fn current_arch_cstr() -> &'static CStr {
+    let bytes: &'static [u8] = match current_arch() {
+        "esp32" => b"esp32\0",
+        "esp32s2" => b"esp32s2\0",
+        "esp32s3" => b"esp32s3\0",
+        "esp32c3" => b"esp32c3\0",
+        "esp32c6" => b"esp32c6\0",
+        "host" => b"host\0",
+        _ => unreachable!("unsupported canonical architecture slug"),
+    };
+    CStr::from_bytes_with_nul(bytes).expect("canonical architecture C string")
 }
 
 /// Manifest entry types.
@@ -839,6 +856,15 @@ mod tests {
         // On the test host this will be "host"; on ESP32-S3 it will be "esp32s3".
         // The important invariant is that it's a non-empty string.
         assert!(!arch.is_empty(), "current_arch() must not be empty");
+    }
+
+    #[test]
+    fn test_current_arch_cstr_matches_canonical_slug() {
+        assert_eq!(
+            current_arch_cstr().to_str().unwrap(),
+            current_arch(),
+            "the loader ABI slug must come from the canonical runtime source"
+        );
     }
 
     #[test]

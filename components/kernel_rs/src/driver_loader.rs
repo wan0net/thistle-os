@@ -46,7 +46,6 @@ extern "C" {
 
     // Manifest (C/Rust shims)
     fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
-    fn manifest_is_compatible(manifest: *const CManifest, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table (C)
@@ -191,13 +190,18 @@ const ESP_LOG_DEBUG: i32 = 4;
 
 static TAG: &[u8] = b"drv_loader\0";
 
-// Current architecture string for manifest compatibility checks
-static CURRENT_ARCH: &[u8] = b"xtensa-esp32s3\0";
-
 // Size of esp_elf_t opaque struct — must be large enough to hold the C struct.
 // We use a byte array as an opaque storage blob.
 // esp_elf_t is typically ~128 bytes; use 256 for safety.
 const ESP_ELF_T_SIZE: usize = 256;
+
+fn manifest_is_compatible_for_arch(manifest: &CManifest, current_arch: &CStr) -> bool {
+    unsafe { crate::ffi::manifest_is_compatible(manifest, current_arch.as_ptr()) }
+}
+
+fn manifest_is_compatible_for_current_arch(manifest: &CManifest) -> bool {
+    manifest_is_compatible_for_arch(manifest, crate::manifest::current_arch_cstr())
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -487,7 +491,7 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
             manifest.as_mut_ptr(),
         ) == ESP_OK {
             let manifest = manifest.assume_init();
-            if !manifest_is_compatible(&manifest, CURRENT_ARCH.as_ptr() as *const c_char) {
+            if !manifest_is_compatible_for_current_arch(&manifest) {
                 esp_log_write(
                     ESP_LOG_ERROR,
                     TAG.as_ptr(),
@@ -692,7 +696,7 @@ pub unsafe extern "C" fn driver_loader_load_with_config(
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
     use std::rc::Rc;
 
     fn reset_state() {
@@ -764,6 +768,27 @@ mod tests {
     #[test]
     fn test_max_loaded_drvs_constant() {
         assert_eq!(MAX_LOADED_DRVS, 8, "MAX_LOADED_DRVS must be 8");
+    }
+
+    #[test]
+    fn driver_loader_accepts_matching_canonical_architectures_only() {
+        let universal = CManifest::from(&crate::manifest::Manifest::default());
+        for package_arch in ["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"] {
+            let manifest = CManifest::from(&crate::manifest::Manifest {
+                arch: package_arch.into(),
+                ..Default::default()
+            });
+            let matching = CString::new(package_arch).unwrap();
+            assert!(manifest_is_compatible_for_arch(&universal, &matching));
+            assert!(manifest_is_compatible_for_arch(&manifest, &matching));
+
+            let mismatch = if package_arch == "esp32c3" {
+                CString::new("esp32s3").unwrap()
+            } else {
+                CString::new("esp32c3").unwrap()
+            };
+            assert!(!manifest_is_compatible_for_arch(&manifest, &mismatch));
+        }
     }
 
     #[test]
