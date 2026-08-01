@@ -1,21 +1,25 @@
-idf_component_register(
-    SRCS
-        "test_hal_registry.c"
-        "test_event_bus.c"
-        "test_ipc.c"
-        "test_app_manager.c"
-        "test_syscall_table.c"
-        "test_epaper_refresh.c"
-        "test_driver_vtable.c"
-        "test_kernel_integration.c"
-        "test_permissions.c"
-        "test_signing.c"
-        "test_wifi_manager.c"
-        "test_ota.c"
-        "test_net_manager.c"
-        "test_driver_loader.c"
-        "test_appstore_client.c"
-    INCLUDE_DIRS "."
-    REQUIRES unity thistle_hal kernel ui esp_timer freertos
-    WHOLE_ARCHIVE
-)
+if(CONFIG_THISTLE_RUN_TESTS)
+    idf_component_register(
+        SRCS
+            "test_hal_registry.c"
+            "test_event_bus.c"
+            "test_ipc.c"
+            "test_app_manager.c"
+            "test_syscall_table.c"
+            "test_epaper_refresh.c"
+            "test_driver_vtable.c"
+            "test_kernel_integration.c"
+            "test_permissions.c"
+            "test_signing.c"
+            "test_wifi_manager.c"
+            "test_ota.c"
+            "test_net_manager.c"
+            "test_driver_loader.c"
+            "test_appstore_client.c"
+        INCLUDE_DIRS "."
+        REQUIRES unity thistle_hal kernel ui esp_timer freertos
+        WHOLE_ARCHIVE
+    )
+else()
+    idf_component_register()
+endif()

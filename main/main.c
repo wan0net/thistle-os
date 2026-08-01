@@ -21,6 +21,7 @@
 #include "ui/lvgl_wm.h"
 #include "ui/toast.h"
 #include "launcher/launcher_app.h"
+#ifdef THISTLE_LEGACY_C_APPS
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
 #include "reader/reader_app.h"
@@ -34,6 +35,7 @@
 #include "weather/weather_app.h"
 #include "terminal/terminal_app.h"
 #include "vault/vault_app.h"
+#endif
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -180,6 +182,7 @@ void app_main(void)
         /* Register LVGL-based built-in apps (they depend on LVGL and would
          * crash under the thistle-tk WM) */
         launcher_app_register();
+#ifdef THISTLE_LEGACY_C_APPS
         settings_app_register();
         filemgr_app_register();
         reader_app_register();
@@ -193,6 +196,7 @@ void app_main(void)
         weather_app_register();
         terminal_app_register();
         vault_app_register();
+#endif
     }
 
     /* Scan SPIFFS and SD card for standalone .app.elf files.
@@ -202,6 +206,7 @@ void app_main(void)
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.tk_launcher", PERM_ALL);
     permissions_grant("com.thistle.launcher",   PERM_ALL);
+#ifdef THISTLE_LEGACY_C_APPS
     permissions_grant("com.thistle.settings",   PERM_ALL);
     permissions_grant("com.thistle.filemgr",    PERM_ALL);
     permissions_grant("com.thistle.reader",     PERM_ALL);
@@ -215,6 +220,7 @@ void app_main(void)
     permissions_grant("com.thistle.weather",     PERM_GPS);
     permissions_grant("com.thistle.terminal",    PERM_ALL);
     permissions_grant("com.thistle.vault",       PERM_STORAGE | PERM_SYSTEM);
+#endif
 
     if (use_tk_wm) {
         /* Wire HAL input drivers (keyboard, touch) to the thistle-tk WM.

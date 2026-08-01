@@ -77,8 +77,32 @@ class TargetMatrixTests(unittest.TestCase):
         terminal = Path(
             "components/apps_builtin/terminal/terminal_ui.c"
         ).read_text()
-        self.assertIn("SOC_UART_NUM > 2", terminal)
+        self.assertIn("CONFIG_IDF_TARGET_ESP32S3", terminal)
         self.assertIn("UART_NUM_1", terminal)
+
+    def test_embedded_tests_are_not_linked_into_production_firmware(self):
+        test_cmake = Path("components/test_thistle/CMakeLists.txt").read_text()
+        main_cmake = Path("main/CMakeLists.txt").read_text()
+        self.assertIn("if(CONFIG_THISTLE_RUN_TESTS)", test_cmake)
+        self.assertIn("if(CONFIG_THISTLE_RUN_TESTS)", main_cmake)
+        self.assertNotIn("test_thistle\n)", main_cmake)
+
+    def test_non_s3_targets_do_not_link_legacy_c_app_suite(self):
+        main_cmake = Path("main/CMakeLists.txt").read_text()
+        main_source = Path("main/main.c").read_text()
+        self.assertIn('IDF_TARGET STREQUAL "esp32s3"', main_cmake)
+        self.assertIn("THISTLE_LEGACY_C_APPS", main_source)
+
+    def test_file_manager_joins_paths_with_explicit_bounds(self):
+        source = Path("apps/file_manager/file_manager/filemgr_ui.c").read_text()
+        self.assertIn("static bool join_path", source)
+        self.assertNotIn('snprintf(full_path, 512, "/%s"', source)
+
+    def test_lvgl_draw_buffers_are_runtime_sized(self):
+        source = Path("components/ui/src/manager.c").read_text()
+        self.assertIn("DRAW_BUF_LINES", source)
+        self.assertIn("heap_caps_malloc", source)
+        self.assertNotIn("s_draw_buf1[MAX_DISPLAY_WIDTH", source)
 
 
 if __name__ == "__main__":

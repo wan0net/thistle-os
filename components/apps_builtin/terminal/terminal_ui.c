@@ -447,7 +447,8 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
 
     memset(&s_term, 0, sizeof(s_term));
     s_term.mode       = TERM_MODE_LOCAL;
-#if !defined(ESP_PLATFORM) || SOC_UART_NUM > 2
+#if !defined(ESP_PLATFORM) || defined(CONFIG_IDF_TARGET_ESP32) || \
+    defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
     s_term.uart_num   = UART_NUM_2;
 #else
     s_term.uart_num   = UART_NUM_1;

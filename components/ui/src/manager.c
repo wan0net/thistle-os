@@ -6,6 +6,7 @@
 #include "hal/input.h"
 #include "thistle/app_manager.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -16,10 +17,11 @@
 
 static const char *TAG = "ui_mgr";
 
-/* Max display dimensions — used to size static draw buffers.
- * Actual dimensions read from HAL at runtime in ui_manager_init(). */
-#define MAX_DISPLAY_WIDTH   480
-#define MAX_DISPLAY_HEIGHT  480
+/* Partial rendering keeps draw memory proportional to the actual panel width.
+ * Twenty RGB565 lines per buffer is enough for LVGL to batch useful work
+ * without reserving hundreds of kilobytes for a hypothetical 480x480 panel. */
+#define DRAW_BUF_LINES 20
+#define DRAW_BUF_BYTES_PER_PIXEL 2
 #define STATUSBAR_H     24
 #define LVGL_TASK_PERIOD_MS 10
 
@@ -38,15 +40,9 @@ static bool s_use_deferred_refresh = false;
 static uint16_t s_display_w = 240;
 static uint16_t s_display_h = 320;
 
-/* Draw buffer — placed in PSRAM to save ~76KB of internal DRAM.
- * Sized for max supported resolution; actual usage is s_display_w * s_display_h. */
-#ifdef CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
-static EXT_RAM_BSS_ATTR uint8_t s_draw_buf1[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT];
-static EXT_RAM_BSS_ATTR uint8_t s_draw_buf2[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT];
-#else
-static uint8_t s_draw_buf1[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT / 2];
-static uint8_t s_draw_buf2[MAX_DISPLAY_WIDTH * MAX_DISPLAY_HEIGHT / 2];
-#endif
+static uint8_t *s_draw_buf1 = NULL;
+static uint8_t *s_draw_buf2 = NULL;
+static size_t   s_draw_buf_size = 0;
 
 static lv_display_t   *s_display  = NULL;
 static lv_obj_t       *s_screen   = NULL;
@@ -302,6 +298,32 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     }
     ESP_LOGI(TAG, "display: %dx%d", s_display_w, s_display_h);
 
+    const size_t draw_lines = s_display_h < DRAW_BUF_LINES
+                                  ? s_display_h : DRAW_BUF_LINES;
+    s_draw_buf_size = (size_t)s_display_w * draw_lines *
+                      DRAW_BUF_BYTES_PER_PIXEL;
+#ifdef CONFIG_SPIRAM
+    s_draw_buf1 = heap_caps_malloc(s_draw_buf_size,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_draw_buf2 = heap_caps_malloc(s_draw_buf_size,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (s_draw_buf1 == NULL) {
+        s_draw_buf1 = heap_caps_malloc(s_draw_buf_size, MALLOC_CAP_8BIT);
+    }
+    if (s_draw_buf2 == NULL) {
+        s_draw_buf2 = heap_caps_malloc(s_draw_buf_size, MALLOC_CAP_8BIT);
+    }
+    if (s_draw_buf1 == NULL || s_draw_buf2 == NULL) {
+        ESP_LOGE(TAG, "draw buffer allocation failed (%zu bytes each)",
+                 s_draw_buf_size);
+        free(s_draw_buf1);
+        free(s_draw_buf2);
+        s_draw_buf1 = NULL;
+        s_draw_buf2 = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     /* 1. Initialize LVGL */
     lv_init();
 
@@ -309,13 +331,17 @@ esp_err_t ui_manager_init(ui_flush_fn_t flush_cb, bool use_deferred_refresh)
     s_display = lv_display_create(s_display_w, s_display_h);
     if (s_display == NULL) {
         ESP_LOGE(TAG, "lv_display_create failed");
+        free(s_draw_buf1);
+        free(s_draw_buf2);
+        s_draw_buf1 = NULL;
+        s_draw_buf2 = NULL;
         return ESP_FAIL;
     }
 
     /* 3. Set draw buffers (double-buffered, partial rendering) */
     lv_display_set_buffers(s_display,
                            s_draw_buf1, s_draw_buf2,
-                           sizeof(s_draw_buf1),
+                           s_draw_buf_size,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     /* 4. Set flush callback (provided by the WM variant) */
