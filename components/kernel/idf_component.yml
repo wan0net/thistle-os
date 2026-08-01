@@ -1,2 +1,0 @@
-dependencies:
-  espressif/elf_loader: "~1.3"

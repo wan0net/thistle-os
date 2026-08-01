@@ -90,6 +90,33 @@ class KeyGenerationSecurityTests(unittest.TestCase):
 
 
 class ArtifactManifestTests(unittest.TestCase):
+    def test_arch_wide_firmware_manifest_allows_no_board_profiles(self):
+        manifest = sign.canonical_manifest(
+            artifact_type="firmware",
+            artifact_id="thistle-os",
+            version="0.5.0",
+            security_version=500,
+            arch="esp32s2",
+            compatible_boards=[],
+            url="https://downloads.example/thistle-os-esp32s2.bin",
+            payload=b"firmware bytes",
+        )
+        self.assertIn(b"arch=esp32s2\n", manifest)
+        self.assertIn(b"compatible_boards=\n", manifest)
+
+    def test_non_firmware_manifest_still_requires_a_board_profile(self):
+        with self.assertRaisesRegex(ValueError, "compatible board"):
+            sign.canonical_manifest(
+                artifact_type="driver",
+                artifact_id="kbd",
+                version="1.0.0",
+                security_version=1,
+                arch="esp32s2",
+                compatible_boards=[],
+                url="https://downloads.example/kbd.drv.elf",
+                payload=b"driver bytes",
+            )
+
     def test_manifest_signature_binds_every_security_field(self):
         private_key = sign.Ed25519PrivateKey.generate()
         payload = b"firmware bytes"

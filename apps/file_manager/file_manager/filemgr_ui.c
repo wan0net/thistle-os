@@ -78,6 +78,22 @@ static int entry_cmp(const void *a, const void *b)
 /* Forward declaration */
 static void navigate_to(const char *path);
 
+static bool join_path(char *out, size_t out_size,
+                      const char *base_path, const char *name)
+{
+    if (!out || out_size == 0 || !base_path || !name) return false;
+
+    const bool root = strcmp(base_path, "/") == 0;
+    const size_t base_len = root ? 0 : strlen(base_path);
+    const size_t name_len = strlen(name);
+    if (base_len + 1 + name_len + 1 > out_size) return false;
+
+    if (base_len > 0) memcpy(out, base_path, base_len);
+    out[base_len] = '/';
+    memcpy(out + base_len + 1, name, name_len + 1);
+    return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* File-type indicator by extension                                     */
 /* ------------------------------------------------------------------ */
@@ -181,10 +197,10 @@ static void create_entry_row(lv_obj_t *list, const char *base_path,
     char *full_path = malloc(512);
     if (!full_path) return;
 
-    if (strcmp(base_path, "/") == 0) {
-        snprintf(full_path, 512, "/%s", entry->name);
-    } else {
-        snprintf(full_path, 512, "%s/%s", base_path, entry->name);
+    if (!join_path(full_path, 512, base_path, entry->name)) {
+        ESP_LOGW(TAG, "Skipping overlong path entry: %s", entry->name);
+        free(full_path);
+        return;
     }
 
     /* Row container */
@@ -396,10 +412,9 @@ static void navigate_to(const char *path)
 
         /* Build full path for stat */
         char full[512];
-        if (strcmp(path, "/") == 0) {
-            snprintf(full, sizeof(full), "/%s", de->d_name);
-        } else {
-            snprintf(full, sizeof(full), "%s/%s", path, de->d_name);
+        if (!join_path(full, sizeof(full), path, de->d_name)) {
+            ESP_LOGW(TAG, "Skipping overlong path entry: %s", de->d_name);
+            continue;
         }
 
         struct stat st;

@@ -7,12 +7,14 @@
 //
 // This file is never called — it just ensures the symbols are present.
 
+#include "sdkconfig.h"
 #include "esp_wifi.h"
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#if CONFIG_BT_ENABLED
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
@@ -21,6 +23,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
+#endif
 #include "esp_elf.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -70,6 +73,7 @@ static void _force_link_deps(void) {
     (void)nvs_flash_init;
     (void)nvs_flash_erase;
     // BLE / NimBLE
+#if CONFIG_BT_ENABLED
     (void)ble_gap_adv_stop;
     (void)ble_gap_terminate;
     (void)ble_svc_gap_device_name_set;
@@ -81,6 +85,7 @@ static void _force_link_deps(void) {
     (void)nimble_port_run;
     (void)ble_hs_mbuf_from_flat;
     (void)ble_gatts_notify_custom;
+#endif
     // ELF loader
     (void)esp_elf_init;
     (void)esp_elf_relocate;
