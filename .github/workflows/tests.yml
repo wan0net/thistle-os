@@ -90,6 +90,12 @@ jobs:
             -o /tmp/test_bundle_transaction
           /tmp/test_bundle_transaction
 
+      - name: Test recovery HTTP and request limits
+        run: |
+          rustc --edition=2021 --test recovery/src/bounded_io.rs \
+            -o /tmp/test_bounded_io
+          /tmp/test_bounded_io
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

@@ -9,9 +9,12 @@
 // `RecoveryState` protected by a Mutex.  The main loop polls that state
 // and performs all operations that require owning the WiFi driver.
 
-use esp_idf_svc::http::server::EspHttpServer;
+use esp_idf_svc::http::server::{EspHttpConnection, EspHttpServer};
 use log::*;
 use std::sync::Mutex;
+
+const MAX_WIFI_REQUEST_BODY: usize = 512;
+const MAX_BOARD_REQUEST_BODY: usize = 256;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -787,14 +790,16 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/wifi/connect",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
-            let mut body = Vec::new();
-            let mut buf = [0u8; 256];
-            loop {
-                match req.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => body.extend_from_slice(&buf[..n]),
+            let body = match read_request_body(&mut req, MAX_WIFI_REQUEST_BODY) {
+                Ok(body) => body,
+                Err(error) => {
+                    warn!("Rejected WiFi request body: {}", error);
+                    let mut resp =
+                        req.into_response(413, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"request body too large\"}")?;
+                    return Ok(());
                 }
-            }
+            };
 
             let body_str = String::from_utf8_lossy(&body);
             let ssid = crate::recovery_ota::json_extract_string(&body_str, "ssid");
@@ -827,14 +832,16 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/board/select",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
-            let mut body = Vec::new();
-            let mut buf = [0u8; 128];
-            loop {
-                match req.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => body.extend_from_slice(&buf[..n]),
+            let body = match read_request_body(&mut req, MAX_BOARD_REQUEST_BODY) {
+                Ok(body) => body,
+                Err(error) => {
+                    warn!("Rejected board request body: {}", error);
+                    let mut resp =
+                        req.into_response(413, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"request body too large\"}")?;
+                    return Ok(());
                 }
-            }
+            };
 
             let body_str = String::from_utf8_lossy(&body);
             let board = crate::recovery_ota::json_extract_string(&body_str, "board");
@@ -1007,6 +1014,32 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
 
     info!("Web UI handlers registered (captive portal active)");
     Ok(())
+}
+
+fn read_request_body(
+    req: &mut embedded_svc::http::server::Request<&mut EspHttpConnection<'_>>,
+    max_size: usize,
+) -> anyhow::Result<Vec<u8>> {
+    let declared = crate::bounded_io::validate_framing(
+        req.header("Content-Length"),
+        req.header("Transfer-Encoding"),
+        max_size,
+    )?;
+    let mut body = Vec::with_capacity(declared.unwrap_or(0).min(max_size));
+    let mut limit = crate::bounded_io::BodyLimit::new(declared, max_size)?;
+    let mut buffer = [0u8; 256];
+    loop {
+        let count = req
+            .read(&mut buffer)
+            .map_err(|error| anyhow::anyhow!("request read failed: {}", error))?;
+        if count == 0 {
+            break;
+        }
+        limit.observe(count)?;
+        body.extend_from_slice(&buffer[..count]);
+    }
+    limit.finish()?;
+    Ok(body)
 }
 
 fn board_is_selectable(
