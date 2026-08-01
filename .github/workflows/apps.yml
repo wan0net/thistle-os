@@ -139,7 +139,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.arch }}
-          path: artifacts/${{ matrix.arch }}/
+          path: artifacts/
 
   publish-catalog:
     needs: build-packages
@@ -156,17 +156,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: all-artifacts/
+          merge-multiple: true
 
       - name: Merge artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p publish/apps
-          for artifact_dir in all-artifacts/packages-*; do
-            arch=${artifact_dir##*-}
-            mkdir -p "publish/apps/$arch"
-            cp -r "$artifact_dir"/. "publish/apps/$arch/"
-          done
+          cp -r all-artifacts/. publish/apps/
 
       - name: Generate catalog
         run: |
