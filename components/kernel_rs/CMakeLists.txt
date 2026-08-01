@@ -3,11 +3,8 @@
 set(KERNEL_RS_REQUIRES
     thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
     esp_wifi esp_netif esp_event mbedtls esp_http_client driver spiffs
-    nvs_flash esp_adc sdmmc espressif__elf_loader
+    nvs_flash esp_adc sdmmc elf_loader bt
 )
-if(CONFIG_BT_ENABLED)
-    list(APPEND KERNEL_RS_REQUIRES bt)
-endif()
 
 idf_component_register(
     SRCS "stub.c" "epaper_spi_shim.c" "http_client_shim.c"

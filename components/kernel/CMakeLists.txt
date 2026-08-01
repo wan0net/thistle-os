@@ -7,11 +7,10 @@ set(KERNEL_SRCS
 set(KERNEL_REQUIRES
     thistle_hal kernel_rs esp_timer freertos esp_partition fatfs vfs app_update
     esp_wifi esp_netif esp_event mbedtls esp_http_client driver spiffs nvs_flash
-    sdmmc esp_adc
+    sdmmc esp_adc bt
 )
 if(CONFIG_BT_ENABLED)
     list(APPEND KERNEL_SRCS "src/ble_security_shim.c")
-    list(APPEND KERNEL_REQUIRES bt)
 endif()
 
 idf_component_register(

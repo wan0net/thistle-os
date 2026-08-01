@@ -54,6 +54,16 @@ class TargetMatrixTests(unittest.TestCase):
         self.assertIn("for arch in esp32 esp32s2 esp32s3 esp32c3 esp32c6", release)
         self.assertIn("thistle_os-${arch}-${RELEASE_TAG}.bin", release)
 
+    def test_package_build_does_not_configure_unrelated_root_firmware(self):
+        packages = Path(".github/workflows/apps.yml").read_text()
+        self.assertNotIn('idf.py set-target "$TARGET_ARCH"', packages)
+
+    def test_pinned_elf_loader_adapter_keeps_c3_in_supported_scope(self):
+        adapter = Path("components/elf_loader/CMakeLists.txt").read_text()
+        kconfig = Path("components/elf_loader/Kconfig").read_text()
+        self.assertIn("URL_HASH SHA256=", adapter)
+        self.assertIn("IDF_TARGET_ESP32C3", kconfig)
+
 
 if __name__ == "__main__":
     unittest.main()
