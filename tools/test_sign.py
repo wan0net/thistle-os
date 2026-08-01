@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 import sign
@@ -86,6 +87,83 @@ class KeyGenerationSecurityTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0)
+
+
+class ArtifactManifestTests(unittest.TestCase):
+    def test_manifest_signature_binds_every_security_field(self):
+        private_key = sign.Ed25519PrivateKey.generate()
+        payload = b"firmware bytes"
+        fields = {
+            "artifact_type": "firmware",
+            "artifact_id": "thistle-os",
+            "version": "0.5.0",
+            "security_version": 500,
+            "arch": "esp32s3",
+            "compatible_boards": ["tdeck-pro", "tdeck"],
+            "url": "https://downloads.example/thistle-os.bin",
+            "payload": payload,
+        }
+        canonical = sign.canonical_manifest(**fields)
+        signature = private_key.sign(canonical)
+        private_key.public_key().verify(signature, canonical)
+
+        mutations = {
+            "artifact_type": "driver",
+            "artifact_id": "other",
+            "version": "0.4.0",
+            "security_version": 499,
+            "arch": "esp32c3",
+            "compatible_boards": ["c3-mini"],
+            "url": "https://downloads.example/other.bin",
+            "payload": b"other bytes",
+        }
+        for field, value in mutations.items():
+            changed = dict(fields)
+            changed[field] = value
+            with self.subTest(field=field), self.assertRaises(sign.InvalidSignature):
+                private_key.public_key().verify(
+                    signature, sign.canonical_manifest(**changed)
+                )
+
+    def test_manifest_generation_is_deterministic_and_sorts_boards(self):
+        arguments = {
+            "artifact_type": "board",
+            "artifact_id": "tdeck-pro",
+            "version": "1.0.0",
+            "security_version": 1,
+            "arch": "esp32s3",
+            "compatible_boards": ["tdeck-pro", "tdeck", "tdeck-pro"],
+            "url": "https://downloads.example/tdeck-pro.json",
+            "payload": b"{}",
+        }
+        first = sign.canonical_manifest(**arguments)
+        second = sign.canonical_manifest(**arguments)
+        self.assertEqual(first, second)
+        self.assertIn(b"compatible_boards=tdeck,tdeck-pro\n", first)
+        self.assertIn(b"destination=config/boards/tdeck-pro.json\n", first)
+
+    def test_manifest_command_writes_verifiable_sidecars(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            key = sign.Ed25519PrivateKey.generate()
+            key_path = root / "private.key"
+            payload_path = root / "driver.elf"
+            key_path.write_bytes(key.private_bytes_raw())
+            payload_path.write_bytes(b"driver bytes")
+            sign.cmd_manifest(SimpleNamespace(
+                key=str(key_path),
+                file=str(payload_path),
+                type="driver",
+                id="qmi8658c",
+                version="1.0.0",
+                security_version=1,
+                arch="esp32s3",
+                compatible_board=["tdeck-pro"],
+                url="https://downloads.example/qmi8658c.drv.elf",
+            ))
+            manifest = Path(f"{payload_path}.manifest").read_bytes()
+            signature = Path(f"{payload_path}.manifest.sig").read_bytes()
+            key.public_key().verify(signature, manifest)
 
 
 if __name__ == "__main__":

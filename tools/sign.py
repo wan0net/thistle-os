@@ -2,6 +2,7 @@
 """ThistleOS Ed25519 signing tool for apps, drivers, and firmware."""
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -15,6 +16,7 @@ from cryptography.exceptions import InvalidSignature
 
 PRIVATE_KEY_PATH = Path("private.key")
 PUBLIC_KEY_PATH = Path("public.key")
+MANIFEST_HEADER = "THISTLE-ARTIFACT-MANIFEST-V1"
 
 
 def _require_absent(path):
@@ -97,6 +99,64 @@ def cmd_verify(args):
         sys.exit(1)
 
 
+def manifest_destination(artifact_type, artifact_id):
+    destinations = {
+        "firmware": "ota_1",
+        "board": f"config/boards/{artifact_id}.json",
+        "driver": f"drivers/{artifact_id}.drv.elf",
+        "wm": f"wm/{artifact_id}.wm.elf",
+    }
+    return destinations[artifact_type]
+
+
+def canonical_manifest(*, artifact_type, artifact_id, version, security_version,
+                       arch, compatible_boards, url, payload):
+    boards = sorted(set(compatible_boards))
+    if not boards:
+        raise ValueError("at least one compatible board is required")
+    fields = [artifact_id, version, arch, url, *boards]
+    if any(not value or "\n" in value or "\r" in value for value in fields):
+        raise ValueError("manifest fields must be non-empty single-line values")
+    digest = hashlib.sha256(payload).hexdigest()
+    return (
+        f"{MANIFEST_HEADER}\n"
+        f"type={artifact_type}\n"
+        f"id={artifact_id}\n"
+        f"version={version}\n"
+        f"security_version={security_version}\n"
+        f"arch={arch}\n"
+        f"compatible_boards={','.join(boards)}\n"
+        f"destination={manifest_destination(artifact_type, artifact_id)}\n"
+        f"sha256={digest}\n"
+        f"size={len(payload)}\n"
+        f"url={url}\n"
+    ).encode("utf-8")
+
+
+def cmd_manifest(args):
+    seed = Path(args.key).read_bytes()
+    if len(seed) != 32:
+        raise ValueError(f"private key must be 32 bytes, got {len(seed)}")
+    payload_path = Path(args.file)
+    canonical = canonical_manifest(
+        artifact_type=args.type,
+        artifact_id=args.id,
+        version=args.version,
+        security_version=args.security_version,
+        arch=args.arch,
+        compatible_boards=args.compatible_board,
+        url=args.url,
+        payload=payload_path.read_bytes(),
+    )
+    signature = Ed25519PrivateKey.from_private_bytes(seed).sign(canonical)
+    manifest_path = Path(f"{args.file}.manifest")
+    signature_path = Path(f"{args.file}.manifest.sig")
+    _write_new_file(manifest_path, canonical, 0o644)
+    _write_new_file(signature_path, signature, 0o644)
+    print(f"Manifest written to: {manifest_path}")
+    print(f"Manifest signature written to: {signature_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ThistleOS Ed25519 signing tool"
@@ -118,6 +178,27 @@ def main():
     verify_parser.add_argument("--pubkey", required=True, metavar="public.key",
                                help="Path to public key (raw 32 bytes)")
 
+    manifest_parser = subparsers.add_parser(
+        "manifest", help="Create and sign a canonical artifact manifest"
+    )
+    manifest_parser.add_argument("file", help="Artifact payload")
+    manifest_parser.add_argument("--key", required=True, help="Raw 32-byte private key")
+    manifest_parser.add_argument(
+        "--type", required=True, choices=["firmware", "board", "driver", "wm"]
+    )
+    manifest_parser.add_argument("--id", required=True)
+    manifest_parser.add_argument("--version", required=True)
+    manifest_parser.add_argument("--security-version", required=True, type=int)
+    manifest_parser.add_argument(
+        "--arch", required=True,
+        choices=["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "esp32h2"],
+    )
+    manifest_parser.add_argument(
+        "--compatible-board", required=True, action="append",
+        help="Signed compatible board ID; repeat for multiple boards",
+    )
+    manifest_parser.add_argument("--url", required=True)
+
     args = parser.parse_args()
 
     try:
@@ -127,7 +208,9 @@ def main():
             cmd_sign(args)
         elif args.command == "verify":
             cmd_verify(args)
-    except OSError as error:
+        elif args.command == "manifest":
+            cmd_manifest(args)
+    except (OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
 

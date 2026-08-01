@@ -90,17 +90,55 @@ jobs:
           apt-get update
           apt-get install -y python3-venv
           python3 -m venv /tmp/thistle-signing-venv
-          /tmp/thistle-signing-venv/bin/pip install PyNaCl
+          /tmp/thistle-signing-venv/bin/pip install -r tools/requirements.txt
           /tmp/thistle-signing-venv/bin/python -c "
-          import nacl.signing, os
+          import json, os, pathlib, re
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from tools.sign import canonical_manifest
           key_hex = os.environ['THISTLE_SIGNING_KEY']
-          sk = nacl.signing.SigningKey(bytes.fromhex(key_hex))
+          sk = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(key_hex))
           data = open('build/thistle_os.bin', 'rb').read()
-          signed = sk.sign(data)
-          sig = signed.signature  # 64-byte Ed25519 signature
+          sig = sk.sign(data)
           open('build/thistle_os.bin.sig', 'wb').write(sig)
-          vk = sk.verify_key
-          open('build/thistle_os.bin.pub', 'wb').write(vk.encode())
+          open('build/thistle_os.bin.pub', 'wb').write(sk.public_key().public_bytes_raw())
+          source = pathlib.Path('components/kernel_rs/src/version.rs').read_text()
+          version = re.search(r'VERSION_STRING: &str = \"([^\"]+)\"', source).group(1)
+          security_version = int(re.search(r'SECURITY_VERSION: u32 = ([0-9]+)', source).group(1))
+          boards = sorted(
+              json.loads(path.read_text())['board']['board_id']
+              for path in pathlib.Path('sdcard_layout/config/boards').glob('*.json')
+              if json.loads(path.read_text()).get('board', {}).get('arch') == 'esp32s3'
+          )
+          manifest = canonical_manifest(
+              artifact_type='firmware', artifact_id='thistle-os', version=version,
+              security_version=security_version, arch='esp32s3',
+              compatible_boards=boards,
+              url=f'https://github.com/{os.environ[\"GITHUB_REPOSITORY\"]}/releases/download/v{version}/thistle_os-v{version}.bin',
+              payload=data,
+          )
+          open('build/thistle_os.bin.manifest', 'wb').write(manifest)
+          open('build/thistle_os.bin.manifest.sig', 'wb').write(sk.sign(manifest))
+          board_output = pathlib.Path('build/signed-board-profiles')
+          board_output.mkdir(exist_ok=True)
+          for path in pathlib.Path('sdcard_layout/config/boards').glob('*.json'):
+              profile = json.loads(path.read_text())
+              metadata = profile['board']
+              board_id = metadata['board_id']
+              profile_version = metadata.get('version', '1.0.0')
+              if profile_version.count('.') == 1:
+                  profile_version += '.0'
+              output = board_output / f'board-{board_id}.json'
+              payload = path.read_bytes()
+              output.write_bytes(payload)
+              board_manifest = canonical_manifest(
+                  artifact_type='board', artifact_id=board_id,
+                  version=profile_version, security_version=1,
+                  arch=metadata['arch'], compatible_boards=[board_id],
+                  url=f'https://github.com/{os.environ[\"GITHUB_REPOSITORY\"]}/releases/download/v{version}/{output.name}',
+                  payload=payload,
+              )
+              pathlib.Path(f'{output}.manifest').write_bytes(board_manifest)
+              pathlib.Path(f'{output}.manifest.sig').write_bytes(sk.sign(board_manifest))
           print(f'Signed: {len(data)} bytes, sig: {sig.hex()[:32]}...')
           "
 
@@ -111,7 +149,10 @@ jobs:
           path: |
             build/thistle_os.bin
             build/thistle_os.bin.sig
+            build/thistle_os.bin.manifest
+            build/thistle_os.bin.manifest.sig
             build/thistle_os.bin.pub
+            build/signed-board-profiles/
 
   rust-tests:
     name: Rust Kernel Tests
