@@ -12,10 +12,14 @@ permissions:
 
 jobs:
   firmware-build:
-    name: Build Firmware (ESP-IDF)
+    name: Build Firmware (${{ matrix.arch }})
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,16 +66,18 @@ jobs:
             build
             managed_components
             components/kernel_rs/target
-          key: espidf-v5.5-rust-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'components/kernel_rs/src/**', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
+          key: espidf-v5.5-rust-${{ matrix.arch }}-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'components/kernel_rs/src/**', 'main/**', 'sdkconfig.defaults*', 'partitions.csv') }}
           restore-keys: |
-            espidf-v5.5-rust-
+            espidf-v5.5-rust-${{ matrix.arch }}-
 
       - name: Build firmware
         shell: bash
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
         run: |
           . $IDF_PATH/export.sh
           export PATH="$HOME/.cargo/bin:$PATH"
-          idf.py set-target esp32s3
+          idf.py set-target "$TARGET_ARCH"
           idf.py build
 
       - name: Check firmware size
@@ -85,6 +91,7 @@ jobs:
         if: env.THISTLE_SIGNING_KEY != ''
         env:
           THISTLE_SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
+          TARGET_ARCH: ${{ matrix.arch }}
         shell: bash
         run: |
           apt-get update
@@ -104,16 +111,17 @@ jobs:
           source = pathlib.Path('components/kernel_rs/src/version.rs').read_text()
           version = re.search(r'VERSION_STRING: &str = \"([^\"]+)\"', source).group(1)
           security_version = int(re.search(r'SECURITY_VERSION: u32 = ([0-9]+)', source).group(1))
+          target_arch = os.environ['TARGET_ARCH']
           boards = sorted(
               json.loads(path.read_text())['board']['board_id']
               for path in pathlib.Path('sdcard_layout/config/boards').glob('*.json')
-              if json.loads(path.read_text()).get('board', {}).get('arch') == 'esp32s3'
+              if json.loads(path.read_text()).get('board', {}).get('arch') == target_arch
           )
           manifest = canonical_manifest(
               artifact_type='firmware', artifact_id='thistle-os', version=version,
-              security_version=security_version, arch='esp32s3',
+              security_version=security_version, arch=target_arch,
               compatible_boards=boards,
-              url=f'https://github.com/{os.environ[\"GITHUB_REPOSITORY\"]}/releases/download/v{version}/thistle_os-v{version}.bin',
+              url=f'https://github.com/{os.environ[\"GITHUB_REPOSITORY\"]}/releases/download/v{version}/thistle_os-{target_arch}-v{version}.bin',
               payload=data,
           )
           open('build/thistle_os.bin.manifest', 'wb').write(manifest)
@@ -123,6 +131,8 @@ jobs:
           for path in pathlib.Path('sdcard_layout/config/boards').glob('*.json'):
               profile = json.loads(path.read_text())
               metadata = profile['board']
+              if metadata['arch'] != target_arch:
+                  continue
               board_id = metadata['board_id']
               profile_version = metadata.get('version', '1.0.0')
               if profile_version.count('.') == 1:
@@ -145,7 +155,7 @@ jobs:
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
-          name: thistle-os-firmware
+          name: thistle-os-firmware-${{ matrix.arch }}
           path: |
             build/thistle_os.bin
             build/thistle_os.bin.sig

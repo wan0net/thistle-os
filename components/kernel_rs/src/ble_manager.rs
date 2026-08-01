@@ -60,7 +60,7 @@ const ESP_LOG_ERROR: i32 = 1;
 // ---------------------------------------------------------------------------
 
 // Direct NimBLE FFI — replaces ble_shim_* wrappers formerly in kernel_shims.c
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 extern "C" {
     fn nimble_port_init() -> i32;
     fn nimble_port_freertos_init(task_fn: *const c_void);
@@ -95,7 +95,7 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 /// GAP advertising parameters — mirrors `ble_gap_adv_params` in NimBLE.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGapAdvParams {
     conn_mode: u8,      // BLE_GAP_CONN_MODE_UND = 2
@@ -110,7 +110,7 @@ struct BleGapAdvParams {
 /// Minimal GAP event — only the event-type byte is read directly.
 /// The full `ble_gap_event` union is large and version-specific; we read
 /// only the fields we need via raw-pointer offsets.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGapEvent {
     event_type: u8,
@@ -118,7 +118,7 @@ struct BleGapEvent {
 }
 
 /// 128-bit UUID in NimBLE's any-type wrapper.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleUuidAny {
     u_type: u8,      // BLE_UUID_TYPE_128 = 4
@@ -130,7 +130,7 @@ struct BleUuidAny {
 /// and `om` fields.  Layout: `op` (u8) at offset 0, then padding, then
 /// `attr_handle` (u16), then `chr` pointer, then `om` (*mut c_void).
 /// We access `om` via `ctxt_attr_om()` to avoid depending on the exact layout.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGattAccessCtxt {
     op: u8,
@@ -143,7 +143,7 @@ struct BleGattAccessCtxt {
 }
 
 /// GATT characteristic definition.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGattChrDef {
     uuid: *const BleUuidAny,
@@ -163,7 +163,7 @@ struct BleGattChrDef {
 }
 
 /// GATT service definition.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGattSvcDef {
     svc_type: u8,              // BLE_GATT_SVC_TYPE_PRIMARY = 1
@@ -174,11 +174,11 @@ struct BleGattSvcDef {
 
 // SAFETY: The static GATT/UUID structs are read-only after init and never
 // mutated from Rust; NimBLE keeps const pointers to them.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe impl Sync for BleUuidAny {}
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe impl Sync for BleGattChrDef {}
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe impl Sync for BleGattSvcDef {}
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ unsafe impl Sync for BleGattSvcDef {}
 // 6E400003-B5A3-F393-E0A9-E50E24DCCA9E  (TX — notified to peer)
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static NUS_SVC_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
@@ -198,7 +198,7 @@ static NUS_SVC_UUID: BleUuidAny = BleUuidAny {
     ],
 };
 
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static NUS_RX_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
@@ -208,7 +208,7 @@ static NUS_RX_UUID: BleUuidAny = BleUuidAny {
     ],
 };
 
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static NUS_TX_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
@@ -220,13 +220,13 @@ static NUS_TX_UUID: BleUuidAny = BleUuidAny {
 
 /// Handle for the TX (notify) characteristic — stored here so NimBLE can
 /// update it; also copied into BleState at GATT registration time.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static mut NUS_TX_VAL_HANDLE: u16 = 0;
 
 // Static characteristic array for the NUS service.
 // Must be 'static because NimBLE retains pointers into it.
 // Terminated by a zeroed sentinel entry (uuid == null).
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static NUS_CHARACTERISTICS: [BleGattChrDef; 3] = [
     // RX characteristic — peer writes, we receive
     BleGattChrDef {
@@ -262,7 +262,7 @@ static NUS_CHARACTERISTICS: [BleGattChrDef; 3] = [
 ];
 
 // Static service array — terminated by a zero-type sentinel.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 static NUS_SERVICES: [BleGattSvcDef; 2] = [
     BleGattSvcDef {
         svc_type: 1, // BLE_GATT_SVC_TYPE_PRIMARY
@@ -284,7 +284,7 @@ static NUS_SERVICES: [BleGattSvcDef; 2] = [
 // ---------------------------------------------------------------------------
 
 /// Called by NimBLE when the peer writes to the NUS RX characteristic.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe extern "C" fn nus_rx_access_cb(
     conn_handle: u16,
     _attr_handle: u16,
@@ -340,7 +340,7 @@ unsafe extern "C" fn nus_rx_access_cb(
 }
 
 /// TX characteristic access callback — read-only, nothing to deliver.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe extern "C" fn nus_tx_access_cb(
     _conn_handle: u16,
     _attr_handle: u16,
@@ -355,7 +355,7 @@ unsafe extern "C" fn nus_tx_access_cb(
 // ---------------------------------------------------------------------------
 
 /// Restart advertising (internal helper, may be called from GAP callback).
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe fn do_advertise() -> i32 {
     let adv_params = BleGapAdvParams {
         conn_mode: 2,       // BLE_GAP_CONN_MODE_UND
@@ -384,7 +384,7 @@ unsafe fn do_advertise() -> i32 {
 ///   `conn_handle` (u16) at offset 8.  We use raw-pointer reads here
 ///   because binding the full `ble_gap_event` union in Rust is fragile
 ///   across NimBLE minor versions.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe extern "C" fn gap_event_cb(event: *mut BleGapEvent, _arg: *mut c_void) -> i32 {
     if event.is_null() {
         return 0;
@@ -437,7 +437,7 @@ unsafe extern "C" fn gap_event_cb(event: *mut BleGapEvent, _arg: *mut c_void) ->
 ///
 /// Must be called after `ble_svc_gap_init()` / `ble_svc_gatt_init()` and
 /// before `nimble_port_freertos_init()`.
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe fn register_gatt_services() -> i32 {
     let rc = ble_gatts_count_cfg(NUS_SERVICES.as_ptr());
     if rc != 0 {
@@ -492,7 +492,7 @@ static BLE_STATE: Mutex<BleState> = Mutex::new(BleState::new());
 // NimBLE host task (hardware only)
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "espidf")]
+#[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe extern "C" fn ble_host_task(_param: *mut c_void) {
     nimble_port_run();
     nimble_port_freertos_deinit();
@@ -533,7 +533,7 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
         state.conn_handle = 0xFFFF;
     }
 
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     {
         let ret = nimble_port_init();
         if ret != ESP_OK {
@@ -580,7 +580,7 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
         name_str.as_ptr(),
     );
 
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     {
         #[cfg(not(test))]
         esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"BLE: simulator stub\0".as_ptr());
@@ -600,7 +600,7 @@ pub extern "C" fn ble_manager_start_advertising() -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
 
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     unsafe {
         let rc = do_advertise();
         if rc != 0 {
@@ -619,7 +619,7 @@ pub extern "C" fn ble_manager_start_advertising() -> i32 {
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"BLE advertising started\0".as_ptr());
     }
 
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     {
         unsafe {
             #[cfg(not(test))]
@@ -641,7 +641,7 @@ pub extern "C" fn ble_manager_stop_advertising() -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
 
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     unsafe {
         ble_gap_adv_stop();
     }
@@ -668,12 +668,12 @@ pub extern "C" fn ble_manager_disconnect() -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
 
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     unsafe {
         ble_gap_terminate(conn_handle, 0x13 /* BLE_ERR_REM_USER_CONN_TERM */);
     }
 
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     let _ = conn_handle;
 
     ESP_OK
@@ -713,7 +713,7 @@ pub unsafe extern "C" fn ble_manager_send(data: *const u8, len: usize) -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
 
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     {
         let om = ble_hs_mbuf_from_flat(data, len as u16);
         if om.is_null() {
@@ -729,7 +729,7 @@ pub unsafe extern "C" fn ble_manager_send(data: *const u8, len: usize) -> i32 {
         return ESP_OK;
     }
 
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     {
         let _ = (conn_handle, tx_handle);
         #[cfg(not(test))]
@@ -799,12 +799,12 @@ pub extern "C" fn ble_manager_get_peer_name() -> *const c_char {
 /// Return the active six-digit pairing passkey, or 0 when no peer is pairing.
 #[no_mangle]
 pub extern "C" fn ble_manager_get_pairing_passkey() -> u32 {
-    #[cfg(target_os = "espidf")]
+    #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
     unsafe {
         return thistle_ble_pairing_passkey();
     }
 
-    #[cfg(not(target_os = "espidf"))]
+    #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     0
 }
 
@@ -988,9 +988,9 @@ mod tests {
         let data = [0x42u8; 4];
         let rc = unsafe { ble_manager_send(data.as_ptr(), 4) };
         // On simulator (non-espidf target), send returns ESP_ERR_NOT_SUPPORTED
-        #[cfg(not(target_os = "espidf"))]
+        #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
         assert_eq!(rc, ESP_ERR_NOT_SUPPORTED);
-        #[cfg(target_os = "espidf")]
+        #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
         {
             // On hardware, would attempt actual send; we can't fully test without
             // NimBLE FFI available. Just verify it's not INVALID_STATE.
@@ -1196,13 +1196,13 @@ mod tests {
         // Send 1 byte
         let data_1 = [0u8; 1];
         let rc = unsafe { ble_manager_send(data_1.as_ptr(), 1) };
-        #[cfg(not(target_os = "espidf"))]
+        #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
         assert_eq!(rc, ESP_ERR_NOT_SUPPORTED);
 
         // Send 256 bytes
         let data_256 = [0x42u8; 256];
         let rc = unsafe { ble_manager_send(data_256.as_ptr(), 256) };
-        #[cfg(not(target_os = "espidf"))]
+        #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
         assert_eq!(rc, ESP_ERR_NOT_SUPPORTED);
     }
 

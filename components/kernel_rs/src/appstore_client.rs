@@ -483,6 +483,14 @@ pub fn catalog_entry_is_board_compatible(entry: &CatalogEntry, board_name: &str)
     boards_str.split(',').any(|b| b == board_name)
 }
 
+fn catalog_object_matches_current_arch(obj: &str) -> bool {
+    match json_str_extract(obj, "arch") {
+        None => true,
+        Some(arch) if arch.is_empty() => true,
+        Some(arch) => arch == crate::manifest::current_arch(),
+    }
+}
+
 /// Check whether a CatalogEntry matches a detected I2C/SPI device.
 ///
 /// Returns true when:
@@ -661,6 +669,11 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         };
 
         let obj = &cursor[..obj_end];
+
+        if !catalog_object_matches_current_arch(obj) {
+            cursor = &cursor[obj_end..];
+            continue;
+        }
 
         let entry = &mut *entries.add(count as usize);
         *entry = CatalogEntry::default();
@@ -1614,6 +1627,10 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
 
         let obj = &cursor[..obj_end];
         cursor = &cursor[obj_end..];
+
+        if !catalog_object_matches_current_arch(obj) {
+            continue;
+        }
 
         let mut entry = CatalogEntry::default();
 
@@ -2852,6 +2869,28 @@ mod tests {
             e.category[0], 0,
             "old entries must default category to empty"
         );
+    }
+
+    #[test]
+    fn test_catalog_parser_filters_architecture_qualified_packages() {
+        let json = r#"{"entries":[
+            {"id":"universal","name":"Universal"},
+            {"id":"host-only","name":"Host","arch":"host"},
+            {"id":"esp-only","name":"ESP","arch":"esp32s3"}
+        ]}"#;
+        let mut entries = Vec::new();
+
+        parse_catalog_entries(json, "all", &mut entries);
+
+        let ids: Vec<&str> = entries
+            .iter()
+            .map(|entry| {
+                std::str::from_utf8(&entry.id)
+                    .unwrap()
+                    .trim_end_matches('\0')
+            })
+            .collect();
+        assert_eq!(ids, vec!["universal", "host-only"]);
     }
 
     // test_sort_entries_by_rating

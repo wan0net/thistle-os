@@ -125,6 +125,8 @@ jobs:
         run: |
           python3 tools/test_build_catalog.py
           python3 tools/test_package_workflow.py
+          python3 tools/test_target_matrix.py
+          python3 tools/test_validate_package_matrix.py
 
       - name: Test release input and provenance validation
         run: python3 tools/test_validate_release.py

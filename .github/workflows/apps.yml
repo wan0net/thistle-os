@@ -13,6 +13,9 @@ on:
       - 'tools/build_catalog.py'
       - 'tools/test_build_catalog.py'
       - 'tools/test_package_workflow.py'
+      - 'tools/test_target_matrix.py'
+      - 'tools/test_validate_package_matrix.py'
+      - 'tools/validate_package_matrix.py'
   pull_request:
     branches: [main]
     paths:
@@ -25,6 +28,9 @@ on:
       - 'tools/build_catalog.py'
       - 'tools/test_build_catalog.py'
       - 'tools/test_package_workflow.py'
+      - 'tools/test_target_matrix.py'
+      - 'tools/test_validate_package_matrix.py'
+      - 'tools/validate_package_matrix.py'
   workflow_dispatch:
 
 permissions:
@@ -35,10 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5
     strategy:
+      fail-fast: false
       matrix:
-        arch: [esp32s3]
-        # Add more architectures as needed:
-        # arch: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
+        arch: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
 
     steps:
       - uses: actions/checkout@v6
@@ -99,7 +104,13 @@ jobs:
               local destination="artifacts/$TARGET_ARCH/${package_type}s/$package_name"
               mkdir -p "$destination"
               cp "$elf" "$destination/$entry"
-              cp "$manifest" "$destination/manifest.json"
+              python3 -c '
+          import json, pathlib, sys
+          source, destination, target_arch = sys.argv[1:]
+          manifest = json.loads(pathlib.Path(source).read_text())
+          manifest["arch"] = target_arch
+          pathlib.Path(destination).write_text(json.dumps(manifest, indent=2) + "\n")
+          ' "$manifest" "$destination/manifest.json" "$TARGET_ARCH"
             done
 
             if [ "$package_count" -eq 0 ]; then
@@ -178,6 +189,7 @@ jobs:
             --output publish/catalog.json \
             --merge existing-app-catalog/catalog.json \
             --require-signatures
+          python3 tools/validate_package_matrix.py publish/catalog.json
 
       - name: Deploy to canonical app catalog
         uses: peaceiris/actions-gh-pages@v4

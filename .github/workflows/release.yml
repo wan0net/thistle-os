@@ -66,19 +66,29 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          manifest="release-artifacts/thistle-os-firmware/thistle_os.bin.manifest"
-          manifest_version="$(sed -n 's/^version=//p' "$manifest")"
-          if [ "$RELEASE_TAG" != "v$manifest_version" ]; then
-            echo "ERROR: release tag $RELEASE_TAG does not match signed manifest version $manifest_version" >&2
-            exit 1
-          fi
           mkdir -p dist
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin "dist/thistle_os-${RELEASE_TAG}.bin"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.sig "dist/thistle_os-${RELEASE_TAG}.bin.sig"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.manifest "dist/thistle_os-${RELEASE_TAG}.bin.manifest"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.manifest.sig "dist/thistle_os-${RELEASE_TAG}.bin.manifest.sig"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.pub "dist/thistle_os-${RELEASE_TAG}.bin.pub"
-          cp release-artifacts/thistle-os-firmware/signed-board-profiles/* dist/
+          for arch in esp32 esp32s2 esp32s3 esp32c3 esp32c6; do
+            artifact_dir="release-artifacts/thistle-os-firmware-$arch"
+            manifest="$artifact_dir/thistle_os.bin.manifest"
+            manifest_version="$(sed -n 's/^version=//p' "$manifest")"
+            manifest_arch="$(sed -n 's/^arch=//p' "$manifest")"
+            if [ "$RELEASE_TAG" != "v$manifest_version" ]; then
+              echo "ERROR: release tag $RELEASE_TAG does not match $arch manifest version $manifest_version" >&2
+              exit 1
+            fi
+            if [ "$manifest_arch" != "$arch" ]; then
+              echo "ERROR: $arch artifact has manifest architecture $manifest_arch" >&2
+              exit 1
+            fi
+            destination="dist/thistle_os-${arch}-${RELEASE_TAG}.bin"
+            cp "$artifact_dir/thistle_os.bin" "$destination"
+            cp "$artifact_dir/thistle_os.bin.sig" "$destination.sig"
+            cp "$manifest" "$destination.manifest"
+            cp "$artifact_dir/thistle_os.bin.manifest.sig" "$destination.manifest.sig"
+            cp "$artifact_dir/thistle_os.bin.pub" "$destination.pub"
+          done
+          find release-artifacts/thistle-os-firmware-* \
+            -path '*/signed-board-profiles/*' -type f -exec cp {} dist/ \;
           cp release-artifacts/thistle-recovery/thistle-recovery "dist/thistle-recovery-${RELEASE_TAG}"
           cd dist
           sha256sum * > SHA256SUMS
