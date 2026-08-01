@@ -6,6 +6,7 @@
 // verifies signatures, parses manifests, and calls driver_init().
 
 use std::ffi::CStr;
+use std::io::Read;
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::Mutex;
 
@@ -42,9 +43,6 @@ extern "C" {
     // PSRAM allocation
     fn heap_caps_malloc(size: usize, caps: u32) -> *mut c_void;
     fn free(ptr: *mut c_void);
-
-    // Signing (Rust)
-    fn signing_verify_file(path: *const c_char) -> i32;
 
     // Manifest (C/Rust shims)
     fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
@@ -275,6 +273,43 @@ fn driver_signature_allows_load(signature_result: i32) -> Result<bool, i32> {
     Err(signature_result)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum PrepareDriverImageError {
+    Read(i32),
+    InvalidSize,
+    Verify(i32),
+}
+
+fn prepare_driver_image_with(
+    path: &str,
+    read_image: impl FnOnce(&str) -> Result<Vec<u8>, i32>,
+    verify_image: impl FnOnce(&str, &[u8]) -> i32,
+) -> Result<(Vec<u8>, bool), PrepareDriverImageError> {
+    let image = read_image(path).map_err(PrepareDriverImageError::Read)?;
+    if image.is_empty() || image.len() > MAX_DRV_SIZE {
+        return Err(PrepareDriverImageError::InvalidSize);
+    }
+
+    let signature_verified = driver_signature_allows_load(verify_image(path, &image))
+        .map_err(PrepareDriverImageError::Verify)?;
+    Ok((image, signature_verified))
+}
+
+fn prepare_driver_image(path: &str) -> Result<(Vec<u8>, bool), PrepareDriverImageError> {
+    prepare_driver_image_with(
+        path,
+        |path| {
+            let file = std::fs::File::open(path).map_err(|_| ESP_ERR_NOT_FOUND)?;
+            let mut image = Vec::new();
+            file.take((MAX_DRV_SIZE + 1) as u64)
+                .read_to_end(&mut image)
+                .map_err(|_| ESP_FAIL)?;
+            Ok(image)
+        },
+        crate::signing::verify_file_bytes,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Symbol resolver — delegates to the kernel syscall table
 // ---------------------------------------------------------------------------
@@ -342,7 +377,7 @@ pub extern "C" fn driver_loader_get_config() -> *const c_char {
 
 /// Load a driver ELF from `path`.
 ///
-/// Steps: verify signature, parse manifest, read ELF into PSRAM, relocate,
+/// Steps: read and verify one ELF snapshot, parse manifest, copy to PSRAM, relocate,
 /// call driver_init() entry point.
 ///
 /// # Safety
@@ -388,25 +423,28 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         return ret;
     }
 
-    // 1. Verify signature
-    match driver_signature_allows_load(signing_verify_file(path)) {
-        Ok(true) => {
+    // 1. Read once and verify the exact byte snapshot that will be relocated.
+    let (file_data, signature_verified) = match prepare_driver_image(path_str) {
+        Ok(prepared) => prepared,
+        Err(PrepareDriverImageError::Read(err)) => {
             esp_log_write(
-                ESP_LOG_INFO,
+                ESP_LOG_ERROR,
                 TAG.as_ptr(),
-                b"Driver signature verified: %s\0".as_ptr(),
+                b"Cannot open driver ELF: %s\0".as_ptr(),
                 path,
             );
+            return err;
         }
-        Ok(false) => {
+        Err(PrepareDriverImageError::InvalidSize) => {
             esp_log_write(
-                ESP_LOG_WARN,
+                ESP_LOG_ERROR,
                 TAG.as_ptr(),
-                b"Driver unsigned (dev mode): %s\0".as_ptr(),
+                b"Rejecting driver size: %s\0".as_ptr(),
                 path,
             );
+            return ESP_ERR_INVALID_SIZE;
         }
-        Err(err) => {
+        Err(PrepareDriverImageError::Verify(err)) => {
             esp_log_write(
                 ESP_LOG_ERROR,
                 TAG.as_ptr(),
@@ -416,6 +454,22 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
             );
             return err;
         }
+    };
+
+    if signature_verified {
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Driver signature verified: %s\0".as_ptr(),
+            path,
+        );
+    } else {
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"Driver unsigned (dev mode): %s\0".as_ptr(),
+            path,
+        );
     }
 
     // 2. Parse manifest (optional)
@@ -446,27 +500,8 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         }
     }
 
-    // 3. Read ELF file into PSRAM
-    let file_data = match std::fs::read(path_str) {
-        Ok(d) => d,
-        Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot open driver ELF: %s\0".as_ptr(), path);
-            return ESP_ERR_NOT_FOUND;
-        }
-    };
-
+    // 3. Copy the already-verified snapshot into PSRAM.
     let size = file_data.len();
-    if size == 0 || size > MAX_DRV_SIZE {
-        esp_log_write(
-            ESP_LOG_ERROR,
-            TAG.as_ptr(),
-            b"Rejecting driver size %d: %s\0".as_ptr(),
-            size as c_int,
-            path,
-        );
-        return ESP_ERR_INVALID_SIZE;
-    }
-
     let buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
     if buf.is_null() {
         esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"PSRAM alloc failed for driver: %s\0".as_ptr(), path);
@@ -656,7 +691,9 @@ pub unsafe extern "C" fn driver_loader_load_with_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use std::ffi::CStr;
+    use std::rc::Rc;
 
     fn reset_state() {
         if let Ok(mut s) = STATE.lock() {
@@ -749,5 +786,66 @@ mod tests {
         ] {
             assert_eq!(driver_signature_allows_load(error), Err(error));
         }
+    }
+
+    #[test]
+    fn test_prepared_driver_image_is_the_exact_verified_snapshot() {
+        let trusted = b"trusted driver bytes".to_vec();
+        let attacker = b"swapped attacker bytes".to_vec();
+        let on_disk = Rc::new(RefCell::new(trusted.clone()));
+        let verified = Rc::new(RefCell::new(Vec::new()));
+
+        let read_disk = Rc::clone(&on_disk);
+        let verify_disk = Rc::clone(&on_disk);
+        let verify_capture = Rc::clone(&verified);
+        let prepared = prepare_driver_image_with(
+            "/sdcard/drivers/test.drv.elf",
+            move |_| Ok(read_disk.borrow().clone()),
+            move |_, image| {
+                verify_capture.borrow_mut().extend_from_slice(image);
+                *verify_disk.borrow_mut() = attacker;
+                ESP_OK
+            },
+        )
+        .expect("the trusted snapshot should pass verification");
+
+        assert_eq!(*verified.borrow(), trusted);
+        assert_eq!(prepared.0, trusted, "relocation must receive verified bytes");
+        assert_ne!(
+            prepared.0,
+            *on_disk.borrow(),
+            "a path swap must be irrelevant"
+        );
+    }
+
+    #[test]
+    fn test_prepared_driver_image_rejects_before_relocation_on_verifier_failure() {
+        let result = prepare_driver_image_with(
+            "/sdcard/drivers/test.drv.elf",
+            |_| Ok(b"untrusted driver bytes".to_vec()),
+            |_, _| ESP_ERR_INVALID_CRC,
+        );
+
+        assert_eq!(
+            result,
+            Err(PrepareDriverImageError::Verify(ESP_ERR_INVALID_CRC))
+        );
+    }
+
+    #[test]
+    fn test_prepared_driver_image_rejects_oversize_before_verification() {
+        let verifier_called = Rc::new(RefCell::new(false));
+        let called = Rc::clone(&verifier_called);
+        let result = prepare_driver_image_with(
+            "/sdcard/drivers/oversized.drv.elf",
+            |_| Ok(vec![0u8; MAX_DRV_SIZE + 1]),
+            move |_, _| {
+                *called.borrow_mut() = true;
+                ESP_OK
+            },
+        );
+
+        assert_eq!(result, Err(PrepareDriverImageError::InvalidSize));
+        assert!(!*verifier_called.borrow());
     }
 }

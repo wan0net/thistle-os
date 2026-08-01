@@ -51,6 +51,38 @@ fn sig_path_for(elf_path: &str) -> String {
     format!("{}.sig", elf_path)
 }
 
+fn read_file_bounded(path: &str, max_size: usize) -> Result<Vec<u8>, i32> {
+    let file = fs::File::open(path).map_err(|_| ESP_ERR_NOT_FOUND)?;
+    let mut bytes = Vec::new();
+    file.take((max_size + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ESP_ERR_NOT_FOUND)?;
+    if bytes.len() > max_size {
+        return Err(ESP_ERR_INVALID_SIZE);
+    }
+    Ok(bytes)
+}
+
+/// Verify an already-read file image against the detached signature associated
+/// with `path`. Callers that execute or install the image can keep using the
+/// same byte slice after this returns, avoiding a pathname-based TOCTOU gap.
+pub(crate) fn verify_file_bytes(path: &str, file_bytes: &[u8]) -> i32 {
+    const MAX_VERIFY_SIZE: usize = 16 * 1024 * 1024;
+    if file_bytes.len() > MAX_VERIFY_SIZE {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    let sig_bytes = match read_file_bounded(&sig_path_for(path), 64) {
+        Ok(bytes) => bytes,
+        Err(err) => return err,
+    };
+    if sig_bytes.len() != 64 {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    unsafe { signing_verify(file_bytes.as_ptr(), file_bytes.len(), sig_bytes.as_ptr()) }
+}
+
 /// Stream one already-open object through Ed25519 verification and a consumer.
 /// The consumer receives the exact byte slices covered by the signature. This
 /// lets OTA write those slices to an inactive partition without reopening a
@@ -190,31 +222,12 @@ pub unsafe extern "C" fn signing_verify_file(elf_path: *const c_char) -> i32 {
         Err(_) => return ESP_ERR_INVALID_ARG,
     };
 
-    let sig_path = sig_path_for(path_str);
-
-    let sig_bytes = match fs::read(&sig_path) {
-        Ok(b) => b,
-        Err(_) => return ESP_ERR_NOT_FOUND,
+    const MAX_VERIFY_SIZE: usize = 16 * 1024 * 1024;
+    let elf_bytes = match read_file_bounded(path_str, MAX_VERIFY_SIZE) {
+        Ok(bytes) => bytes,
+        Err(err) => return err,
     };
-
-    if sig_bytes.len() != 64 {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    // Size limit: reject files > 16 MB to prevent heap exhaustion
-    const MAX_VERIFY_SIZE: u64 = 16 * 1024 * 1024;
-    if let Ok(meta) = fs::metadata(path_str) {
-        if meta.len() > MAX_VERIFY_SIZE {
-            return ESP_ERR_INVALID_SIZE;
-        }
-    }
-
-    let elf_bytes = match fs::read(path_str) {
-        Ok(b) => b,
-        Err(_) => return ESP_ERR_NOT_FOUND,
-    };
-
-    signing_verify(elf_bytes.as_ptr(), elf_bytes.len(), sig_bytes.as_ptr())
+    verify_file_bytes(path_str, &elf_bytes)
 }
 
 /// Return `true` if `<elf_path>.sig` exists on the filesystem.
