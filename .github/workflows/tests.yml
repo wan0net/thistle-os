@@ -81,6 +81,16 @@ jobs:
             components/drv_modem_a7682e/src/a7682e_lifecycle.c \
             components/drv_modem_a7682e/src/drv_modem_a7682e.c
 
+      - name: Test board bus initialization failures
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -DTHISTLE_BUS_INIT_HOST_TEST \
+            -Icomponents/kernel/tests \
+            components/kernel/src/board_builtin_drivers.c \
+            components/kernel/tests/test_board_bus_init.c \
+            -o /tmp/test_board_bus_init
+          /tmp/test_board_bus_init
+
       - name: Test assistant request bounds under sanitizers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \
