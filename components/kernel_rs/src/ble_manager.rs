@@ -28,6 +28,18 @@ const BLE_STATE_CONNECTED: u32 = 2;
 
 const BLE_DEVICE_NAME_MAX: usize = 32;
 
+// NimBLE GATT flags from ESP-IDF v5.5 `host/ble_gatt.h`. Keep these named and
+// testable so a future SDK upgrade cannot silently weaken the RX policy.
+const BLE_GATT_CHR_F_WRITE_NO_RSP: u16 = 0x0004;
+const BLE_GATT_CHR_F_WRITE: u16 = 0x0008;
+const BLE_GATT_CHR_F_WRITE_ENC: u16 = 0x1000;
+const BLE_GATT_CHR_F_WRITE_AUTHEN: u16 = 0x2000;
+const NUS_RX_FLAGS: u16 = BLE_GATT_CHR_F_WRITE
+    | BLE_GATT_CHR_F_WRITE_NO_RSP
+    | BLE_GATT_CHR_F_WRITE_ENC
+    | BLE_GATT_CHR_F_WRITE_AUTHEN;
+const NUS_RX_MIN_KEY_SIZE: u8 = 16;
+
 static TAG: &[u8] = b"ble_mgr\0";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +84,10 @@ extern "C" {
     fn ble_gatts_count_cfg(svcs: *const BleGattSvcDef) -> i32;
     fn ble_gatts_add_svcs(svcs: *const BleGattSvcDef) -> i32;
     fn os_mbuf_copydata(om: *const c_void, off: i32, len: u32, dst: *mut u8) -> i32;
+    fn thistle_ble_security_configure();
+    fn thistle_ble_security_handle_event(event: *mut c_void) -> i32;
+    fn thistle_ble_conn_is_authenticated(conn_handle: u16) -> bool;
+    fn thistle_ble_pairing_passkey() -> u32;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,8 +234,8 @@ static NUS_CHARACTERISTICS: [BleGattChrDef; 3] = [
         access_cb: Some(nus_rx_access_cb),
         arg: std::ptr::null_mut(),
         descriptors: std::ptr::null(),
-        flags: 0x0008 | 0x0004, // BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP
-        min_key_size: 0,
+        flags: NUS_RX_FLAGS,
+        min_key_size: NUS_RX_MIN_KEY_SIZE,
         val_handle: std::ptr::null_mut(),
     },
     // TX characteristic — we notify the peer
@@ -270,7 +286,7 @@ static NUS_SERVICES: [BleGattSvcDef; 2] = [
 /// Called by NimBLE when the peer writes to the NUS RX characteristic.
 #[cfg(target_os = "espidf")]
 unsafe extern "C" fn nus_rx_access_cb(
-    _conn_handle: u16,
+    conn_handle: u16,
     _attr_handle: u16,
     ctxt: *mut BleGattAccessCtxt,
     _arg: *mut c_void,
@@ -280,6 +296,12 @@ unsafe extern "C" fn nus_rx_access_cb(
         return 0;
     }
     if (*ctxt).op != BLE_GATT_ACCESS_OP_WRITE_CHR {
+        return 0;
+    }
+    // The GATT flags make NimBLE reject this before the callback unless the
+    // link is encrypted and authenticated. Re-check the live connection here
+    // as a defense-in-depth boundary before copying or dispatching peer data.
+    if !thistle_ble_conn_is_authenticated(conn_handle) {
         return 0;
     }
     let om = (*ctxt).om;
@@ -307,7 +329,12 @@ unsafe extern "C" fn nus_rx_access_cb(
     let mut buf = [0u8; 512];
     let rc = os_mbuf_copydata(om, 0, data_len as u32, buf.as_mut_ptr());
     if rc == 0 {
-        ble_manager_rx_dispatch(buf.as_ptr(), data_len as u16);
+        ble_manager_rx_dispatch_authorized(
+            conn_handle,
+            true,
+            buf.as_ptr(),
+            data_len as u16,
+        );
     }
     0
 }
@@ -362,6 +389,13 @@ unsafe extern "C" fn gap_event_cb(event: *mut BleGapEvent, _arg: *mut c_void) ->
     if event.is_null() {
         return 0;
     }
+    // C owns the version-specific NimBLE union and handles passkey exchange.
+    // A non-zero return is a security-protocol result that must reach NimBLE.
+    let security_rc = thistle_ble_security_handle_event(event.cast());
+    if security_rc != 0 {
+        return security_rc;
+    }
+
     match (*event).event_type {
         0 => {
             // BLE_GAP_EVENT_CONNECT
@@ -507,6 +541,11 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
             esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"nimble_port_init failed: %d\0".as_ptr(), ret);
             return ret;
         }
+
+        // Require bonded, MITM-protected LE Secure Connections. Pairing uses
+        // display-only passkey entry; the passkey is logged by the C ABI shim
+        // so it can be surfaced by the device UI without weakening the link.
+        thistle_ble_security_configure();
 
         ble_svc_gap_init();
         ble_svc_gatt_init();
@@ -757,6 +796,18 @@ pub extern "C" fn ble_manager_get_peer_name() -> *const c_char {
     }
 }
 
+/// Return the active six-digit pairing passkey, or 0 when no peer is pairing.
+#[no_mangle]
+pub extern "C" fn ble_manager_get_pairing_passkey() -> u32 {
+    #[cfg(target_os = "espidf")]
+    unsafe {
+        return thistle_ble_pairing_passkey();
+    }
+
+    #[cfg(not(target_os = "espidf"))]
+    0
+}
+
 // ---------------------------------------------------------------------------
 // Internal state updates — called from the C NimBLE event shim
 // ---------------------------------------------------------------------------
@@ -789,6 +840,33 @@ pub unsafe extern "C" fn ble_manager_rx_dispatch(data: *const u8, len: u16) {
     }
 }
 
+/// Deliver NUS RX bytes only for the currently connected, authenticated peer.
+///
+/// `authenticated` must come from NimBLE's live connection descriptor. Keeping
+/// this gate separate makes the source-to-callback security boundary testable
+/// on host builds as well as enforced by the hardware callback.
+unsafe fn ble_manager_rx_dispatch_authorized(
+    conn_handle: u16,
+    authenticated: bool,
+    data: *const u8,
+    len: u16,
+) -> bool {
+    if !authenticated || data.is_null() || len == 0 {
+        return false;
+    }
+
+    let current_connection = BLE_STATE
+        .lock()
+        .map(|s| s.state == BLE_STATE_CONNECTED && s.conn_handle == conn_handle)
+        .unwrap_or(false);
+    if !current_connection {
+        return false;
+    }
+
+    ble_manager_rx_dispatch(data, len);
+    true
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -796,6 +874,17 @@ pub unsafe extern "C" fn ble_manager_rx_dispatch(data: *const u8, len: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static RX_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn counting_rx_cb(
+        _data: *const u8,
+        _len: u16,
+        _user_data: *mut c_void,
+    ) {
+        RX_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
 
     /// Reset the BLE state to initial condition for test isolation.
     fn reset_ble_state() {
@@ -1008,6 +1097,71 @@ mod tests {
             )
         };
         assert_eq!(rc, ESP_OK);
+    }
+
+    #[test]
+    fn test_nus_rx_requires_authenticated_encrypted_128_bit_write() {
+        assert_eq!(NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE, BLE_GATT_CHR_F_WRITE);
+        assert_eq!(NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE_ENC, BLE_GATT_CHR_F_WRITE_ENC);
+        assert_eq!(
+            NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE_AUTHEN,
+            BLE_GATT_CHR_F_WRITE_AUTHEN
+        );
+        assert_eq!(NUS_RX_MIN_KEY_SIZE, 16);
+    }
+
+    #[test]
+    fn test_unauthenticated_rx_is_rejected_before_callback_sink() {
+        reset_ble_state();
+        RX_CALLS.store(0, Ordering::SeqCst);
+        unsafe {
+            ble_manager_set_conn_state(BLE_STATE_CONNECTED, 7);
+            ble_manager_register_rx_cb(Some(counting_rx_cb), std::ptr::null_mut());
+        }
+        let data = b"untrusted";
+
+        let delivered = unsafe {
+            ble_manager_rx_dispatch_authorized(7, false, data.as_ptr(), data.len() as u16)
+        };
+
+        assert!(!delivered);
+        assert_eq!(RX_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_authenticated_rx_for_current_connection_reaches_callback_sink() {
+        reset_ble_state();
+        RX_CALLS.store(0, Ordering::SeqCst);
+        unsafe {
+            ble_manager_set_conn_state(BLE_STATE_CONNECTED, 7);
+            ble_manager_register_rx_cb(Some(counting_rx_cb), std::ptr::null_mut());
+        }
+        let data = b"trusted";
+
+        let delivered = unsafe {
+            ble_manager_rx_dispatch_authorized(7, true, data.as_ptr(), data.len() as u16)
+        };
+
+        assert!(delivered);
+        assert_eq!(RX_CALLS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_authenticated_rx_from_stale_connection_is_rejected() {
+        reset_ble_state();
+        RX_CALLS.store(0, Ordering::SeqCst);
+        unsafe {
+            ble_manager_set_conn_state(BLE_STATE_CONNECTED, 8);
+            ble_manager_register_rx_cb(Some(counting_rx_cb), std::ptr::null_mut());
+        }
+        let data = b"stale";
+
+        let delivered = unsafe {
+            ble_manager_rx_dispatch_authorized(7, true, data.as_ptr(), data.len() as u16)
+        };
+
+        assert!(!delivered);
+        assert_eq!(RX_CALLS.load(Ordering::SeqCst), 0);
     }
 
     #[test]

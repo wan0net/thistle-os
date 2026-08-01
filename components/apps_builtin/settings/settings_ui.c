@@ -30,6 +30,7 @@
 #include "ui/statusbar.h"
 
 #include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -84,6 +85,7 @@ static bool s_ble_inited = false;
 static lv_obj_t *s_ble_status_label   = NULL;
 static lv_obj_t *s_ble_name_label     = NULL;
 static lv_obj_t *s_ble_peer_label     = NULL;
+static lv_obj_t *s_ble_pairing_label  = NULL;
 static lv_obj_t *s_ble_toggle_btn_lbl = NULL;
 
 /* Power detail live-update timer */
@@ -108,6 +110,8 @@ static lv_obj_t *s_bt_value_label   = NULL;
 
 /* Main list live-update timer */
 static lv_timer_t *s_main_timer = NULL;
+
+static void ble_update_labels(void);
 
 /* ------------------------------------------------------------------ */
 /* Driver type enum                                                     */
@@ -251,6 +255,10 @@ static lv_obj_t *create_live_row(lv_obj_t *parent, const char *initial_text)
 static void settings_main_update_timer(lv_timer_t *t)
 {
     (void)t;
+    if (s_current_screen == SETTINGS_BLUETOOTH) {
+        ble_update_labels();
+        return;
+    }
     if (s_current_screen != SETTINGS_MAIN) return;
 
     if (s_wifi_value_label) {
@@ -316,6 +324,7 @@ static void back_to_main(lv_event_t *e)
     s_ble_status_label     = NULL;
     s_ble_name_label       = NULL;
     s_ble_peer_label       = NULL;
+    s_ble_pairing_label    = NULL;
     s_ble_toggle_btn_lbl   = NULL;
     s_driver_row_pool_used = 0;
     /* Value labels on the main list are still valid after returning */
@@ -830,6 +839,17 @@ static void ble_update_labels(void)
                              LV_PART_MAIN);
     }
 
+    if (s_ble_pairing_label) {
+        uint32_t passkey = ble_manager_get_pairing_passkey();
+        char pairing_buf[40];
+        if (passkey != 0) {
+            snprintf(pairing_buf, sizeof(pairing_buf), "Pairing code: %06" PRIu32, passkey);
+        } else {
+            snprintf(pairing_buf, sizeof(pairing_buf), "Pairing code: waiting");
+        }
+        lv_label_set_text(s_ble_pairing_label, pairing_buf);
+    }
+
     if (s_ble_toggle_btn_lbl) {
         lv_label_set_text(s_ble_toggle_btn_lbl,
                           (state == BLE_STATE_OFF) ? "Enable" : "Disable");
@@ -904,6 +924,12 @@ static void open_bluetooth_screen(void)
     lv_obj_t *peer_row = create_info_row(content, "Peer: None");
     s_ble_peer_label = lv_obj_get_child(peer_row, 0);
     lv_obj_set_style_opa(s_ble_peer_label, LV_OPA_40, LV_PART_MAIN);
+
+    create_separator(content);
+
+    /* Secure Connections passkey, populated when a peer starts pairing. */
+    lv_obj_t *pairing_row = create_info_row(content, "Pairing code: waiting");
+    s_ble_pairing_label = lv_obj_get_child(pairing_row, 0);
 
     create_separator(content);
 
@@ -2215,6 +2241,7 @@ void settings_ui_destroy(void)
     s_ble_status_label   = NULL;
     s_ble_name_label     = NULL;
     s_ble_peer_label     = NULL;
+    s_ble_pairing_label  = NULL;
     s_ble_toggle_btn_lbl = NULL;
 
     if (s_root) {

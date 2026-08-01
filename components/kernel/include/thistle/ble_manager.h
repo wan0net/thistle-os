@@ -41,3 +41,6 @@ ble_state_t ble_manager_get_state(void);
 
 /* Get connected device name (NULL if not connected) */
 const char *ble_manager_get_peer_name(void);
+
+/* Active six-digit pairing passkey, or 0 when no peer is pairing. */
+uint32_t ble_manager_get_pairing_passkey(void);
