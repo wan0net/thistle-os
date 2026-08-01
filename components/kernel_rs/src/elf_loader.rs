@@ -38,9 +38,6 @@ const MALLOC_CAP_SPIRAM: u32 = 1 << 9;
 const PERM_ALL: u32 = 0x7F;
 const PERM_IPC: u32 = 1 << 6;
 
-// Current architecture string for manifest compatibility checks
-static CURRENT_ARCH: &[u8] = b"xtensa-esp32s3\0";
-
 // ---------------------------------------------------------------------------
 // C FFI declarations
 // ---------------------------------------------------------------------------
@@ -78,7 +75,6 @@ extern "C" {
 
     // Manifest (C/Rust)
     fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
-    fn manifest_is_compatible(manifest: *const CManifest, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table
@@ -98,6 +94,14 @@ const ESP_LOG_DEBUG: i32 = 4;
 const PD_PASS: i32 = 1;
 
 static TAG: &[u8] = b"elf_loader\0";
+
+fn manifest_is_compatible_for_arch(manifest: &CManifest, current_arch: &CStr) -> bool {
+    unsafe { crate::ffi::manifest_is_compatible(manifest, current_arch.as_ptr()) }
+}
+
+fn manifest_is_compatible_for_current_arch(manifest: &CManifest) -> bool {
+    manifest_is_compatible_for_arch(manifest, crate::manifest::current_arch_cstr())
+}
 
 // Size of esp_elf_t opaque struct storage blob.
 const ESP_ELF_T_SIZE: usize = 256;
@@ -485,7 +489,7 @@ pub unsafe extern "C" fn elf_app_load(
             manifest.as_mut_ptr(),
         ) == ESP_OK {
             let manifest = manifest.assume_init();
-            if !manifest_is_compatible(&manifest, CURRENT_ARCH.as_ptr() as *const c_char) {
+            if !manifest_is_compatible_for_current_arch(&manifest) {
                 esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
                 let _ = permissions_revoke(perm_id, granted_permissions);
                 esp_elf_deinit(elf_ptr);
@@ -1057,6 +1061,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CString;
 
     #[test]
     fn unsigned_manifest_cannot_escalate_beyond_ipc() {
@@ -1076,5 +1081,26 @@ mod tests {
         let app = ElfAppHandle::empty();
         assert_eq!(app.app_id, [0u8; 64]);
         assert_eq!(app.granted_permissions, 0);
+    }
+
+    #[test]
+    fn app_loader_accepts_matching_canonical_architectures_only() {
+        let universal = CManifest::from(&crate::manifest::Manifest::default());
+        for package_arch in ["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"] {
+            let manifest = CManifest::from(&crate::manifest::Manifest {
+                arch: package_arch.into(),
+                ..Default::default()
+            });
+            let matching = CString::new(package_arch).unwrap();
+            assert!(manifest_is_compatible_for_arch(&universal, &matching));
+            assert!(manifest_is_compatible_for_arch(&manifest, &matching));
+
+            let mismatch = if package_arch == "esp32c3" {
+                CString::new("esp32s3").unwrap()
+            } else {
+                CString::new("esp32c3").unwrap()
+            };
+            assert!(!manifest_is_compatible_for_arch(&manifest, &mismatch));
+        }
     }
 }
