@@ -78,6 +78,7 @@ class TargetMatrixTests(unittest.TestCase):
             "components/apps_builtin/terminal/terminal_ui.c"
         ).read_text()
         self.assertIn("CONFIG_IDF_TARGET_ESP32S3", terminal)
+        self.assertNotIn("CONFIG_IDF_TARGET_ESP32S2", terminal)
         self.assertIn("UART_NUM_1", terminal)
 
     def test_embedded_tests_are_not_linked_into_production_firmware(self):
