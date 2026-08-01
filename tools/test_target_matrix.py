@@ -65,6 +65,20 @@ class TargetMatrixTests(unittest.TestCase):
         self.assertIn("ESP_ELF_LOADER_SHA256", adapter)
         self.assertIn("IDF_TARGET_ESP32C3", kconfig)
 
+    def test_legacy_s3_board_components_are_not_built_for_other_targets(self):
+        for path in [
+            "components/board_tdeck/CMakeLists.txt",
+            "components/board_tdeck_pro/CMakeLists.txt",
+        ]:
+            self.assertIn('IDF_TARGET STREQUAL "esp32s3"', Path(path).read_text())
+
+    def test_terminal_selects_an_available_uart(self):
+        terminal = Path(
+            "components/apps_builtin/terminal/terminal_ui.c"
+        ).read_text()
+        self.assertIn("SOC_UART_NUM > 2", terminal)
+        self.assertIn("UART_NUM_1", terminal)
+
 
 if __name__ == "__main__":
     unittest.main()
