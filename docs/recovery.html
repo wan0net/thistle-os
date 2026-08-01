@@ -92,7 +92,7 @@
   &#x2514;&#x2500; NO &#x2500;&#x25BA; Boot Recovery OS (ota_0)
                      &#x2502;
                      &#x25BC;
-          [Step 0] Detect chip type (ESP32/S3/C3/S2/C6/H2)
+          [Step 0] Detect supported chip type (ESP32/S3/C3/S2/C6)
                      &#x2502;
                      &#x25BC;
           [Step 1] Check ota_1 partition state
@@ -160,7 +160,7 @@
     <h2>Building from source</h2>
     <p>The Recovery OS is a standard <code>esp-idf-svc</code> Rust project. You need:</p>
     <ul>
-      <li>Rust toolchain with the <code>xtensa-esp32s3-espidf</code> target (and/or RISC-V target for C3/C6/H2)</li>
+      <li>Rust toolchain with the <code>xtensa-esp32s3-espidf</code> target (and/or RISC-V target for C3/C6)</li>
       <li><code>espup</code> (Espressif's Rust toolchain installer)</li>
     </ul>
 

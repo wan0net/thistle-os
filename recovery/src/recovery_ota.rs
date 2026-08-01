@@ -23,7 +23,7 @@ use crate::catalog_path::validate_catalog_id;
 // ---------------------------------------------------------------------------
 
 /// Detect the ESP32 chip variant from the ROM at runtime.
-/// Returns a slug like "esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "esp32h2".
+/// Returns a supported slug like "esp32", "esp32s2", "esp32s3", "esp32c3", or "esp32c6".
 ///
 /// Uses `esp_chip_info()` which is available on all ESP32 variants via ROM.
 /// The `model` field maps to the `esp_chip_model_t` enum in esp_system.h.
@@ -55,7 +55,6 @@ pub fn detect_chip() -> &'static str {
             9 => "esp32s3",  // CHIP_ESP32S3
             5 => "esp32c3",  // CHIP_ESP32C3
             13 => "esp32c6", // CHIP_ESP32C6
-            16 => "esp32h2", // CHIP_ESP32H2
             _ => "unknown",
         }
     }
@@ -63,11 +62,11 @@ pub fn detect_chip() -> &'static str {
 
 /// Returns a human-readable architecture family for display purposes.
 /// Xtensa cores: esp32, esp32s2, esp32s3.
-/// RISC-V cores: esp32c3, esp32c6, esp32h2.
+/// RISC-V cores: esp32c3, esp32c6.
 pub fn chip_arch_family(chip: &str) -> &'static str {
     match chip {
         "esp32" | "esp32s2" | "esp32s3" => "xtensa",
-        "esp32c3" | "esp32c6" | "esp32h2" => "riscv32",
+        "esp32c3" | "esp32c6" => "riscv32",
         _ => "unknown",
     }
 }

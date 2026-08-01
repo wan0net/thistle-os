@@ -34,7 +34,7 @@
   <rect x="70" y="315" width="180" height="28" rx="6" fill="#ef4444" opacity="0.15"/>
   <text x="160" y="334" font-size="12" fill="#991b1b" text-anchor="middle" font-weight="700">thistle_os.bin</text>
 
-  <text x="160" y="362" font-size="9" fill="#991b1b" text-anchor="middle">ESP32 / S2 / S3 / C3 / C6 / H2</text>
+  <text x="160" y="362" font-size="9" fill="#991b1b" text-anchor="middle">ESP32 / S2 / S3 / C3 / C6</text>
 
   <!-- SDL2 Simulator (Blue) - center -->
   <rect x="310" y="155" width="180" height="220" rx="12" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5" filter="url(#sf)"/>

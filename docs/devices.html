@@ -167,14 +167,14 @@
 
     <div class="callout info">
       <div class="callout-title">One binary per architecture</div>
-      The kernel is compiled separately for each architecture family: one binary for Xtensa (ESP32, S2, S3) and one for RISC-V (C3, C6, H2). Apps and drivers are also architecture-specific. The catalog <code>arch</code> field filters entries to the correct binary for each device.
+      The kernel is compiled separately for each architecture family: one binary for Xtensa (ESP32, S2, S3) and one for RISC-V (C3, C6). Apps and drivers are also architecture-specific. The catalog <code>arch</code> field filters entries to the correct binary for each device.
     </div>
 
     <h2>How hardware detection works</h2>
     <p>When Recovery OS boots on a new or blank device, it auto-provisions hardware with no user configuration needed:</p>
 
     <ol class="steps">
-      <li><strong>Chip detection</strong> &mdash; Recovery reads the chip model register at boot. It knows whether it is running on ESP32, S2, S3, C3, C6, or H2, and selects the correct firmware architecture from the catalog.</li>
+      <li><strong>Chip detection</strong> &mdash; Recovery reads the chip model register at boot. It supports ESP32, S2, S3, C3, and C6, and selects the correct firmware architecture from the catalog.</li>
       <li><strong>Power rail enable</strong> &mdash; Before scanning, Recovery enables peripheral power rails (where applicable) to ensure devices are powered.</li>
       <li><strong>I2C bus scan</strong> &mdash; Probes addresses 0x08 through 0x77 on each I2C bus. Each responding address is looked up in the detection table.</li>
       <li><strong>SPI device probing</strong> &mdash; GPIO-level CS pin checks determine whether SPI devices (e-paper, LoRa SX1262, SD card) are present.</li>

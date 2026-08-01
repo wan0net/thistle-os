@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 REQUIRED_BOARD_KEYS = {"name", "arch", "board_id", "version"}
-VALID_ARCHES = {"esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "esp32h2"}
+VALID_ARCHES = {"esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"}
 DRIVER_ENTRY_ALIASES = {
     "lcd-st7789-i80.drv.elf": "lcd-st7789.drv.elf",
     "qmi8658.drv.elf": "accel-qmi8658.drv.elf",

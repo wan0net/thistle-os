@@ -1,7 +1,7 @@
 # ThistleOS Development Guide
 
 ## Project Overview
-ThistleOS is a portable ESP32 family operating system with an immutable kernel, loadable drivers and apps, swappable window managers, and Ed25519 signing at every level. Supports multiple boards across ESP32, S2, S3, C3, C6, and H2 architectures. Targets LilyGo T-Deck Pro (e-paper), T-Deck (LCD), T-Display-S3, T3-S3, CYD, and C3-Mini.
+ThistleOS is a portable ESP32 family operating system with an immutable kernel, loadable drivers and apps, swappable window managers, and Ed25519 signing at every level. Supports multiple boards across ESP32, S2, S3, C3, and C6 architectures. Targets LilyGo T-Deck Pro (e-paper), T-Deck (LCD), T-Display-S3, T3-S3, CYD, and C3-Mini.
 
 ## Build System
 - **Firmware**: ESP-IDF v5.5 with CMake. `idf.py build`, `idf.py flash monitor`

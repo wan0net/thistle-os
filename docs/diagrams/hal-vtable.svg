@@ -99,5 +99,5 @@
 
   <!-- Hardware (Red) -->
   <rect x="30" y="480" width="740" height="50" rx="12" fill="#ffc9c9" stroke="#ef4444" stroke-width="1.5" filter="url(#shd)"/>
-  <text x="400" y="510" font-size="13" fill="#991b1b" text-anchor="middle" font-weight="700">Physical Hardware (ESP32 / S2 / S3 / C3 / C6 / H2)</text>
+  <text x="400" y="510" font-size="13" fill="#991b1b" text-anchor="middle" font-weight="700">Physical Hardware (ESP32 / S2 / S3 / C3 / C6)</text>
 </svg>
