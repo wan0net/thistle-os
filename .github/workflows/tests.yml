@@ -81,6 +81,9 @@ jobs:
           python3 -m pip install -r tools/requirements.txt
           python3 tools/test_sign.py
 
+      - name: Test release input and provenance validation
+        run: python3 tools/test_validate_release.py
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest
