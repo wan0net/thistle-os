@@ -45,6 +45,11 @@ class TargetMatrixTests(unittest.TestCase):
         self.assertIn('set(RUST_TARGET_FEATURES "-C target-feature=+a")', cmake)
         self.assertNotIn("INTERFACE atomic", cmake)
 
+    def test_c6_omits_unavailable_global_gpio_hold_api(self):
+        source = Path("components/kernel_rs/src/board_config.rs").read_text()
+        self.assertIn('not(feature = "esp32c6")', source)
+        self.assertIn("gpio_deep_sleep_hold_dis", source)
+
     def test_matrix_artifacts_are_architecture_qualified(self):
         firmware = Path(".github/workflows/build.yml").read_text()
         packages = Path(".github/workflows/apps.yml").read_text()

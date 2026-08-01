@@ -156,7 +156,7 @@ fn load_config(config_path: &str) -> i32 {
     // Required when recovering from deep sleep — otherwise GPIO levels set
     // during sleep persist and prevent normal output configuration.
     // (Mirrors board_tdeck_pro.c::gpio_deep_sleep_hold_dis() on boot.)
-    #[cfg(not(test))]
+    #[cfg(all(not(test), not(feature = "esp32c6")))]
     {
         extern "C" { fn gpio_deep_sleep_hold_dis(); }
         unsafe { gpio_deep_sleep_hold_dis(); }
