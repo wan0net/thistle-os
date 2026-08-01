@@ -52,6 +52,7 @@ const APP_VISIBLE_SYMBOLS: &[&str] = &[
     "thistle_crypto_aes128_ecb_encrypt",
     "thistle_crypto_aes256_cbc_decrypt",
     "thistle_crypto_aes256_cbc_encrypt",
+    "thistle_crypto_argon2id",
     "thistle_crypto_ed25519_derive_public",
     "thistle_crypto_ed25519_keygen",
     "thistle_crypto_ed25519_sign",
@@ -425,6 +426,7 @@ extern "C" {
     fn thistle_crypto_hmac_verify(key: *const u8, key_len: usize, data: *const u8, data_len: usize, expected_mac: *const u8) -> i32;
     fn thistle_crypto_aes256_cbc_encrypt(key: *const u8, iv: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32;
     fn thistle_crypto_aes256_cbc_decrypt(key: *const u8, iv: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8) -> i32;
+    fn thistle_crypto_argon2id(password: *const u8, password_len: usize, salt: *const u8, salt_len: usize, key_out: *mut u8, key_len: usize) -> i32;
     fn thistle_crypto_pbkdf2_sha256(password: *const c_char, salt: *const u8, salt_len: usize, iterations: u32, key_out: *mut u8, key_len: usize) -> i32;
     fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32;
     fn thistle_crypto_aes128_ecb_encrypt(key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32;
@@ -987,6 +989,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_argon2id",          thistle_crypto_argon2id          as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8, usize) -> i32),
     entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
@@ -1098,6 +1101,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_crypto_aes128_ecb_encrypt", thistle_crypto_aes128_ecb_encrypt as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_aes256_cbc_decrypt", thistle_crypto_aes256_cbc_decrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
     entry!("thistle_crypto_aes256_cbc_encrypt", thistle_crypto_aes256_cbc_encrypt as unsafe extern "C" fn(*const u8, *const u8, *const u8, usize, *mut u8) -> i32),
+    entry!("thistle_crypto_argon2id",          thistle_crypto_argon2id          as unsafe extern "C" fn(*const u8, usize, *const u8, usize, *mut u8, usize) -> i32),
     entry!("thistle_crypto_ed25519_derive_public", thistle_crypto_ed25519_derive_public as unsafe extern "C" fn(*const u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_keygen",       thistle_crypto_ed25519_keygen       as unsafe extern "C" fn(*mut u8, *mut u8) -> i32),
     entry!("thistle_crypto_ed25519_sign",         thistle_crypto_ed25519_sign         as unsafe extern "C" fn(*const u8, *const u8, usize, *mut u8) -> i32),

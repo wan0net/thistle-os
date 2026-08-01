@@ -15,6 +15,7 @@
 
 use std::os::raw::c_char;
 
+use argon2::{Algorithm, Argon2, Params, Version};
 use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::{Sha256, Digest};
@@ -25,6 +26,13 @@ const ESP_OK: i32 = 0;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
 const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_FAIL: i32 = -1;
+
+pub const ARGON2ID_SALT_LEN: usize = 16;
+pub const ARGON2ID_KEY_LEN: usize = 32;
+pub const ARGON2ID_MAX_PASSWORD_LEN: usize = 1024;
+pub const ARGON2ID_MEMORY_KIB: u32 = 64;
+pub const ARGON2ID_TIME_COST: u32 = 6;
+pub const ARGON2ID_LANES: u32 = 1;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -83,8 +91,48 @@ fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]
     }
 }
 
-fn sw_random(buf: &mut [u8]) -> bool {
-    getrandom::fill(buf).is_ok()
+fn fill_random_result_with<F>(buf: &mut [u8], fill: F) -> i32
+where
+    F: FnOnce(&mut [u8]) -> i32,
+{
+    let result = fill(buf);
+    if result != ESP_OK {
+        buf.fill(0);
+    }
+    result
+}
+
+fn sw_random(buf: &mut [u8]) -> i32 {
+    fill_random_result_with(buf, |out| {
+        if getrandom::fill(out).is_ok() {
+            ESP_OK
+        } else {
+            ESP_FAIL
+        }
+    })
+}
+
+pub(crate) fn derive_argon2id_key(
+    password: &[u8],
+    salt: &[u8; ARGON2ID_SALT_LEN],
+) -> Result<[u8; ARGON2ID_KEY_LEN], i32> {
+    if password.is_empty() || password.len() > ARGON2ID_MAX_PASSWORD_LEN {
+        return Err(ESP_ERR_INVALID_ARG);
+    }
+
+    let params = Params::new(
+        ARGON2ID_MEMORY_KIB,
+        ARGON2ID_TIME_COST,
+        ARGON2ID_LANES,
+        Some(ARGON2ID_KEY_LEN),
+    )
+    .map_err(|_| ESP_ERR_INVALID_ARG)?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; ARGON2ID_KEY_LEN];
+    argon2
+        .hash_password_into(password, salt, &mut key)
+        .map_err(|_| ESP_FAIL)?;
+    Ok(key)
 }
 
 fn sw_aes128_ecb_encrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &mut [u8; 16]) {
@@ -233,18 +281,56 @@ pub unsafe extern "C" fn thistle_crypto_pbkdf2_sha256(
     ESP_OK
 }
 
+/// Derive a 256-bit key with the device-calibrated Argon2id v1.3 profile.
+///
+/// The output is left untouched when validation or derivation fails.
+#[no_mangle]
+pub unsafe extern "C" fn thistle_crypto_argon2id(
+    password: *const u8,
+    password_len: usize,
+    salt: *const u8,
+    salt_len: usize,
+    key_out: *mut u8,
+    key_len: usize,
+) -> i32 {
+    if password.is_null()
+        || salt.is_null()
+        || key_out.is_null()
+        || password_len == 0
+        || password_len > ARGON2ID_MAX_PASSWORD_LEN
+        || salt_len != ARGON2ID_SALT_LEN
+        || key_len != ARGON2ID_KEY_LEN
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    let password = std::slice::from_raw_parts(password, password_len);
+    let salt = &*(salt as *const [u8; ARGON2ID_SALT_LEN]);
+    match derive_argon2id_key(password, salt) {
+        Ok(key) => {
+            std::ptr::copy_nonoverlapping(key.as_ptr(), key_out, ARGON2ID_KEY_LEN);
+            ESP_OK
+        }
+        Err(err) => err,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32 {
     if buf.is_null() { return ESP_ERR_INVALID_ARG; }
 
     if let Some(hw) = get_hw_crypto() {
         if let Some(f) = hw.random {
-            return f(buf, len);
+            let result = f(buf, len);
+            if result != ESP_OK {
+                std::ptr::write_bytes(buf, 0, len);
+            }
+            return result;
         }
     }
 
     let slice = std::slice::from_raw_parts_mut(buf, len);
-    if sw_random(slice) { ESP_OK } else { ESP_FAIL }
+    sw_random(slice)
 }
 
 #[no_mangle]
@@ -481,6 +567,87 @@ mod tests {
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(key, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_argon2id_ffi_uses_unique_salts() {
+        let password = b"correct horse battery staple";
+        let salt_a = [0x11u8; 16];
+        let salt_b = [0x22u8; 16];
+        let mut key_a = [0u8; 32];
+        let mut key_b = [0u8; 32];
+
+        let rc_a = unsafe {
+            thistle_crypto_argon2id(
+                password.as_ptr(),
+                password.len(),
+                salt_a.as_ptr(),
+                salt_a.len(),
+                key_a.as_mut_ptr(),
+                key_a.len(),
+            )
+        };
+        let rc_b = unsafe {
+            thistle_crypto_argon2id(
+                password.as_ptr(),
+                password.len(),
+                salt_b.as_ptr(),
+                salt_b.len(),
+                key_b.as_mut_ptr(),
+                key_b.len(),
+            )
+        };
+
+        assert_eq!(rc_a, ESP_OK);
+        assert_eq!(rc_b, ESP_OK);
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn test_argon2id_ffi_rejects_malformed_input_before_output() {
+        let password = b"passphrase";
+        let short_salt = [0x33u8; 8];
+        let mut key = [0xA5u8; 32];
+
+        let rc = unsafe {
+            thistle_crypto_argon2id(
+                password.as_ptr(),
+                password.len(),
+                short_salt.as_ptr(),
+                short_salt.len(),
+                key.as_mut_ptr(),
+                key.len(),
+            )
+        };
+
+        assert_eq!(rc, ESP_ERR_INVALID_ARG);
+        assert_eq!(key, [0xA5u8; 32]);
+
+        let valid_salt = [0x44u8; ARGON2ID_SALT_LEN];
+        let rc = unsafe {
+            thistle_crypto_argon2id(
+                password.as_ptr(),
+                ARGON2ID_MAX_PASSWORD_LEN + 1,
+                valid_salt.as_ptr(),
+                valid_salt.len(),
+                key.as_mut_ptr(),
+                key.len(),
+            )
+        };
+        assert_eq!(rc, ESP_ERR_INVALID_ARG);
+        assert_eq!(key, [0xA5u8; 32]);
+    }
+
+    #[test]
+    fn test_failed_random_fill_zeroes_partial_output() {
+        let mut output = [0xA5u8; 32];
+        let result = fill_random_result_with(&mut output, |buf| {
+            buf[..8].fill(0x5A);
+            ESP_FAIL
+        });
+
+        assert_eq!(result, ESP_FAIL);
+        assert_eq!(output, [0u8; 32]);
     }
 
     #[test]

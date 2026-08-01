@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  * ThistleOS — Vault app public interface
  *
- * AES-256-CBC encrypted password vault, protected by a PBKDF2-derived key.
+ * AES-256-CBC encrypted password vault, protected by an Argon2id-derived key.
  * Hardware AES acceleration used on ESP32-S3 via mbedtls.
  */
 #pragma once

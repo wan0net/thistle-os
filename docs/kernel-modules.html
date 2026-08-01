@@ -148,12 +148,12 @@
 <span class="tok-keyword">pub</span> <span class="tok-keyword">extern</span> <span class="tok-string">"C"</span> <span class="tok-keyword">fn</span> <span class="tok-fn">rs_msg_queue_set_defaults</span>(max_retries: <span class="tok-type">u32</span>, ttl_ms: <span class="tok-type">u64</span>) -> <span class="tok-type">i32</span>;</code></pre>
 
     <h3>Message Crypto</h3>
-    <p><code>msg_crypto.rs</code> — End-to-end message encryption using AES-256-CTR + HMAC-SHA256. PBKDF2 key derivation from shared secrets. Per-message nonces with only 49 bytes overhead per encrypted message.</p>
+    <p><code>msg_crypto.rs</code> — End-to-end message encryption using AES-256-CTR + HMAC-SHA256. Versioned Argon2id key derivation uses authenticated random salts; legacy v1 envelopes remain readable during migration. V2 adds 65 bytes overhead per encrypted message.</p>
     <ul>
       <li>AES-256-CTR encryption with HMAC-SHA256 authentication</li>
-      <li>PBKDF2 key derivation from shared secrets</li>
+      <li>Argon2id key derivation from shared secrets with per-channel random salts</li>
       <li>Per-message unique nonces</li>
-      <li>49 bytes overhead per encrypted message</li>
+      <li>65 bytes overhead per v2 encrypted message</li>
       <li>Per-contact crypto channels with session statistics</li>
     </ul>
     <p><span class="badge badge-purple">12 FFI exports</span> <span class="badge badge-green">48 tests</span></p>

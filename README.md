@@ -210,7 +210,7 @@ ThistleOS ships with 14 apps that demonstrate the platform. All are built-in but
 | **Flashlight** | Full-screen white + SOS Morse code pattern |
 | **Weather** | IMU sensor dashboard (barometer, temperature) |
 | **Terminal** | System console with built-in diagnostic commands |
-| **Vault** | AES-256 encrypted password manager (PBKDF2 key derivation) |
+| **Vault** | AES-256 encrypted password manager (versioned Argon2id key derivation) |
 
 ## Themes
 
@@ -319,7 +319,7 @@ Signing and verification at every level — from boot to apps:
 - The **developer** holds the Ed25519 private key (never on-device)
 - The **device** holds only the public key (embedded in Recovery firmware)
 - The device **cannot forge signatures** — it can only verify them
-- Cryptography uses **ed25519-dalek** (Rust) for signing and **mbedtls** (ESP-IDF) for TLS; symmetric crypto (AES-256, HMAC-SHA256, PBKDF2) goes through the kernel crypto module
+- Cryptography uses **ed25519-dalek** (Rust) for signing and **mbedtls** (ESP-IDF) for TLS; symmetric crypto and password derivation (AES-256, HMAC-SHA256, Argon2id, legacy-migration PBKDF2) go through the kernel crypto module
 
 **Kernel crypto module:**
 The kernel contains a platform-independent crypto layer (`components/kernel_rs/src/crypto.rs`). It dispatches through the `hal_crypto_driver_t` vtable first — on ESP32-S3 this can use the hardware AES and SHA accelerators. When no hardware crypto driver is registered (simulator, WASM, or boards without hardware crypto), it falls back to pure Rust software implementations transparently. The Vault app uses this kernel crypto on all platforms, including the SDL2 simulator and the planned WASM web simulator.
@@ -466,6 +466,7 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | mbedtls | Apache-2.0 | TLS, AES, hashing |
 | aes | MIT/Apache-2.0 | Rust software AES-256 |
 | hmac | MIT/Apache-2.0 | Rust software HMAC |
+| argon2 | MIT/Apache-2.0 | Memory-hard password key derivation |
 | pbkdf2 | MIT/Apache-2.0 | Rust software PBKDF2 |
 | getrandom | MIT/Apache-2.0 | Rust CSPRNG entropy |
 | embedded-graphics | MIT/Apache-2.0 | Rust 2D graphics primitives |

@@ -169,9 +169,9 @@ thistle-register-key --port /dev/ttyACM0 --key dev_key.bin</code></pre>
     <p>The built-in settings app includes a password vault. Vault entries are encrypted at rest on the SD card using:</p>
 
     <ul>
-      <li><strong>Key derivation:</strong> PBKDF2-HMAC-SHA256 with 100,000 iterations and a random 16-byte salt stored alongside the ciphertext</li>
+      <li><strong>Key derivation:</strong> Argon2id v1.3 with a random 16-byte salt and versioned, authenticated parameters</li>
       <li><strong>Encryption:</strong> AES-256-CBC with a random IV per entry</li>
-      <li><strong>Storage:</strong> <code>/sdcard/data/vault.enc</code></li>
+      <li><strong>Storage:</strong> <code>/sdcard/config/vault.enc</code>, with automatic authenticated migration from legacy PBKDF2 files</li>
     </ul>
 
     <p>The master password is never stored — only the derived key is used for encryption/decryption and is held in DRAM only while the vault app is open. Closing the vault app zeroes the in-memory key.</p>

@@ -79,6 +79,7 @@ extern int thistle_crypto_aes256_cbc_encrypt(const uint8_t *key, const uint8_t *
 extern int thistle_crypto_aes256_cbc_decrypt(const uint8_t *key, const uint8_t *iv, const uint8_t *ciphertext, size_t len, uint8_t *plaintext_out);
 extern int thistle_crypto_aes128_ecb_encrypt(const uint8_t *key, const uint8_t *plaintext, size_t len, uint8_t *ciphertext_out);
 extern int thistle_crypto_aes128_ecb_decrypt(const uint8_t *key, const uint8_t *ciphertext, size_t len, uint8_t *plaintext_out);
+extern int thistle_crypto_argon2id(const uint8_t *password, size_t password_len, const uint8_t *salt, size_t salt_len, uint8_t *key_out, size_t key_len);
 extern int thistle_crypto_pbkdf2_sha256(const char *password, const uint8_t *salt, size_t salt_len, uint32_t iterations, uint8_t *key_out, size_t key_len);
 extern int thistle_crypto_random(uint8_t *buf, size_t len);
 extern int thistle_crypto_ed25519_keygen(uint8_t *private_key_out, uint8_t *public_key_out);

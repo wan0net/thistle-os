@@ -21,7 +21,7 @@ ThistleOS splits responsibility at the syscall boundary:
   C FFI functions declared in `thistle/kernel_rs.h`.
 
 The crate is `thistle-kernel` (version `0.1.0`). Current runtime dependencies:
-`log = "0.4"`, `ed25519-dalek`, `sha2`, `hmac`, `aes`, `pbkdf2`, `thistle-tk`,
+`log = "0.4"`, `ed25519-dalek`, `sha2`, `hmac`, `aes`, `argon2`, `pbkdf2`, `thistle-tk`,
 `embedded-graphics`. Build depends on `embuild = "0.33"` for ESP-IDF path
 discovery.
 
@@ -586,7 +586,8 @@ and `user_data` opaque pointers. All storage is in a `static Mutex<EventBus>`.
 
 Platform-independent cryptographic primitives with optional hardware acceleration
 via HAL dispatch. All symmetric crypto operations used by the kernel (AES-256-CBC
-encryption/decryption, HMAC-SHA256, SHA-256 hashing, PBKDF2 key derivation, and
+encryption/decryption, HMAC-SHA256, SHA-256 hashing, Argon2id key derivation,
+legacy PBKDF2 migration, and
 CSPRNG random bytes) are routed through this module. If a `hal_crypto_driver_t`
 vtable is registered (e.g. an ESP32-S3 hardware crypto driver), its functions are
 called first. If the vtable is absent or a particular operation is not implemented
@@ -653,6 +654,12 @@ esp_err_t thistle_crypto_pbkdf2_sha256(const uint8_t *password, size_t password_
                                        const uint8_t *salt, size_t salt_len,
                                        uint32_t iterations,
                                        uint8_t *out, size_t out_len);
+
+// Device-calibrated Argon2id v1.3 derivation. Salt must be 16 bytes and
+// output must be 32 bytes. Output is untouched on validation failure.
+esp_err_t thistle_crypto_argon2id(const uint8_t *password, size_t password_len,
+                                  const uint8_t salt[16], size_t salt_len,
+                                  uint8_t out[32], size_t out_len);
 
 // Fill `buf` with `len` bytes of cryptographically secure random data.
 esp_err_t thistle_crypto_random(uint8_t *buf, size_t len);
