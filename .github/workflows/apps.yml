@@ -146,11 +146,16 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: write
-      pages: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Check out canonical app catalog
+        uses: actions/checkout@v6
+        with:
+          repository: wan0net/thistle-apps
+          path: existing-app-catalog
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -171,11 +176,15 @@ jobs:
           python3 tools/build_catalog.py publish/apps \
             --base-url "https://wan0net.github.io/thistle-apps/apps" \
             --output publish/catalog.json \
+            --merge existing-app-catalog/catalog.json \
             --require-signatures
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy to canonical app catalog
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          deploy_key: ${{ secrets.THISTLE_APPS_DEPLOY_KEY }}
+          external_repository: wan0net/thistle-apps
+          publish_branch: main
           publish_dir: ./publish
           destination_dir: .
+          keep_files: true

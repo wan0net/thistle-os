@@ -104,6 +104,33 @@ def scan_artifacts(artifact_dir: str, base_url: str,
     return entries
 
 
+def merge_catalog_entries(entries: list, existing_entries: list) -> list:
+    """Preserve existing packages and carry usage metadata onto rebuilt ones."""
+    existing_map = {
+        entry.get("id", ""): entry
+        for entry in existing_entries
+        if entry.get("id")
+    }
+    merged = []
+    rebuilt_ids = set()
+    for entry in entries:
+        package_id = entry.get("id", "")
+        rebuilt_ids.add(package_id)
+        old = existing_map.get(package_id, {})
+        entry["rating"] = old.get("rating", entry.get("rating", 0))
+        entry["rating_count"] = old.get(
+            "rating_count", entry.get("rating_count", 0)
+        )
+        entry["downloads"] = old.get("downloads", entry.get("downloads", 0))
+        merged.append(entry)
+
+    merged.extend(
+        entry for entry in existing_entries
+        if entry.get("id") not in rebuilt_ids
+    )
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate ThistleOS app catalog"
@@ -125,21 +152,15 @@ def main():
     entries = scan_artifacts(args.artifact_dir, args.base_url,
                              require_signatures=args.require_signatures)
 
-    # Merge with existing catalog to preserve ratings/downloads
-    if args.merge and Path(args.merge).exists():
-        existing = json.loads(Path(args.merge).read_text())
-        existing_map = {e["id"]: e for e in existing.get("entries", [])}
-        for entry in entries:
-            if entry["id"] in existing_map:
-                old = existing_map[entry["id"]]
-                entry["rating"] = old.get("rating", 0)
-                entry["rating_count"] = old.get("rating_count", 0)
-                entry["downloads"] = old.get("downloads", 0)
-
-    # Set updated date
+    # Set the publication date only on packages rebuilt in this run.
     today = date.today().isoformat()
     for entry in entries:
         entry["updated"] = today
+
+    # Preserve packages not rebuilt here and retain their usage metadata.
+    if args.merge and Path(args.merge).exists():
+        existing = json.loads(Path(args.merge).read_text())
+        entries = merge_catalog_entries(entries, existing.get("entries", []))
 
     catalog = {
         "version": 1,
