@@ -118,16 +118,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install -r tools/requirements.txt
+          apt-get update
+          apt-get install -y python3-venv
+          python3 -m venv /tmp/thistle-package-signing-venv
+          /tmp/thistle-package-signing-venv/bin/pip install -r tools/requirements.txt
           SIGNING_KEY="$PRODUCTION_SIGNING_KEY"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            SIGNING_KEY=$(python3 -c 'from nacl.signing import SigningKey; print(SigningKey.generate().encode().hex())')
+            SIGNING_KEY=$(/tmp/thistle-package-signing-venv/bin/python -c 'from nacl.signing import SigningKey; print(SigningKey.generate().encode().hex())')
           elif [ -z "$SIGNING_KEY" ]; then
             echo "::error::THISTLE_SIGNING_KEY is required for published packages"
             exit 1
           fi
           while IFS= read -r -d '' elf; do
-            python3 tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
+            /tmp/thistle-package-signing-venv/bin/python \
+              tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
           done < <(find "artifacts/$TARGET_ARCH" -type f \
             \( -name '*.app.elf' -o -name '*.drv.elf' \) -print0)
 
