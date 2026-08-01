@@ -66,6 +66,21 @@ jobs:
           ! grep -Eq 'AT\\+CMGS=.*msg|AT\\+CMGS=.*\\\\r' \
             components/drv_modem_a7682e/src/drv_modem_a7682e.c
 
+      - name: Test modem lifecycle concurrency
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pthread \
+            -D_DEFAULT_SOURCE -DA7682E_LIFECYCLE_HOST_TEST \
+            -Icomponents/drv_modem_a7682e/include \
+            components/drv_modem_a7682e/src/a7682e_lifecycle.c \
+            components/drv_modem_a7682e/tests/test_lifecycle.c \
+            -o /tmp/test_modem_lifecycle
+          /tmp/test_modem_lifecycle
+          grep -q "a7682e_lifecycle_begin_operation" \
+            components/drv_modem_a7682e/src/drv_modem_a7682e.c
+          ! grep -Eq "vSemaphoreDelete|xSemaphoreCreateMutex\\(" \
+            components/drv_modem_a7682e/src/a7682e_lifecycle.c \
+            components/drv_modem_a7682e/src/drv_modem_a7682e.c
+
       - name: Test assistant request bounds under sanitizers
         run: |
           cc -std=c11 -Wall -Wextra -Werror \

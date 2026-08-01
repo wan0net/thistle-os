@@ -3,6 +3,7 @@
 
 #include "drv_modem_a7682e.h"
 #include "a7682e_sms_validation.h"
+#include "a7682e_lifecycle.h"
 
 #include "esp_modem_api.h"
 #include "esp_modem_config.h"
@@ -16,6 +17,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static const char *TAG = "a7682e";
 
@@ -33,18 +35,21 @@ static struct {
     a7682e_config_t  cfg;
     esp_modem_dce_t *dce;        ///< Data Communication Equipment handle
     esp_netif_t     *ppp_netif;  ///< PPP network interface
-    bool             initialized;
     bool             powered_on;
-    bool             ppp_connected;
+    atomic_bool      ppp_connected;
     a7682e_sms_cb_t  sms_cb;
     void            *sms_cb_data;
     bool             sms_initialized;
     TaskHandle_t     sms_poll_task;
+    bool             got_ip_handler_registered;
+    bool             lost_ip_handler_registered;
 } s_modem;
 
 static void sms_poll_task(void *arg);
 static void sms_poll_start_if_needed(void);
 static void sms_poll_stop(void);
+static esp_err_t stop_ppp_locked(void);
+static void destroy_transport_locked(void);
 
 /* =========================================================================
  * Internal — PPP event handler
@@ -56,11 +61,34 @@ static void ppp_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == IP_EVENT && event_id == IP_EVENT_PPP_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "PPP connected, IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        s_modem.ppp_connected = true;
+        atomic_store(&s_modem.ppp_connected, true);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_PPP_LOST_IP) {
         ESP_LOGI(TAG, "PPP disconnected");
-        s_modem.ppp_connected = false;
+        atomic_store(&s_modem.ppp_connected, false);
     }
+}
+
+static void destroy_transport_locked(void)
+{
+    if (s_modem.got_ip_handler_registered) {
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_PPP_GOT_IP,
+                                     &ppp_event_handler);
+        s_modem.got_ip_handler_registered = false;
+    }
+    if (s_modem.lost_ip_handler_registered) {
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_PPP_LOST_IP,
+                                     &ppp_event_handler);
+        s_modem.lost_ip_handler_registered = false;
+    }
+    if (s_modem.dce) {
+        esp_modem_destroy(s_modem.dce);
+        s_modem.dce = NULL;
+    }
+    if (s_modem.ppp_netif) {
+        esp_netif_destroy(s_modem.ppp_netif);
+        s_modem.ppp_netif = NULL;
+    }
+    atomic_store(&s_modem.ppp_connected, false);
 }
 
 /* =========================================================================
@@ -69,11 +97,16 @@ static void ppp_event_handler(void *arg, esp_event_base_t event_base,
 
 esp_err_t drv_a7682e_init(const a7682e_config_t *config)
 {
-    if (s_modem.initialized) {
-        return ESP_OK;
-    }
     if (!config) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    a7682e_init_result_t begin = a7682e_lifecycle_begin_init();
+    if (begin == A7682E_INIT_ALREADY_RUNNING) {
+        return ESP_OK;
+    }
+    if (begin != A7682E_INIT_ACQUIRED) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     memcpy(&s_modem.cfg, config, sizeof(a7682e_config_t));
@@ -94,36 +127,29 @@ esp_err_t drv_a7682e_init(const a7682e_config_t *config)
         gpio_set_level(s_modem.cfg.pin_reset, 1);
     }
 
-    s_modem.initialized = true;
+    atomic_store(&s_modem.ppp_connected, false);
     ESP_LOGI(TAG, "driver initialised (esp_modem backend, UART%d, %lu baud, "
              "TX=%d RX=%d PWRKEY=%d RST=%d)",
              (int)s_modem.cfg.uart_num, (unsigned long)s_modem.cfg.baud_rate,
              (int)s_modem.cfg.pin_tx, (int)s_modem.cfg.pin_rx,
              (int)s_modem.cfg.pin_pwrkey, (int)s_modem.cfg.pin_reset);
+    a7682e_lifecycle_finish_init(true);
     return ESP_OK;
 }
 
 void drv_a7682e_deinit(void)
 {
-    if (!s_modem.initialized) {
+    if (!a7682e_lifecycle_begin_stop()) {
         return;
     }
 
     sms_poll_stop();
 
-    if (s_modem.ppp_connected) {
-        drv_a7682e_stop_ppp();
+    if (atomic_load(&s_modem.ppp_connected)) {
+        stop_ppp_locked();
     }
 
-    if (s_modem.dce) {
-        esp_modem_destroy(s_modem.dce);
-        s_modem.dce = NULL;
-    }
-
-    if (s_modem.ppp_netif) {
-        esp_netif_destroy(s_modem.ppp_netif);
-        s_modem.ppp_netif = NULL;
-    }
+    destroy_transport_locked();
 
     /* Release GPIO */
     if (s_modem.cfg.pin_pwrkey >= 0) {
@@ -133,9 +159,13 @@ void drv_a7682e_deinit(void)
         gpio_reset_pin(s_modem.cfg.pin_reset);
     }
 
-    s_modem.initialized = false;
     s_modem.powered_on  = false;
+    s_modem.sms_initialized = false;
+    s_modem.sms_cb = NULL;
+    s_modem.sms_cb_data = NULL;
+    atomic_store(&s_modem.ppp_connected, false);
     ESP_LOGI(TAG, "driver de-initialised");
+    a7682e_lifecycle_finish_stop();
 }
 
 /* =========================================================================
@@ -144,10 +174,12 @@ void drv_a7682e_deinit(void)
 
 esp_err_t drv_a7682e_power(bool on)
 {
-    if (!s_modem.initialized) {
+    if (!a7682e_lifecycle_begin_operation()) {
         ESP_LOGE(TAG, "power: driver not initialised");
         return ESP_ERR_INVALID_STATE;
     }
+
+    esp_err_t result = ESP_OK;
 
     if (on && !s_modem.powered_on) {
         /* Power-on sequence:
@@ -180,14 +212,27 @@ esp_err_t drv_a7682e_power(bool on)
         s_modem.ppp_netif = esp_netif_new(&netif_ppp_config);
         if (!s_modem.ppp_netif) {
             ESP_LOGE(TAG, "power-on: failed to create PPP netif");
-            return ESP_ERR_NO_MEM;
+            result = ESP_ERR_NO_MEM;
+            goto done;
         }
 
         /* Register PPP IP event handlers */
-        esp_event_handler_register(IP_EVENT, IP_EVENT_PPP_GOT_IP,
-                                   &ppp_event_handler, NULL);
-        esp_event_handler_register(IP_EVENT, IP_EVENT_PPP_LOST_IP,
-                                   &ppp_event_handler, NULL);
+        esp_err_t event_ret = esp_event_handler_register(
+            IP_EVENT, IP_EVENT_PPP_GOT_IP, &ppp_event_handler, NULL);
+        if (event_ret != ESP_OK) {
+            result = event_ret;
+            destroy_transport_locked();
+            goto done;
+        }
+        s_modem.got_ip_handler_registered = true;
+        event_ret = esp_event_handler_register(
+            IP_EVENT, IP_EVENT_PPP_LOST_IP, &ppp_event_handler, NULL);
+        if (event_ret != ESP_OK) {
+            result = event_ret;
+            destroy_transport_locked();
+            goto done;
+        }
+        s_modem.lost_ip_handler_registered = true;
 
         /* Create the modem DCE.
          * ESP_MODEM_DCE_SIM7600 is the closest supported device type for the
@@ -205,9 +250,9 @@ esp_err_t drv_a7682e_power(bool on)
                                         s_modem.ppp_netif);
         if (!s_modem.dce) {
             ESP_LOGE(TAG, "power-on: failed to create esp_modem DCE");
-            esp_netif_destroy(s_modem.ppp_netif);
-            s_modem.ppp_netif = NULL;
-            return ESP_FAIL;
+            destroy_transport_locked();
+            result = ESP_FAIL;
+            goto done;
         }
 
         s_modem.powered_on = true;
@@ -220,14 +265,11 @@ esp_err_t drv_a7682e_power(bool on)
          *   2. Destroy DCE (sends AT+CPOF internally if possible)
          *   3. Fallback PWRKEY pulse
          */
-        if (s_modem.ppp_connected) {
-            drv_a7682e_stop_ppp();
+        if (atomic_load(&s_modem.ppp_connected)) {
+            stop_ppp_locked();
         }
 
-        if (s_modem.dce) {
-            esp_modem_destroy(s_modem.dce);
-            s_modem.dce = NULL;
-        }
+        destroy_transport_locked();
 
         if (s_modem.cfg.pin_pwrkey >= 0) {
             ESP_LOGI(TAG, "power-off: PWRKEY pulse (%d ms)",
@@ -241,7 +283,9 @@ esp_err_t drv_a7682e_power(bool on)
         ESP_LOGI(TAG, "power-off: done");
     }
 
-    return ESP_OK;
+done:
+    a7682e_lifecycle_finish_operation();
+    return result;
 }
 
 static void sms_poll_task(void *arg)
@@ -249,23 +293,33 @@ static void sms_poll_task(void *arg)
     (void)arg;
 
     while (true) {
+        if (!a7682e_lifecycle_begin_operation()) {
+            vTaskDelay(pdMS_TO_TICKS(A7682E_SMS_POLL_MS));
+            continue;
+        }
         if (!s_modem.sms_cb || !s_modem.sms_initialized || !s_modem.powered_on || !s_modem.dce) {
+            a7682e_lifecycle_finish_operation();
             vTaskDelay(pdMS_TO_TICKS(A7682E_SMS_POLL_MS));
             continue;
         }
 
-        bool ppp_was_active = s_modem.ppp_connected;
+        bool ppp_was_active = atomic_load(&s_modem.ppp_connected);
         if (ppp_was_active) {
             esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
         }
 
+        int unread_indices[16];
+        size_t unread_count = 0;
+        a7682e_sms_cb_t callback = s_modem.sms_cb;
+        void *callback_data = s_modem.sms_cb_data;
         char resp[768] = {0};
         if (esp_modem_at(s_modem.dce, "AT+CMGL=\"REC UNREAD\"", resp, 5000) == ESP_OK) {
             const char *p = resp;
             while ((p = strstr(p, "+CMGL:")) != NULL) {
                 int index = 0;
-                if (sscanf(p, "+CMGL: %d", &index) == 1 && index > 0 && s_modem.sms_cb) {
-                    s_modem.sms_cb(index, s_modem.sms_cb_data);
+                if (sscanf(p, "+CMGL: %d", &index) == 1 && index > 0
+                    && unread_count < sizeof(unread_indices) / sizeof(unread_indices[0])) {
+                    unread_indices[unread_count++] = index;
                 }
                 p += 6;
             }
@@ -273,6 +327,11 @@ static void sms_poll_task(void *arg)
 
         if (ppp_was_active) {
             esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
+        }
+
+        a7682e_lifecycle_finish_operation();
+        for (size_t i = 0; i < unread_count; ++i) {
+            callback(unread_indices[i], callback_data);
         }
 
         vTaskDelay(pdMS_TO_TICKS(A7682E_SMS_POLL_MS));
@@ -308,12 +367,16 @@ static void sms_poll_stop(void)
 esp_err_t drv_a7682e_send_at(const char *cmd, char *buf, size_t buf_len,
                               uint32_t timeout_ms)
 {
-    if (!s_modem.dce || !s_modem.powered_on) {
-        ESP_LOGE(TAG, "send_at: modem not powered on");
-        return ESP_ERR_INVALID_STATE;
-    }
     if (!cmd) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "send_at: modem not powered on");
+        a7682e_lifecycle_finish_operation();
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (timeout_ms == 0) {
@@ -334,6 +397,7 @@ esp_err_t drv_a7682e_send_at(const char *cmd, char *buf, size_t buf_len,
         ESP_LOGD(TAG, "AT<< %s", resp);
     }
 
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
@@ -349,35 +413,47 @@ bool drv_a7682e_is_ready(void)
 
 int drv_a7682e_get_signal_rssi(void)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return -999;
+    }
     if (!s_modem.dce) {
+        a7682e_lifecycle_finish_operation();
         return -999;
     }
 
     int rssi = 0, ber = 0;
     esp_err_t ret = esp_modem_get_signal_quality(s_modem.dce, &rssi, &ber);
     if (ret != ESP_OK) {
+        a7682e_lifecycle_finish_operation();
         return -999;
     }
 
     if (rssi == 99) {
         /* 99 = not detectable / unknown */
+        a7682e_lifecycle_finish_operation();
         return -999;
     }
 
     /* Convert to dBm: dBm = −113 + 2×rssi (range 0–31 → −113 to −51 dBm) */
     int dbm = -113 + 2 * rssi;
     ESP_LOGD(TAG, "signal: rssi=%d → %d dBm", rssi, dbm);
+    a7682e_lifecycle_finish_operation();
     return dbm;
 }
 
 a7682e_net_reg_t drv_a7682e_get_network_reg(void)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return A7682E_NET_UNKNOWN;
+    }
     if (!s_modem.dce) {
+        a7682e_lifecycle_finish_operation();
         return A7682E_NET_UNKNOWN;
     }
 
     char resp[64] = {0};
     if (esp_modem_at(s_modem.dce, "AT+CREG?", resp, 2000) != ESP_OK) {
+        a7682e_lifecycle_finish_operation();
         return A7682E_NET_UNKNOWN;
     }
 
@@ -385,6 +461,7 @@ a7682e_net_reg_t drv_a7682e_get_network_reg(void)
     const char *p = strstr(resp, "+CREG:");
     if (!p) {
         ESP_LOGW(TAG, "get_network_reg: could not parse +CREG in: %s", resp);
+        a7682e_lifecycle_finish_operation();
         return A7682E_NET_UNKNOWN;
     }
 
@@ -397,17 +474,21 @@ a7682e_net_reg_t drv_a7682e_get_network_reg(void)
         stat = n;
     } else {
         ESP_LOGW(TAG, "get_network_reg: sscanf failed on: %s", p);
+        a7682e_lifecycle_finish_operation();
         return A7682E_NET_UNKNOWN;
     }
 
+    a7682e_net_reg_t result;
     switch (stat) {
-        case 0:  return A7682E_NET_NOT_REGISTERED;
-        case 1:  return A7682E_NET_REGISTERED_HOME;
-        case 2:  return A7682E_NET_SEARCHING;
-        case 3:  return A7682E_NET_DENIED;
-        case 5:  return A7682E_NET_REGISTERED_ROAM;
-        default: return A7682E_NET_UNKNOWN;
+        case 0:  result = A7682E_NET_NOT_REGISTERED; break;
+        case 1:  result = A7682E_NET_REGISTERED_HOME; break;
+        case 2:  result = A7682E_NET_SEARCHING; break;
+        case 3:  result = A7682E_NET_DENIED; break;
+        case 5:  result = A7682E_NET_REGISTERED_ROAM; break;
+        default: result = A7682E_NET_UNKNOWN; break;
     }
+    a7682e_lifecycle_finish_operation();
+    return result;
 }
 
 /* =========================================================================
@@ -416,11 +497,16 @@ a7682e_net_reg_t drv_a7682e_get_network_reg(void)
 
 esp_err_t drv_a7682e_start_ppp(void)
 {
-    if (!s_modem.dce || !s_modem.powered_on) {
-        ESP_LOGE(TAG, "start_ppp: modem not powered on");
+    if (!a7682e_lifecycle_begin_operation()) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_modem.ppp_connected) {
+    if (!s_modem.dce || !s_modem.powered_on) {
+        ESP_LOGE(TAG, "start_ppp: modem not powered on");
+        a7682e_lifecycle_finish_operation();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (atomic_load(&s_modem.ppp_connected)) {
+        a7682e_lifecycle_finish_operation();
         return ESP_OK;
     }
 
@@ -431,25 +517,29 @@ esp_err_t drv_a7682e_start_ppp(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "start_ppp: failed to enter PPP mode: %s",
                  esp_err_to_name(ret));
+        a7682e_lifecycle_finish_operation();
         return ret;
     }
 
     /* Wait for IP_EVENT_PPP_GOT_IP (event handler sets ppp_connected) */
-    for (int i = 0; i < A7682E_PPP_TIMEOUT_S && !s_modem.ppp_connected; i++) {
+    for (int i = 0; i < A7682E_PPP_TIMEOUT_S
+         && !atomic_load(&s_modem.ppp_connected); i++) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    if (!s_modem.ppp_connected) {
+    if (!atomic_load(&s_modem.ppp_connected)) {
         ESP_LOGW(TAG, "start_ppp: timed out waiting for IP address");
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
+        a7682e_lifecycle_finish_operation();
         return ESP_ERR_TIMEOUT;
     }
 
     ESP_LOGI(TAG, "start_ppp: PPP up — TCP/IP stack routed through 4G");
+    a7682e_lifecycle_finish_operation();
     return ESP_OK;
 }
 
-esp_err_t drv_a7682e_stop_ppp(void)
+static esp_err_t stop_ppp_locked(void)
 {
     if (!s_modem.dce) {
         return ESP_ERR_INVALID_STATE;
@@ -457,13 +547,28 @@ esp_err_t drv_a7682e_stop_ppp(void)
 
     ESP_LOGI(TAG, "stop_ppp: returning to AT command mode");
     esp_err_t ret = esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
-    s_modem.ppp_connected = false;
+    atomic_store(&s_modem.ppp_connected, false);
+    return ret;
+}
+
+esp_err_t drv_a7682e_stop_ppp(void)
+{
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = stop_ppp_locked();
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
 bool drv_a7682e_ppp_connected(void)
 {
-    return s_modem.ppp_connected;
+    if (!a7682e_lifecycle_begin_operation()) {
+        return false;
+    }
+    bool connected = atomic_load(&s_modem.ppp_connected);
+    a7682e_lifecycle_finish_operation();
+    return connected;
 }
 
 /* =========================================================================
@@ -506,12 +611,16 @@ esp_err_t drv_a7682e_http_get(const char *url, char *buf, size_t buf_len)
 
 esp_err_t drv_a7682e_sms_init(void)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_modem.dce || !s_modem.powered_on) {
         ESP_LOGE(TAG, "sms_init: modem not powered on");
+        a7682e_lifecycle_finish_operation();
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool ppp_was_active = s_modem.ppp_connected;
+    bool ppp_was_active = atomic_load(&s_modem.ppp_connected);
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
     }
@@ -547,6 +656,7 @@ restore:
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
     }
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
@@ -557,12 +667,16 @@ esp_err_t drv_a7682e_send_sms(const char *phone, const char *msg)
         ESP_LOGE(TAG, "send_sms: rejected unsafe recipient or message text");
         return ESP_ERR_INVALID_ARG;
     }
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_modem.dce || !s_modem.powered_on) {
         ESP_LOGE(TAG, "send_sms: modem not powered on");
+        a7682e_lifecycle_finish_operation();
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool ppp_was_active = s_modem.ppp_connected;
+    bool ppp_was_active = atomic_load(&s_modem.ppp_connected);
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
     }
@@ -590,18 +704,23 @@ restore:
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
     }
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
 esp_err_t drv_a7682e_read_sms(int index, char *sender, size_t sender_len,
                                char *body, size_t body_len)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_modem.dce || !s_modem.powered_on) {
         ESP_LOGE(TAG, "read_sms: modem not powered on");
+        a7682e_lifecycle_finish_operation();
         return ESP_ERR_INVALID_STATE;
     }
 
-    bool ppp_was_active = s_modem.ppp_connected;
+    bool ppp_was_active = atomic_load(&s_modem.ppp_connected);
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_COMMAND);
     }
@@ -679,13 +798,18 @@ restore:
     if (ppp_was_active) {
         esp_modem_set_mode(s_modem.dce, ESP_MODEM_MODE_DATA);
     }
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
 esp_err_t drv_a7682e_delete_sms(int index)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!s_modem.dce || !s_modem.powered_on) {
         ESP_LOGE(TAG, "delete_sms: modem not powered on");
+        a7682e_lifecycle_finish_operation();
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -700,11 +824,15 @@ esp_err_t drv_a7682e_delete_sms(int index)
     } else {
         ESP_LOGD(TAG, "delete_sms: index %d deleted", index);
     }
+    a7682e_lifecycle_finish_operation();
     return ret;
 }
 
 void drv_a7682e_register_sms_cb(a7682e_sms_cb_t cb, void *user_data)
 {
+    if (!a7682e_lifecycle_begin_operation()) {
+        return;
+    }
     s_modem.sms_cb      = cb;
     s_modem.sms_cb_data = user_data;
     if (cb) {
@@ -714,4 +842,5 @@ void drv_a7682e_register_sms_cb(a7682e_sms_cb_t cb, void *user_data)
     }
     ESP_LOGD(TAG, "register_sms_cb: callback %s",
              cb ? "registered" : "unregistered");
+    a7682e_lifecycle_finish_operation();
 }
