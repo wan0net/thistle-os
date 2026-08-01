@@ -61,8 +61,9 @@ class TargetMatrixTests(unittest.TestCase):
     def test_pinned_elf_loader_adapter_keeps_c3_in_supported_scope(self):
         adapter = Path("components/elf_loader/CMakeLists.txt").read_text()
         kconfig = Path("components/elf_loader/Kconfig").read_text()
-        self.assertIn("EXPECTED_HASH", adapter)
-        self.assertIn("ESP_ELF_LOADER_SHA256", adapter)
+        self.assertIn("vendor/elf_loader", adapter)
+        self.assertNotIn("file(DOWNLOAD", adapter)
+        self.assertTrue(Path("components/elf_loader/vendor/elf_loader/license.txt").is_file())
         self.assertIn("IDF_TARGET_ESP32C3", kconfig)
 
     def test_legacy_s3_board_components_are_not_built_for_other_targets(self):

@@ -3,32 +3,7 @@
 # generic RISC-V backend is architecture-compatible. Keep this dependency
 # pinned and isolated so it can be removed with the planned Rust loader.
 
-set(ESP_ELF_LOADER_COMMIT "a7a883a2c71b2cdb553565550a203efbd24fbdc0")
-set(ESP_ELF_LOADER_SHA256 "239801baceefdec38c30dd2dd56ad2817dcdb58d07b92b4cfc41a2e90be564bf")
-set(ESP_ELF_LOADER_CACHE "${CMAKE_BINARY_DIR}/_deps/esp-elf-loader-${ESP_ELF_LOADER_COMMIT}.tar.gz")
-set(ESP_ELF_LOADER_SOURCE "${CMAKE_BINARY_DIR}/_deps/esp-iot-solution-${ESP_ELF_LOADER_COMMIT}")
-
-if(NOT EXISTS "${ESP_ELF_LOADER_SOURCE}/components/elf_loader/CMakeLists.txt")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
-    file(DOWNLOAD
-        "https://github.com/espressif/esp-iot-solution/archive/${ESP_ELF_LOADER_COMMIT}.tar.gz"
-        "${ESP_ELF_LOADER_CACHE}"
-        EXPECTED_HASH "SHA256=${ESP_ELF_LOADER_SHA256}"
-        TLS_VERIFY ON
-        STATUS ESP_ELF_LOADER_DOWNLOAD_STATUS
-    )
-    list(GET ESP_ELF_LOADER_DOWNLOAD_STATUS 0 ESP_ELF_LOADER_DOWNLOAD_CODE)
-    if(NOT ESP_ELF_LOADER_DOWNLOAD_CODE EQUAL 0)
-        list(GET ESP_ELF_LOADER_DOWNLOAD_STATUS 1 ESP_ELF_LOADER_DOWNLOAD_ERROR)
-        message(FATAL_ERROR "Could not download pinned ELF loader: ${ESP_ELF_LOADER_DOWNLOAD_ERROR}")
-    endif()
-    file(ARCHIVE_EXTRACT
-        INPUT "${ESP_ELF_LOADER_CACHE}"
-        DESTINATION "${CMAKE_BINARY_DIR}/_deps"
-    )
-endif()
-
-set(ELF_LOADER_DIR "${ESP_ELF_LOADER_SOURCE}/components/elf_loader")
+set(ELF_LOADER_DIR "${CMAKE_CURRENT_LIST_DIR}/vendor/elf_loader")
 set(ELF_LOADER_SRCS
     "${ELF_LOADER_DIR}/src/esp_elf_symbol.c"
     "${ELF_LOADER_DIR}/src/esp_elf.c"
@@ -61,5 +36,5 @@ idf_component_register(
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     ELF_LOADER_VER_MAJOR=1
     ELF_LOADER_VER_MINOR=3
-    ELF_LOADER_VER_PATCH=2
+    ELF_LOADER_VER_PATCH=1
 )

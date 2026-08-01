@@ -1,6 +1,8 @@
-The source downloaded and compiled by this adapter is Espressif's ELF loader,
-licensed under the Apache License 2.0. Its canonical license is available at:
+The source vendored and compiled by this adapter is Espressif ELF loader 1.3.1
+at commit a7a883a2c71b2cdb553565550a203efbd24fbdc0, licensed under the Apache
+License 2.0. The complete upstream license is retained at:
 
-https://github.com/espressif/esp-iot-solution/blob/a7a883a2c71b2cdb553565550a203efbd24fbdc0/components/elf_loader/license.txt
+vendor/elf_loader/license.txt
 
-The dependency is pinned by commit and archive SHA-256 in CMakeLists.txt.
+Canonical source:
+https://github.com/espressif/esp-iot-solution/tree/a7a883a2c71b2cdb553565550a203efbd24fbdc0/components/elf_loader

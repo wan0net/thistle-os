@@ -30,7 +30,9 @@
 #include <stdbool.h>
 
 #include "driver/uart.h"
+#ifdef ESP_PLATFORM
 #include "soc/soc_caps.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -445,7 +447,7 @@ esp_err_t terminal_ui_create(lv_obj_t *parent)
 
     memset(&s_term, 0, sizeof(s_term));
     s_term.mode       = TERM_MODE_LOCAL;
-#if SOC_UART_NUM > 2
+#if !defined(ESP_PLATFORM) || SOC_UART_NUM > 2
     s_term.uart_num   = UART_NUM_2;
 #else
     s_term.uart_num   = UART_NUM_1;
