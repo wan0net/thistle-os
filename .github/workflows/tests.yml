@@ -121,6 +121,13 @@ jobs:
           ! grep -q "AuthMethod::None" recovery/src/main.rs
           test "$(grep -c "authFetch('/api/" recovery/src/recovery_web.rs)" -eq 7
 
+      - name: Test canonical signed artifact manifests
+        run: |
+          rustc --edition=2021 --test recovery/src/artifact_manifest.rs \
+            -o /tmp/test_artifact_manifest
+          /tmp/test_artifact_manifest
+          grep -q "manifest_url" recovery/src/recovery_ota.rs
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

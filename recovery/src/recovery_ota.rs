@@ -10,9 +10,10 @@ use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::artifact_manifest::{ArtifactManifest, ArtifactType};
 use crate::bounded_io;
 use crate::bundle_transaction::{self, Boundary, BundleFile, RecoveryAction};
-use crate::catalog_path::{catalog_destination, validate_catalog_id};
+use crate::catalog_path::validate_catalog_id;
 
 // ---------------------------------------------------------------------------
 // Chip detection
@@ -89,6 +90,7 @@ const MAX_CATALOG_SIZE: usize = 256 * 1024;
 const MAX_BOARD_PROFILE_SIZE: usize = 64 * 1024;
 const MAX_EXECUTABLE_SIZE: usize = 2 * 1024 * 1024;
 const MAX_SIGNATURE_SIZE: usize = 64;
+const MAX_ARTIFACT_MANIFEST_SIZE: usize = 4096;
 const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
 
 #[cfg(not(debug_assertions))]
@@ -1201,6 +1203,92 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
     recovery_download_board_bundle_for(catalog_url, &board_name)
 }
 
+struct VerifiedManifest {
+    manifest: ArtifactManifest,
+    canonical: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+fn fetch_verified_manifests(catalog_json: &str) -> anyhow::Result<Vec<VerifiedManifest>> {
+    let mut manifests = Vec::new();
+    for obj in iter_json_objects(catalog_json) {
+        let Some(legacy_type) = json_extract_string(obj, "type") else {
+            continue;
+        };
+        if !matches!(legacy_type.as_str(), "firmware" | "board" | "driver" | "wm") {
+            continue;
+        }
+        let manifest_url = json_extract_string(obj, "manifest_url").ok_or_else(|| {
+            anyhow::anyhow!("Catalog {} entry is missing manifest_url", legacy_type)
+        })?;
+        let signature_url = json_extract_string(obj, "manifest_sig_url").ok_or_else(|| {
+            anyhow::anyhow!("Catalog {} entry is missing manifest_sig_url", legacy_type)
+        })?;
+        let canonical = http_get_bytes(&manifest_url, MAX_ARTIFACT_MANIFEST_SIZE)?;
+        let signature = http_get_bytes(&signature_url, MAX_SIGNATURE_SIZE)?;
+        let mut reader = std::io::Cursor::new(&canonical);
+        verify_ed25519_reader(&mut reader, &signature)?;
+        let text = std::str::from_utf8(&canonical)
+            .map_err(|_| anyhow::anyhow!("Signed artifact manifest is not UTF-8"))?;
+        let manifest = ArtifactManifest::parse(text).map_err(anyhow::Error::msg)?;
+
+        if manifest.artifact_type.as_str() != legacy_type {
+            anyhow::bail!(
+                "Catalog type '{}' disagrees with signed type '{}'",
+                legacy_type,
+                manifest.artifact_type.as_str()
+            );
+        }
+        if let Some(legacy_id) = json_extract_string(obj, "id") {
+            if legacy_id != manifest.id {
+                anyhow::bail!(
+                    "Catalog id '{}' disagrees with signed id '{}'",
+                    legacy_id,
+                    manifest.id
+                );
+            }
+        }
+        manifests.push(VerifiedManifest {
+            manifest,
+            canonical,
+            signature,
+        });
+    }
+    Ok(manifests)
+}
+
+fn artifact_size_limit(artifact_type: ArtifactType) -> usize {
+    match artifact_type {
+        ArtifactType::Firmware => MAX_FIRMWARE_SIZE,
+        ArtifactType::Board => MAX_BOARD_PROFILE_SIZE,
+        ArtifactType::Driver | ArtifactType::WindowManager => MAX_EXECUTABLE_SIZE,
+    }
+}
+
+fn download_verified_payload(
+    artifact: &ArtifactManifest,
+    destination: &Path,
+) -> anyhow::Result<()> {
+    let limit = artifact_size_limit(artifact.artifact_type);
+    if artifact.size > limit {
+        anyhow::bail!(
+            "Signed {} artifact '{}' exceeds its {} byte limit",
+            artifact.artifact_type.as_str(),
+            artifact.id,
+            limit
+        );
+    }
+    let written = http_get_to_file(&artifact.url, artifact.size, destination)?;
+    if written != artifact.size {
+        anyhow::bail!(
+            "Signed artifact size mismatch: expected {}, received {}",
+            artifact.size,
+            written
+        );
+    }
+    verify_sha256_file(destination, &artifact.sha256)
+}
+
 /// Download all drivers, board config, WM entries, and the firmware image that are
 /// compatible with `board_name`.
 ///
@@ -1229,42 +1317,47 @@ pub fn recovery_download_board_bundle_for(
     info!("Fetching catalog: {}", catalog_url);
     let catalog_json = http_get_string(catalog_url, MAX_CATALOG_SIZE)?;
 
-    // Detect the running chip once so arch filtering can be applied to every entry.
     let chip = detect_chip();
-    info!("Filtering catalog for chip: {}", chip);
-
-    // Closure: decide whether a catalog entry JSON object should be downloaded.
-    // The selected board config is authoritative; hardware probes are optional
-    // presentation hints and are not used for install decisions.
-    let entry_should_download = |obj: &str| -> bool {
-        // Arch check first — skip entries targeting a different chip entirely.
-        if !catalog_entry_arch_matches(obj, chip) {
-            return false;
+    info!("Verifying signed manifests for chip: {}", chip);
+    let verified_manifests = fetch_verified_manifests(&catalog_json)?;
+    let mut selected = Vec::new();
+    for artifact in verified_manifests {
+        if artifact.manifest.arch != chip
+            || !artifact
+                .manifest
+                .compatible_boards
+                .iter()
+                .any(|candidate| candidate == board_name)
+            || (artifact.manifest.artifact_type == ArtifactType::Board
+                && artifact.manifest.id != board_name)
+        {
+            continue;
         }
+        artifact
+            .manifest
+            .validate_for_device(chip, board_name, 1)
+            .map_err(anyhow::Error::msg)?;
+        selected.push(artifact);
+    }
 
-        let entry_type = json_extract_string(obj, "type").unwrap_or_default();
-        match entry_type.as_str() {
-            "driver" | "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
-            "board" => {
-                let id = json_extract_string(obj, "board_id")
-                    .or_else(|| json_extract_string(obj, "id"))
-                    .unwrap_or_default();
-                id == board_name
-            }
-            _ => false,
-        }
-    };
-
-    // First pass: count compatible entries so we can report accurate progress.
-    let total_entries: u32 = iter_json_objects(&catalog_json)
-        .filter(|obj| entry_should_download(obj))
-        .count() as u32;
-
-    if total_entries == 0 {
+    if selected.is_empty() {
         anyhow::bail!(
-            "Catalog has no compatible bundle entries for '{}'",
+            "Catalog has no signed compatible bundle entries for '{}'",
             board_name
         );
+    }
+
+    let total_entries = u32::try_from(selected.len())?;
+    let firmware_count = selected
+        .iter()
+        .filter(|artifact| artifact.manifest.artifact_type == ArtifactType::Firmware)
+        .count();
+    let board_count = selected
+        .iter()
+        .filter(|artifact| artifact.manifest.artifact_type == ArtifactType::Board)
+        .count();
+    if firmware_count != 1 || board_count != 1 {
+        anyhow::bail!("Signed bundle must contain exactly one firmware and one board profile");
     }
 
     let mut downloaded = 0u32;
@@ -1272,93 +1365,81 @@ pub fn recovery_download_board_bundle_for(
     let mut bundle_files = Vec::new();
     let mut firmware_path: Option<std::path::PathBuf> = None;
 
-    for obj in iter_json_objects(&catalog_json) {
-        if !entry_should_download(obj) {
-            continue;
+    let mut destinations = std::collections::BTreeSet::new();
+    for artifact in selected {
+        let manifest = &artifact.manifest;
+        if !destinations.insert(manifest.destination.clone()) {
+            anyhow::bail!(
+                "Signed bundle contains duplicate destination '{}'",
+                manifest.destination
+            );
         }
+        validate_catalog_id(&manifest.id).map_err(anyhow::Error::msg)?;
 
-        let entry_type = json_extract_string(obj, "type").unwrap_or_default();
-        let id = match json_extract_string(obj, "id") {
-            Some(v) => v,
-            None => anyhow::bail!("Compatible catalog entry is missing id"),
-        };
-        validate_catalog_id(&id).map_err(anyhow::Error::msg)?;
-        let url = match json_extract_string(obj, "url") {
-            Some(v) => v,
-            None => anyhow::bail!("Compatible catalog entry '{}' is missing url", id),
-        };
-        let sig_url = json_extract_string(obj, "sig_url");
-        let expected_sha = json_extract_string(obj, "sha256");
-        let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
-
-        let dest_path = match entry_type.as_str() {
-            "firmware" => Ok(std::path::PathBuf::new()),
-            "board" => catalog_destination(SD_BOARDS_DIR, &id, ".json"),
-            "driver" => catalog_destination(SD_DRIVERS_DIR, &id, ".drv.elf"),
-            "wm" => catalog_destination(SD_WM_DIR, &id, ".wm.elf"),
-            other => {
-                info!("Skipping '{}' (type={})", id, other);
-                continue;
-            }
-        }
-        .map_err(anyhow::Error::msg)?
-        .to_string_lossy()
-        .into_owned();
-
-        if entry_type == "firmware" {
-            let Some(expected_sha) = expected_sha.as_deref().filter(|s| !s.is_empty()) else {
-                anyhow::bail!("Firmware '{}' is missing sha256", name);
-            };
+        if manifest.artifact_type == ArtifactType::Firmware {
             if firmware_path.is_some() {
-                anyhow::bail!("Catalog contains multiple compatible firmware images");
+                anyhow::bail!("Signed bundle contains multiple firmware images");
             }
-            info!("Downloading and verifying firmware {}", name);
-            println!("  {} [firmware, staged on SD]", name);
+            info!("Downloading signed firmware {}", manifest.id);
+            println!("  {} [firmware, staged on SD]", manifest.id);
             let staged = download_stage.path(&format!("{}-firmware.bin", downloaded))?;
-            download_catalog_entry_to_file(
-                &url,
-                Some(expected_sha),
-                sig_url.as_deref(),
-                REQUIRE_EXECUTABLE_SIGNATURES,
-                MAX_FIRMWARE_SIZE,
-                &staged,
+            download_verified_payload(manifest, &staged)?;
+            let staged_manifest =
+                download_stage.write(&format!("{}-manifest", downloaded), &artifact.canonical)?;
+            let staged_signature = download_stage.write(
+                &format!("{}-manifest-signature", downloaded),
+                &artifact.signature,
             )?;
+            bundle_files.push(BundleFile::from_file(
+                "config/firmware.manifest",
+                staged_manifest,
+            )?);
+            bundle_files.push(BundleFile::from_file(
+                "config/firmware.manifest.sig",
+                staged_signature,
+            )?);
             firmware_path = Some(staged);
         } else {
-            info!("Downloading and verifying {} -> {}", name, dest_path);
-            println!("  {} [{}]", name, entry_type);
-            let require_signature =
-                matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
+            info!(
+                "Downloading signed {} -> {}",
+                manifest.id, manifest.destination
+            );
+            println!("  {} [{}]", manifest.id, manifest.artifact_type.as_str());
             let staged = download_stage.path(&format!("{}-payload", downloaded))?;
-            let max_size = if entry_type == "board" {
-                MAX_BOARD_PROFILE_SIZE
-            } else {
-                MAX_EXECUTABLE_SIZE
-            };
-            let signature = download_catalog_entry_to_file(
-                &url,
-                expected_sha.as_deref(),
-                sig_url.as_deref(),
-                require_signature,
-                max_size,
-                &staged,
-            )?;
-            let relative = sdcard_relative_path(&dest_path)?;
-            if entry_type == "board" {
+            download_verified_payload(manifest, &staged)?;
+            let relative = std::path::PathBuf::from(&manifest.destination);
+            if manifest.artifact_type == ArtifactType::Board {
                 bundle_files.push(BundleFile::from_file("config/board.json", &staged)?);
             }
             bundle_files.push(BundleFile::from_file(&relative, &staged)?);
-            if let Some(signature) = signature {
-                let signature_path = format!("{}.sig", relative.to_string_lossy());
-                let staged_signature =
-                    download_stage.write(&format!("{}-signature", downloaded), &signature)?;
-                bundle_files.push(BundleFile::from_file(signature_path, staged_signature)?);
-                info!("Signature downloaded for '{}'", name);
+            let staged_manifest =
+                download_stage.write(&format!("{}-manifest", downloaded), &artifact.canonical)?;
+            let staged_signature = download_stage.write(
+                &format!("{}-manifest-signature", downloaded),
+                &artifact.signature,
+            )?;
+            bundle_files.push(BundleFile::from_file(
+                format!("{}.manifest", relative.to_string_lossy()),
+                &staged_manifest,
+            )?);
+            bundle_files.push(BundleFile::from_file(
+                format!("{}.manifest.sig", relative.to_string_lossy()),
+                &staged_signature,
+            )?);
+            if manifest.artifact_type == ArtifactType::Board {
+                bundle_files.push(BundleFile::from_file(
+                    "config/board.json.manifest",
+                    staged_manifest,
+                )?);
+                bundle_files.push(BundleFile::from_file(
+                    "config/board.json.manifest.sig",
+                    staged_signature,
+                )?);
             }
         }
 
         downloaded += 1;
-        info!("Verified '{}'", name);
+        info!("Verified signed artifact '{}'", manifest.id);
 
         // Update progress
         if total_entries > 0 {
@@ -1491,32 +1572,26 @@ pub fn recovery_bundle_plan_json(catalog_url: &str, board_name: &str) -> anyhow:
     let chip = detect_chip();
     let mut entries: Vec<String> = Vec::new();
 
-    for obj in iter_json_objects(&catalog_json) {
-        if !catalog_entry_arch_matches(obj, chip) {
+    for artifact in fetch_verified_manifests(&catalog_json)? {
+        let manifest = artifact.manifest;
+        if manifest.arch != chip
+            || !manifest
+                .compatible_boards
+                .iter()
+                .any(|candidate| candidate == board_name)
+            || (manifest.artifact_type == ArtifactType::Board && manifest.id != board_name)
+        {
             continue;
         }
-
-        let entry_type = json_extract_string(obj, "type").unwrap_or_default();
-        let matches = match entry_type.as_str() {
-            "driver" | "firmware" | "wm" => catalog_entry_board_matches(obj, board_name),
-            "board" => {
-                let id = json_extract_string(obj, "board_id")
-                    .or_else(|| json_extract_string(obj, "id"))
-                    .unwrap_or_default();
-                id == board_name
-            }
-            _ => false,
-        };
-
-        if !matches {
-            continue;
-        }
-
-        let id = json_extract_string(obj, "id").unwrap_or_default();
-        let name = json_extract_string(obj, "name").unwrap_or_else(|| id.clone());
+        manifest
+            .validate_for_device(chip, board_name, 1)
+            .map_err(anyhow::Error::msg)?;
         entries.push(format!(
-            r#"{{"id":"{}","type":"{}","name":"{}"}}"#,
-            id, entry_type, name
+            r#"{{"id":"{}","type":"{}","version":"{}","destination":"{}"}}"#,
+            manifest.id,
+            manifest.artifact_type.as_str(),
+            manifest.version,
+            manifest.destination,
         ));
     }
 

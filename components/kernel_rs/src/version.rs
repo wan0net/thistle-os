@@ -5,6 +5,9 @@ pub const VERSION_MAJOR: u32 = 0;
 pub const VERSION_MINOR: u32 = 5;
 pub const VERSION_PATCH: u32 = 0;
 pub const VERSION_STRING: &str = "0.5.0";
+/// Monotonic signed-release counter. Never decrease or reuse this value for a
+/// release that contains different firmware bytes.
+pub const SECURITY_VERSION: u32 = 500;
 
 /// Compare a semver requirement string against the running kernel version.
 /// Returns true if the requirement is satisfied (req <= current).
@@ -54,5 +57,10 @@ mod tests {
     fn test_satisfies_empty() {
         // An empty requirement string parses as 0.0.0 — always satisfied
         assert!(satisfies(""));
+    }
+
+    #[test]
+    fn security_version_is_nonzero() {
+        assert!(SECURITY_VERSION > 0);
     }
 }

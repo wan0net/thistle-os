@@ -22,6 +22,7 @@ use esp_idf_svc::wifi::{
 
 use log::*;
 
+mod artifact_manifest;
 mod bounded_io;
 mod bundle_transaction;
 mod catalog_path;

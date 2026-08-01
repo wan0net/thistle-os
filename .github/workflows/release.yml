@@ -66,10 +66,19 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          manifest="release-artifacts/thistle-os-firmware/thistle_os.bin.manifest"
+          manifest_version="$(sed -n 's/^version=//p' "$manifest")"
+          if [ "$RELEASE_TAG" != "v$manifest_version" ]; then
+            echo "ERROR: release tag $RELEASE_TAG does not match signed manifest version $manifest_version" >&2
+            exit 1
+          fi
           mkdir -p dist
           cp release-artifacts/thistle-os-firmware/thistle_os.bin "dist/thistle_os-${RELEASE_TAG}.bin"
           cp release-artifacts/thistle-os-firmware/thistle_os.bin.sig "dist/thistle_os-${RELEASE_TAG}.bin.sig"
+          cp release-artifacts/thistle-os-firmware/thistle_os.bin.manifest "dist/thistle_os-${RELEASE_TAG}.bin.manifest"
+          cp release-artifacts/thistle-os-firmware/thistle_os.bin.manifest.sig "dist/thistle_os-${RELEASE_TAG}.bin.manifest.sig"
           cp release-artifacts/thistle-os-firmware/thistle_os.bin.pub "dist/thistle_os-${RELEASE_TAG}.bin.pub"
+          cp release-artifacts/thistle-os-firmware/signed-board-profiles/* dist/
           cp release-artifacts/thistle-recovery/thistle-recovery "dist/thistle-recovery-${RELEASE_TAG}"
           cd dist
           sha256sum * > SHA256SUMS
