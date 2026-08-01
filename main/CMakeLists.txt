@@ -1,4 +1,4 @@
-set(thistle_main_requires kernel thistle_hal ui apps_builtin)
+set(thistle_main_requires kernel thistle_hal)
 
 if(CONFIG_THISTLE_RUN_TESTS)
     list(APPEND thistle_main_requires unity test_thistle)
@@ -9,7 +9,8 @@ endif()
 # from SPIFFS/SD, keeping generic non-PSRAM firmware within internal DRAM.
 if(IDF_TARGET STREQUAL "esp32s3")
     list(APPEND thistle_main_requires
-        notes reader vault file_manager wifiscanner navigator flashlight weather appstore
+        ui apps_builtin notes reader vault file_manager wifiscanner navigator
+        flashlight weather appstore
     )
 endif()
 

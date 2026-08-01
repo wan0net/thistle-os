@@ -93,6 +93,11 @@ class TargetMatrixTests(unittest.TestCase):
         main_source = Path("main/main.c").read_text()
         self.assertIn('IDF_TARGET STREQUAL "esp32s3"', main_cmake)
         self.assertIn("THISTLE_LEGACY_C_APPS", main_source)
+        self.assertIn("set(thistle_main_requires kernel thistle_hal)", main_cmake)
+        self.assertNotIn(
+            "set(thistle_main_requires kernel thistle_hal ui apps_builtin)",
+            main_cmake,
+        )
 
     def test_file_manager_joins_paths_with_explicit_bounds(self):
         source = Path("apps/file_manager/file_manager/filemgr_ui.c").read_text()
@@ -104,6 +109,10 @@ class TargetMatrixTests(unittest.TestCase):
         self.assertIn("DRAW_BUF_LINES", source)
         self.assertIn("heap_caps_malloc", source)
         self.assertNotIn("s_draw_buf1[MAX_DISPLAY_WIDTH", source)
+
+    def test_meshcore_compatibility_warning_is_scoped_to_vendor_component(self):
+        cmake = Path("components/meshcore/CMakeLists.txt").read_text()
+        self.assertIn("-Wno-class-memaccess", cmake)
 
 
 if __name__ == "__main__":

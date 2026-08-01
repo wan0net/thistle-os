@@ -17,11 +17,11 @@
 /* board_config.h not needed — WM selected by display capability */
 #include "hal/board.h"
 #include "hal/input.h"
+#ifdef THISTLE_LEGACY_C_APPS
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
 #include "ui/toast.h"
 #include "launcher/launcher_app.h"
-#ifdef THISTLE_LEGACY_C_APPS
 #include "settings/settings_app.h"
 #include "file_manager/filemgr_app.h"
 #include "reader/reader_app.h"
@@ -36,6 +36,8 @@
 #include "terminal/terminal_app.h"
 #include "vault/vault_app.h"
 #endif
+
+extern const display_server_wm_t *thistle_tk_wm_get(void);
 
 #ifdef CONFIG_THISTLE_RUN_TESTS
 #include "unity.h"
@@ -105,6 +107,7 @@ static void tk_render_task(void *arg)
     }
 }
 
+#ifdef THISTLE_LEGACY_C_APPS
 static void system_event_toast(const event_t *event, void *user_data)
 {
     (void)user_data;
@@ -128,6 +131,7 @@ static void system_event_toast(const event_t *event, void *user_data)
             break;
     }
 }
+#endif
 
 void app_main(void)
 {
@@ -145,17 +149,18 @@ void app_main(void)
         return;
     }
 
-    /* Initialize display server and register the LVGL window manager */
+    /* Initialize the display server before selecting a window manager. */
     ret = display_server_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "display_server_init failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    /* Select WM variant based on display type.
-     * E-paper: thistle-tk (pure Rust, embedded-graphics)
-     * LCD: LVGL (existing C apps) */
-    bool use_tk_wm = false;
+    /* Non-S3 targets now use the Rust WM and signed ELF apps exclusively.
+     * S3 keeps the LVGL/C app bridge while that final migration is completed. */
+    bool use_tk_wm = true;
+#ifdef THISTLE_LEGACY_C_APPS
+    use_tk_wm = false;
     {
         const hal_registry_t *reg = hal_get_registry();
         if (reg && reg->display && reg->display->refresh) {
@@ -166,23 +171,28 @@ void app_main(void)
             ret = display_server_register_wm(lvgl_lcd_wm_get());
         }
     }
+#else
+    ret = display_server_register_wm(thistle_tk_wm_get());
+#endif
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register window manager: %s", esp_err_to_name(ret));
         return;
     }
 
-    /* Subscribe to system events that warrant user-visible toasts */
+#ifdef THISTLE_LEGACY_C_APPS
+    /* Subscribe to system events that warrant user-visible toasts. */
     event_subscribe(EVENT_WIFI_CONNECTED,    system_event_toast, NULL);
     event_subscribe(EVENT_WIFI_DISCONNECTED, system_event_toast, NULL);
     event_subscribe(EVENT_SD_MOUNTED,        system_event_toast, NULL);
     event_subscribe(EVENT_SD_UNMOUNTED,      system_event_toast, NULL);
     event_subscribe(EVENT_BATTERY_LOW,       system_event_toast, NULL);
+#endif
 
+#ifdef THISTLE_LEGACY_C_APPS
     if (!use_tk_wm) {
         /* Register LVGL-based built-in apps (they depend on LVGL and would
          * crash under the thistle-tk WM) */
         launcher_app_register();
-#ifdef THISTLE_LEGACY_C_APPS
         settings_app_register();
         filemgr_app_register();
         reader_app_register();
@@ -196,8 +206,8 @@ void app_main(void)
         weather_app_register();
         terminal_app_register();
         vault_app_register();
-#endif
     }
+#endif
 
     /* Scan SPIFFS and SD card for standalone .app.elf files.
      * This function is #[no_mangle] in Rust (elf_loader.rs). */
@@ -205,8 +215,8 @@ void app_main(void)
 
     /* Grant full permissions to built-in apps */
     permissions_grant("com.thistle.tk_launcher", PERM_ALL);
-    permissions_grant("com.thistle.launcher",   PERM_ALL);
 #ifdef THISTLE_LEGACY_C_APPS
+    permissions_grant("com.thistle.launcher",   PERM_ALL);
     permissions_grant("com.thistle.settings",   PERM_ALL);
     permissions_grant("com.thistle.filemgr",    PERM_ALL);
     permissions_grant("com.thistle.reader",     PERM_ALL);
@@ -250,6 +260,7 @@ void app_main(void)
             ESP_LOGE(TAG, "tk_render: xTaskCreate failed (%d)", task_ret);
             return;
         }
+#ifdef THISTLE_LEGACY_C_APPS
     } else {
         ret = app_manager_launch("com.thistle.launcher");
         if (ret != ESP_OK) {
@@ -266,12 +277,15 @@ void app_main(void)
                      esp_err_to_name(ret));
             return;
         }
+#endif
     }
 
     /* Check for SD card firmware update */
     if (ota_sd_update_available()) {
         ESP_LOGI(TAG, "Firmware update detected on SD card!");
+#ifdef THISTLE_LEGACY_C_APPS
         toast_show("Update available! Settings > About to install", TOAST_INFO, 5000);
+#endif
     }
 
     /* Keep a newly flashed image rollback-eligible until all required boot
