@@ -278,6 +278,13 @@ void app_main(void)
                  esp_err_to_name(ret));
         return;
     }
+    ret = ota_finalize_bundle_transaction();
+    if (ret != ESP_OK) {
+        /* The image is already valid. Recovery will safely retry finalization
+         * if the SD card was temporarily unavailable at this milestone. */
+        ESP_LOGW(TAG, "Could not finalize recovery bundle transaction: %s",
+                 esp_err_to_name(ret));
+    }
 
     ESP_LOGI(TAG, "ThistleOS ready");
 

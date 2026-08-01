@@ -37,5 +37,8 @@ const char *ota_get_running_partition(void);
  * Idempotent: once confirmed, later calls do not invoke the OTA API again. */
 esp_err_t ota_mark_valid(void);
 
+/* Remove the recovery bundle journal and backups after ota_mark_valid(). */
+esp_err_t ota_finalize_bundle_transaction(void);
+
 /* Rollback to previous firmware */
 esp_err_t ota_rollback(void);

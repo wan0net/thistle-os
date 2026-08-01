@@ -7,6 +7,7 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
+use std::path::Path;
 use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,8 @@ const ESP_ERR_INVALID_CRC: i32 = 0x109;
 
 const OTA_BUF_SIZE: usize = 4096;
 const OTA_SD_UPDATE_PATH: &str = "/sdcard/update/thistle_os.bin\0";
+const BUNDLE_TRANSACTION_PATH: &str = "/sdcard/.thistle-bundle-transaction";
+const BUNDLE_DOWNLOAD_PATH: &str = "/sdcard/.thistle-bundle-download";
 const MAX_OTA_SIZE: u64 = 16 * 1024 * 1024; // 16 MB
 
 static TAG: &[u8] = b"ota\0";
@@ -36,8 +39,8 @@ extern "C" {
     fn signing_verify_file(path: *const c_char) -> i32;
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
@@ -228,11 +231,19 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     };
 
     if file_size == 0 {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Update file is empty\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"Update file is empty\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_SIZE;
     }
     if file_size > MAX_OTA_SIZE {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"OTA file too large\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"OTA file too large\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -247,14 +258,23 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     {
         let update_partition = esp_ota_get_next_update_partition(std::ptr::null());
         if update_partition.is_null() {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"No OTA partition available\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"No OTA partition available\0".as_ptr(),
+            );
             return ESP_ERR_NOT_FOUND;
         }
 
         let mut ota_handle: u32 = 0;
         let ret = esp_ota_begin(update_partition, file_size as usize, &mut ota_handle);
         if ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_begin failed: %d\0".as_ptr(), ret);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_ota_begin failed: %d\0".as_ptr(),
+                ret,
+            );
             return ret;
         }
 
@@ -263,7 +283,9 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
         loop {
             let to_read = OTA_BUF_SIZE.min((file_size - written as u64) as usize);
-            if to_read == 0 { break; }
+            if to_read == 0 {
+                break;
+            }
 
             let nread = match file.read(&mut buf[..to_read]) {
                 Ok(0) => break,
@@ -277,7 +299,12 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
             let ret = esp_ota_write(ota_handle, buf.as_ptr(), nread);
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_write failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"esp_ota_write failed: %d\0".as_ptr(),
+                    ret,
+                );
                 esp_ota_abort(ota_handle);
                 return ret;
             }
@@ -291,7 +318,12 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
         let ret = esp_ota_end(ota_handle);
         if ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_end failed: %d\0".as_ptr(), ret);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_ota_end failed: %d\0".as_ptr(),
+                ret,
+            );
             return ret;
         }
 
@@ -388,14 +420,32 @@ pub extern "C" fn ota_mark_valid() -> i32 {
     {
         return match BOOT_VALIDATION_STATE.lock() {
             Ok(mut state) => {
-                state.mark_valid_once_with(|| unsafe {
-                    esp_ota_mark_app_valid_cancel_rollback()
-                })
+                state.mark_valid_once_with(|| unsafe { esp_ota_mark_app_valid_cancel_rollback() })
             }
             Err(_) => ESP_FAIL,
         };
     }
     #[cfg(not(target_os = "espidf"))]
+    ESP_OK
+}
+
+fn finalize_bundle_transaction_at(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Remove rollback files only after the matching OTA image is healthy and valid.
+/// Recovery can also finalize this journal on a later boot if SD cleanup fails.
+#[no_mangle]
+pub extern "C" fn ota_finalize_bundle_transaction() -> i32 {
+    for path in [BUNDLE_TRANSACTION_PATH, BUNDLE_DOWNLOAD_PATH] {
+        if finalize_bundle_transaction_at(Path::new(path)).is_err() {
+            return ESP_FAIL;
+        }
+    }
     ESP_OK
 }
 
@@ -501,7 +551,10 @@ mod tests {
     #[test]
     fn test_get_current_version_non_null() {
         let ptr = ota_get_current_version();
-        assert!(!ptr.is_null(), "ota_get_current_version() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "ota_get_current_version() must not return NULL"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -526,7 +579,10 @@ mod tests {
         // In the test environment there is no SD card, so the update path
         // /sdcard/update/thistle_os.bin does not exist.
         let available = ota_sd_update_available();
-        assert!(!available, "ota_sd_update_available() must return false when no SD card");
+        assert!(
+            !available,
+            "ota_sd_update_available() must return false when no SD card"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -540,6 +596,19 @@ mod tests {
         assert_eq!(rc, ESP_OK, "ota_mark_valid() must return ESP_OK on host");
     }
 
+    #[test]
+    fn test_bundle_transaction_cleanup_is_idempotent() {
+        let root =
+            std::env::temp_dir().join(format!("thistle-ota-finalize-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("backup")).unwrap();
+        std::fs::write(root.join("journal"), b"transaction").unwrap();
+
+        finalize_bundle_transaction_at(&root).unwrap();
+        assert!(!root.exists());
+        finalize_bundle_transaction_at(&root).unwrap();
+    }
+
     // -----------------------------------------------------------------------
     // test_get_running_partition_non_null
     // ota_get_running_partition() returns "unknown" on host builds.
@@ -548,7 +617,10 @@ mod tests {
     #[test]
     fn test_get_running_partition_non_null() {
         let ptr = ota_get_running_partition();
-        assert!(!ptr.is_null(), "ota_get_running_partition() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "ota_get_running_partition() must not return NULL"
+        );
         let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
         assert_eq!(s, "unknown", "partition must be \"unknown\" on host builds");
     }

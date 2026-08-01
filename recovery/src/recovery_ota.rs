@@ -5,8 +5,11 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_sys::*;
 use log::*;
+use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use crate::bundle_transaction::{self, Boundary, BundleFile, RecoveryAction};
 use crate::catalog_path::{catalog_destination, validate_catalog_id};
 
 // ---------------------------------------------------------------------------
@@ -78,6 +81,7 @@ pub fn catalog_entry_arch_matches(obj: &str, chip: &str) -> bool {
 }
 
 const SD_FIRMWARE_PATH: &str = "/sdcard/update/thistle_os.bin";
+const BUNDLE_DOWNLOAD_DIR: &str = "/sdcard/.thistle-bundle-download";
 const MAX_FIRMWARE_SIZE: usize = 4 * 1024 * 1024; // 4MB
 const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
 
@@ -200,8 +204,8 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Write firmware data to the ota_1 partition
-fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
+/// Write firmware data to the inactive OTA partition without selecting it.
+fn write_ota1(data: &[u8]) -> anyhow::Result<()> {
     unsafe {
         let part = esp_ota_get_next_update_partition(std::ptr::null());
         if part.is_null() {
@@ -245,14 +249,32 @@ fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
             anyhow::bail!("esp_ota_end failed: {}", ret);
         }
 
+        info!("OTA flash complete; boot partition remains unchanged");
+        Ok(())
+    }
+}
+
+/// Select the already-written OTA partition. Bundle installs call this only
+/// after the complete filesystem generation is active and recoverable.
+fn select_ota1_for_boot() -> anyhow::Result<()> {
+    unsafe {
+        let part = esp_ota_get_next_update_partition(std::ptr::null());
+        if part.is_null() {
+            anyhow::bail!("No OTA update partition");
+        }
         let ret = esp_ota_set_boot_partition(part);
         if ret != ESP_OK as i32 {
             anyhow::bail!("esp_ota_set_boot_partition failed: {}", ret);
         }
-
-        info!("OTA flash complete, boot partition set");
+        info!("OTA boot partition selected");
         Ok(())
     }
+}
+
+/// Write and select firmware for single-image update workflows.
+fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
+    write_ota1(data)?;
+    select_ota1_for_boot()
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,15 +1188,9 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 ///   - board entries: matched by `id`/`board_id`.
 ///   - all entries: filtered by detected chip `arch` when present.
 ///
-/// Steps:
-/// 1. Fetch catalog JSON from `catalog_url`.
-/// 2. Count compatible entries to compute per-item progress increments.
-/// 3. For each compatible catalog entry:
-///    - firmware → verified and flashed directly to ota_1
-///    - board    → /sdcard/config/boards/<id>.json and /sdcard/config/board.json
-///    - driver   → /sdcard/drivers/<id>.drv.elf
-///    - wm       → /sdcard/wm/<id>.wm.elf
-/// 4. Verify and store matching .sig files alongside non-firmware bundle files.
+/// All matching artifacts are downloaded and verified before any active file
+/// changes. Files are then staged as one journaled generation, firmware is
+/// written without changing the boot selector, and boot selection happens last.
 ///
 /// Returns the number of items successfully downloaded.
 pub fn recovery_download_board_bundle_for(
@@ -1220,8 +1236,17 @@ pub fn recovery_download_board_bundle_for(
         .filter(|obj| entry_should_download(obj))
         .count() as u32;
 
+    if total_entries == 0 {
+        anyhow::bail!(
+            "Catalog has no compatible bundle entries for '{}'",
+            board_name
+        );
+    }
+
     let mut downloaded = 0u32;
-    let mut errors = 0u32;
+    let download_stage = DownloadStage::new(Path::new(BUNDLE_DOWNLOAD_DIR))?;
+    let mut bundle_files = Vec::new();
+    let mut firmware_path: Option<std::path::PathBuf> = None;
 
     for obj in iter_json_objects(&catalog_json) {
         if !entry_should_download(obj) {
@@ -1231,12 +1256,12 @@ pub fn recovery_download_board_bundle_for(
         let entry_type = json_extract_string(obj, "type").unwrap_or_default();
         let id = match json_extract_string(obj, "id") {
             Some(v) => v,
-            None => continue,
+            None => anyhow::bail!("Compatible catalog entry is missing id"),
         };
         validate_catalog_id(&id).map_err(anyhow::Error::msg)?;
         let url = match json_extract_string(obj, "url") {
             Some(v) => v,
-            None => continue,
+            None => anyhow::bail!("Compatible catalog entry '{}' is missing url", id),
         };
         let sig_url = json_extract_string(obj, "sig_url");
         let expected_sha = json_extract_string(obj, "sha256");
@@ -1258,79 +1283,73 @@ pub fn recovery_download_board_bundle_for(
 
         if entry_type == "firmware" {
             let Some(expected_sha) = expected_sha.as_deref().filter(|s| !s.is_empty()) else {
-                error!("Firmware '{}' missing sha256 — skipping install", name);
-                errors += 1;
-                continue;
+                anyhow::bail!("Firmware '{}' is missing sha256", name);
             };
-            info!("Downloading firmware {} -> ota_1", name);
-            println!("  {} [firmware -> ota_1]", name);
-            match download_catalog_entry_bytes(
+            if firmware_path.is_some() {
+                anyhow::bail!("Catalog contains multiple compatible firmware images");
+            }
+            info!("Downloading and verifying firmware {}", name);
+            println!("  {} [firmware, staged in memory]", name);
+            let (data, _) = download_catalog_entry_bytes(
                 &url,
                 Some(expected_sha),
                 sig_url.as_deref(),
                 REQUIRE_EXECUTABLE_SIGNATURES,
-            )
-            .and_then(|(data, _)| flash_to_ota1(&data))
-            {
-                Ok(()) => {
-                    downloaded += 1;
-                    info!("Firmware '{}' flashed to ota_1", name);
-                    if total_entries > 0 {
-                        let pct = (downloaded * 100 / total_entries).min(99) as u8;
-                        BUNDLE_PROGRESS.store(pct, Ordering::Relaxed);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to flash firmware '{}': {}", name, e);
-                    errors += 1;
-                }
+            )?;
+            let staged = download_stage.write(&format!("{}-firmware.bin", downloaded), &data)?;
+            firmware_path = Some(staged);
+        } else {
+            info!("Downloading and verifying {} -> {}", name, dest_path);
+            println!("  {} [{}]", name, entry_type);
+            let require_signature =
+                matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
+            let (data, signature) = download_catalog_entry_bytes(
+                &url,
+                expected_sha.as_deref(),
+                sig_url.as_deref(),
+                require_signature,
+            )?;
+            let relative = sdcard_relative_path(&dest_path)?;
+            let staged = download_stage.write(&format!("{}-payload", downloaded), &data)?;
+            if entry_type == "board" {
+                bundle_files.push(BundleFile::from_file("config/board.json", &staged)?);
             }
-            continue;
-        }
-
-        info!("Downloading {} -> {}", name, dest_path);
-        println!("  {} [{}]", name, entry_type);
-
-        let require_signature =
-            matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
-        if let Err(e) = download_file(
-            &url,
-            expected_sha.as_deref(),
-            sig_url.as_deref(),
-            require_signature,
-            &dest_path,
-        ) {
-            error!("Failed to download '{}': {}", name, e);
-            errors += 1;
-            continue;
-        }
-
-        if entry_type == "board" {
-            let _ = std::fs::create_dir_all("/sdcard/config");
-            let _ = std::fs::copy(&dest_path, "/sdcard/config/board.json");
-        }
-
-        if !sig_url.as_deref().unwrap_or_default().is_empty() {
-            info!("Signature downloaded for '{}'", name);
+            bundle_files.push(BundleFile::from_file(&relative, &staged)?);
+            if let Some(signature) = signature {
+                let signature_path = format!("{}.sig", relative.to_string_lossy());
+                let staged_signature =
+                    download_stage.write(&format!("{}-signature", downloaded), &signature)?;
+                bundle_files.push(BundleFile::from_file(signature_path, staged_signature)?);
+                info!("Signature downloaded for '{}'", name);
+            }
         }
 
         downloaded += 1;
-        info!("Installed '{}'", name);
+        info!("Verified '{}'", name);
 
         // Update progress
         if total_entries > 0 {
-            let pct = (downloaded * 100 / total_entries).min(99) as u8;
+            let pct = (downloaded * 80 / total_entries).min(80) as u8;
             BUNDLE_PROGRESS.store(pct, Ordering::Relaxed);
         }
     }
 
-    if errors > 0 {
-        anyhow::bail!(
-            "Bundle download completed with {} error(s) ({} succeeded)",
-            errors,
-            downloaded
-        );
-    }
+    let firmware_path =
+        firmware_path.ok_or_else(|| anyhow::anyhow!("Catalog has no compatible firmware image"))?;
+    let sdcard_root = Path::new("/sdcard");
+    bundle_transaction::install(
+        sdcard_root,
+        &bundle_files,
+        || {
+            let firmware_data = std::fs::read(&firmware_path)?;
+            write_ota1(&firmware_data).map_err(transaction_io_error)
+        },
+        || select_ota1_for_boot().map_err(transaction_io_error),
+        |boundary| {
+            log_transaction_boundary(boundary);
+            Ok(())
+        },
+    )?;
 
     BUNDLE_PROGRESS.store(100, Ordering::Relaxed);
     info!(
@@ -1339,6 +1358,83 @@ pub fn recovery_download_board_bundle_for(
     );
     println!("Bundle complete: {} items installed", downloaded);
     Ok(downloaded)
+}
+
+fn sdcard_relative_path(path: &str) -> anyhow::Result<std::path::PathBuf> {
+    Path::new(path)
+        .strip_prefix("/sdcard")
+        .map(|relative| relative.to_path_buf())
+        .map_err(|_| anyhow::anyhow!("Bundle destination is outside /sdcard: {}", path))
+}
+
+fn transaction_io_error(error: anyhow::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, error.to_string())
+}
+
+struct DownloadStage {
+    root: std::path::PathBuf,
+}
+
+impl DownloadStage {
+    fn new(root: &Path) -> io::Result<Self> {
+        if root.exists() {
+            std::fs::remove_dir_all(root)?;
+        }
+        std::fs::create_dir_all(root)?;
+        Ok(Self {
+            root: root.to_path_buf(),
+        })
+    }
+
+    fn write(&self, name: &str, data: &[u8]) -> io::Result<std::path::PathBuf> {
+        let path = self.root.join(name);
+        let mut file = std::fs::File::create(&path)?;
+        std::io::Write::write_all(&mut file, data)?;
+        file.sync_all()?;
+        Ok(path)
+    }
+}
+
+impl Drop for DownloadStage {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn log_transaction_boundary(boundary: Boundary) {
+    info!("Bundle transaction boundary: {:?}", boundary);
+}
+
+/// Resolve a transaction left by a reset, failed boot, or failed cleanup.
+/// Only a firmware image that reached ESP-IDF's VALID state may commit the
+/// matching filesystem generation; every other state restores the old files.
+pub fn recover_interrupted_bundle() -> anyhow::Result<()> {
+    let root = Path::new("/sdcard");
+    let ota_selected = ota1_is_boot_partition();
+    let ota_valid = matches!(check_ota1(), Ota1State::Valid);
+    match bundle_transaction::recovery_action(root, ota_selected, ota_valid)? {
+        RecoveryAction::None => {}
+        RecoveryAction::Rollback => {
+            warn!("Rolling back interrupted bundle transaction");
+            bundle_transaction::rollback(root)?;
+        }
+        RecoveryAction::Finalize => {
+            info!("Finalizing confirmed bundle transaction");
+            bundle_transaction::finalize(root)?;
+        }
+    }
+    if Path::new(BUNDLE_DOWNLOAD_DIR).exists() {
+        std::fs::remove_dir_all(BUNDLE_DOWNLOAD_DIR)?;
+    }
+    Ok(())
+}
+
+fn ota1_is_boot_partition() -> bool {
+    unsafe {
+        let ota1 = esp_ota_get_next_update_partition(std::ptr::null());
+        let selected = esp_ota_get_boot_partition();
+        !ota1.is_null() && selected == ota1
+    }
 }
 
 /// Build a dry-run JSON plan for the bundle entries recovery would download.

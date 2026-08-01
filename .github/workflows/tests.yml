@@ -84,6 +84,12 @@ jobs:
       - name: Test release input and provenance validation
         run: python3 tools/test_validate_release.py
 
+      - name: Test transactional recovery bundle activation
+        run: |
+          rustc --edition=2021 --test recovery/src/bundle_transaction.rs \
+            -o /tmp/test_bundle_transaction
+          /tmp/test_bundle_transaction
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

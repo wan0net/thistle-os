@@ -22,6 +22,7 @@ use esp_idf_svc::wifi::{
 
 use log::*;
 
+mod bundle_transaction;
 mod catalog_path;
 mod recovery_ota;
 mod recovery_web;
@@ -56,6 +57,10 @@ fn main() -> anyhow::Result<()> {
         let mut st = recovery_web::STATE.lock().unwrap();
         st.chip = chip.to_string();
     }
+
+    // Resolve any filesystem generation left by a reset or OTA rollback before
+    // deciding whether ota_1 is safe to boot.
+    recovery_ota::recover_interrupted_bundle()?;
 
     // Step 1: Check if ota_1 has valid firmware
     info!("Checking ota_1 partition...");
