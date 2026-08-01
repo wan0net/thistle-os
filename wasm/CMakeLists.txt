@@ -49,6 +49,7 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_app.c
     ${THISTLE_DIR}/components/apps_builtin/appstore/appstore_ui.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_app.c
+    ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_request.c
     ${THISTLE_DIR}/components/apps_builtin/assistant/assistant_ui.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_app.c
     ${THISTLE_DIR}/components/apps_builtin/wifiscanner/wifiscanner_ui.c
@@ -61,6 +62,41 @@ set(THISTLE_SRCS
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_app.c
     ${THISTLE_DIR}/components/apps_builtin/vault/vault_ui.c
 )
+
+# Built-in apps are being migrated from compiled-in C to signed Rust ELFs.
+# Keep the browser simulator buildable throughout that migration: only compile
+# source files that still exist and expose availability flags to main.c.
+function(thistle_set_optional_app_flag flag source)
+    if(EXISTS "${THISTLE_DIR}/${source}")
+        set(${flag} 1 PARENT_SCOPE)
+    else()
+        set(${flag} 0 PARENT_SCOPE)
+    endif()
+endfunction()
+
+thistle_set_optional_app_flag(THISTLE_HAVE_LAUNCHER "components/apps_builtin/launcher/launcher_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_SETTINGS "components/apps_builtin/settings/settings_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_FILEMGR "components/apps_builtin/file_manager/filemgr_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_READER "components/apps_builtin/reader/reader_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_MESSENGER "components/apps_builtin/messenger/messenger_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_NAVIGATOR "components/apps_builtin/navigator/navigator_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_NOTES "components/apps_builtin/notes/notes_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_APPSTORE "components/apps_builtin/appstore/appstore_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_ASSISTANT "components/apps_builtin/assistant/assistant_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_WIFISCANNER "components/apps_builtin/wifiscanner/wifiscanner_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_FLASHLIGHT "components/apps_builtin/flashlight/flashlight_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_WEATHER "components/apps_builtin/weather/weather_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_TERMINAL "components/apps_builtin/terminal/terminal_app.c")
+thistle_set_optional_app_flag(THISTLE_HAVE_VAULT "components/apps_builtin/vault/vault_app.c")
+
+set(THISTLE_WASM_SRCS)
+foreach(source IN LISTS THISTLE_SRCS)
+    if(EXISTS "${source}")
+        list(APPEND THISTLE_WASM_SRCS "${source}")
+    else()
+        message(STATUS "Skipping migrated WASM app source: ${source}")
+    endif()
+endforeach()
 
 # WASM-specific sources
 set(SIM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../simulator")
@@ -91,7 +127,7 @@ set(WASM_SRCS
     ${SIM_DIR}/platform/sim_vfs.c
 )
 
-add_executable(thistle_wasm ${WASM_SRCS} ${THISTLE_SRCS} ${LVGL_SRCS})
+add_executable(thistle_wasm ${WASM_SRCS} ${THISTLE_WASM_SRCS} ${LVGL_SRCS})
 set_target_properties(thistle_wasm PROPERTIES SUFFIX ".html")
 
 # Emscripten SDL2 — auto-provided, no system install needed
@@ -125,6 +161,20 @@ target_compile_definitions(thistle_wasm PRIVATE
     LV_COLOR_DEPTH=16
     SIMULATOR_BUILD=1
     WASM_BUILD=1
+    THISTLE_HAVE_LAUNCHER=${THISTLE_HAVE_LAUNCHER}
+    THISTLE_HAVE_SETTINGS=${THISTLE_HAVE_SETTINGS}
+    THISTLE_HAVE_FILEMGR=${THISTLE_HAVE_FILEMGR}
+    THISTLE_HAVE_READER=${THISTLE_HAVE_READER}
+    THISTLE_HAVE_MESSENGER=${THISTLE_HAVE_MESSENGER}
+    THISTLE_HAVE_NAVIGATOR=${THISTLE_HAVE_NAVIGATOR}
+    THISTLE_HAVE_NOTES=${THISTLE_HAVE_NOTES}
+    THISTLE_HAVE_APPSTORE=${THISTLE_HAVE_APPSTORE}
+    THISTLE_HAVE_ASSISTANT=${THISTLE_HAVE_ASSISTANT}
+    THISTLE_HAVE_WIFISCANNER=${THISTLE_HAVE_WIFISCANNER}
+    THISTLE_HAVE_FLASHLIGHT=${THISTLE_HAVE_FLASHLIGHT}
+    THISTLE_HAVE_WEATHER=${THISTLE_HAVE_WEATHER}
+    THISTLE_HAVE_TERMINAL=${THISTLE_HAVE_TERMINAL}
+    THISTLE_HAVE_VAULT=${THISTLE_HAVE_VAULT}
     CONFIG_LOG_DEFAULT_LEVEL=3
     THISTLE_SDCARD_PATH="/thistle_sdcard"
 )

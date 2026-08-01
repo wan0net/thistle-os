@@ -3,6 +3,16 @@ name: Deploy Pages (Docs + WASM Simulator)
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/pages.yml'
+      - 'components/apps_builtin/**'
+      - 'components/kernel/**'
+      - 'components/kernel_rs/**'
+      - 'components/thistle_hal/**'
+      - 'components/ui/**'
+      - 'simulator/**'
+      - 'wasm/**'
 
 permissions:
   contents: read
@@ -114,6 +124,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     environment:
