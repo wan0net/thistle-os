@@ -121,6 +121,11 @@ jobs:
           python3 -m pip install -r tools/requirements.txt
           python3 tools/test_sign.py
 
+      - name: Test standalone package publication
+        run: |
+          python3 tools/test_build_catalog.py
+          python3 tools/test_package_workflow.py
+
       - name: Test release input and provenance validation
         run: python3 tools/test_validate_release.py
 

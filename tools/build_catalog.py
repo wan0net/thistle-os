@@ -3,16 +3,16 @@
 
 import json
 import hashlib
-import sys
 import argparse
 from datetime import date
 from pathlib import Path
 
 
-def scan_artifacts(artifact_dir: str, base_url: str) -> list:
+def scan_artifacts(artifact_dir: str, base_url: str,
+                   require_signatures: bool = False) -> list:
     """Scan directory for .app.elf/.drv.elf + manifest.json pairs."""
     entries = []
-    artifact_path = Path(artifact_dir)
+    artifact_path = Path(artifact_dir).resolve()
 
     manifest_files = sorted(
         set(list(artifact_path.glob("**/manifest.json"))
@@ -25,12 +25,25 @@ def scan_artifacts(artifact_dir: str, base_url: str) -> list:
         # Find corresponding ELF
         elf_name = manifest.get("entry", "")
         if not elf_name:
-            continue
-        elf_path = manifest_file.parent / elf_name
+            raise ValueError(f"Manifest has no entry: {manifest_file}")
+        elf_path = (manifest_file.parent / elf_name).resolve()
+        try:
+            rel_path = elf_path.relative_to(artifact_path)
+        except ValueError as exc:
+            raise ValueError(
+                f"Manifest entry escapes artifact directory: {manifest_file}"
+            ) from exc
         if not elf_path.exists():
-            print(f"Warning: ELF not found for {manifest_file}: {elf_name}",
-                  file=sys.stderr)
-            continue
+            raise FileNotFoundError(
+                f"ELF not found for {manifest_file}: {elf_name}"
+            )
+
+        entry_type = manifest.get("type", "app")
+        expected_suffix = ".drv.elf" if entry_type == "driver" else ".app.elf"
+        if not elf_name.endswith(expected_suffix):
+            raise ValueError(
+                f"{entry_type} manifest has invalid entry suffix: {manifest_file}"
+            )
 
         # Compute SHA-256
         elf_data = elf_path.read_bytes()
@@ -40,18 +53,14 @@ def scan_artifacts(artifact_dir: str, base_url: str) -> list:
         # Check for signature
         sig_path = elf_path.with_suffix(elf_path.suffix + ".sig")
         has_sig = sig_path.exists()
+        if require_signatures and not has_sig:
+            raise FileNotFoundError(f"Signature not found for {elf_path}")
 
         # Build relative URL path
-        try:
-            rel_path = elf_path.relative_to(artifact_path)
-        except ValueError:
-            print(f"Warning: skipping {manifest_file} — entry path outside artifact dir", file=sys.stderr)
-            continue
-        elf_url = f"{base_url}/{rel_path}"
-        sig_url = f"{base_url}/{rel_path}.sig" if has_sig else ""
+        elf_url = f"{base_url.rstrip('/')}/{rel_path.as_posix()}"
+        sig_url = f"{elf_url}.sig" if has_sig else ""
 
         # Map manifest fields to catalog entry
-        entry_type = manifest.get("type", "app")
         permissions = manifest.get("permissions", [])
         if isinstance(permissions, list):
             permissions = ",".join(permissions)
@@ -108,10 +117,13 @@ def main():
     parser.add_argument("--merge",
                         help="Existing catalog to merge with "
                              "(preserves ratings/downloads)")
+    parser.add_argument("--require-signatures", action="store_true",
+                        help="Fail if any catalogued ELF has no signature")
 
     args = parser.parse_args()
 
-    entries = scan_artifacts(args.artifact_dir, args.base_url)
+    entries = scan_artifacts(args.artifact_dir, args.base_url,
+                             require_signatures=args.require_signatures)
 
     # Merge with existing catalog to preserve ratings/downloads
     if args.merge and Path(args.merge).exists():
