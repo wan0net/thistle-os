@@ -54,7 +54,10 @@ extern int thistle_radio_set_freq(uint32_t freq_hz);
 extern int thistle_gps_enable(void);
 extern int thistle_gps_get_lat_lon(double *lat, double *lon);
 
-/* Storage (fopen/fread/fwrite/fclose semantics) */
+/* Storage (fopen/fread/fwrite/fclose semantics).
+ * Paths must be relative and are resolved beneath the calling app's private
+ * /spiffs/data/apps/<manifest-id>/ root. Absolute paths, '.', '..', invalid
+ * modes, and file handles owned by another app are rejected. */
 extern void *thistle_fs_open(const char *path, const char *mode);
 extern int   thistle_fs_read(void *buf, size_t size, size_t count, void *stream);
 extern int   thistle_fs_write(const void *buf, size_t size, size_t count, void *stream);
