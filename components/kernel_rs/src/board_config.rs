@@ -20,8 +20,6 @@ static BOARD_NAME: Mutex<[u8; 64]> = Mutex::new([0u8; 64]);
 // ESP-IDF FFI for bus init and driver loading
 extern "C" {
     fn hal_set_board_name(name: *const c_char) -> i32;
-    fn hal_bus_register_spi(host_id: i32, handle: *mut std::os::raw::c_void) -> i32;
-    fn hal_bus_register_i2c(port: i32, handle: *mut std::os::raw::c_void) -> i32;
     fn driver_loader_init() -> i32;
     fn driver_loader_load_with_config(path: *const c_char, config: *const c_char) -> i32;
     fn board_init() -> i32;
@@ -46,6 +44,52 @@ fn set_board_name(name: &str) {
         buf[..len].copy_from_slice(&bytes[..len]);
         buf[len] = 0;
     }
+}
+
+fn initialize_configured_buses<S, I>(json: &str, mut init_spi: S, mut init_i2c: I) -> i32
+where
+    S: FnMut(i32, i32, i32, i32, i32) -> i32,
+    I: FnMut(i32, i32, i32, i32) -> i32,
+{
+    let Some(buses_obj) = extract_object(json, "buses") else {
+        return ESP_OK;
+    };
+
+    if let Some(spi_arr) = find_array(&buses_obj, "spi") {
+        for i in 0..4 {
+            let Some(bus) = nth_object(&spi_arr, i) else {
+                break;
+            };
+            let host = json_get_int(&bus, "host").unwrap_or(1) as i32;
+            let mosi = json_get_int(&bus, "mosi").unwrap_or(-1) as i32;
+            let miso = json_get_int(&bus, "miso").unwrap_or(-1) as i32;
+            let sclk = json_get_int(&bus, "sclk").unwrap_or(-1) as i32;
+            let max_bytes =
+                json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
+            let ret = init_spi(host, mosi, miso, sclk, max_bytes);
+            if ret != ESP_OK {
+                return ret;
+            }
+        }
+    }
+
+    if let Some(i2c_arr) = find_array(&buses_obj, "i2c") {
+        for i in 0..4 {
+            let Some(bus) = nth_object(&i2c_arr, i) else {
+                break;
+            };
+            let port = json_get_int(&bus, "port").unwrap_or(0) as i32;
+            let sda = json_get_int(&bus, "sda").unwrap_or(-1) as i32;
+            let scl = json_get_int(&bus, "scl").unwrap_or(-1) as i32;
+            let freq_hz = json_get_int(&bus, "freq_hz").unwrap_or(400000) as i32;
+            let ret = init_i2c(port, sda, scl, freq_hz);
+            if ret != ESP_OK {
+                return ret;
+            }
+        }
+    }
+
+    ESP_OK
 }
 
 // This function does the main work but requires ESP-IDF APIs for bus init.
@@ -140,33 +184,17 @@ fn load_config(config_path: &str) -> i32 {
 
     // Initialize SPI and I2C buses from board.json
     #[cfg(not(test))]
-    if let Some(buses_obj) = extract_object(&json, "buses") {
-        if let Some(spi_arr) = find_array(&buses_obj, "spi") {
-            for i in 0..4 {
-                if let Some(bus) = nth_object(&spi_arr, i) {
-                    let host      = json_get_int(&bus, "host").unwrap_or(1) as i32;
-                    let mosi      = json_get_int(&bus, "mosi").unwrap_or(-1) as i32;
-                    let miso      = json_get_int(&bus, "miso").unwrap_or(-1) as i32;
-                    let sclk      = json_get_int(&bus, "sclk").unwrap_or(-1) as i32;
-                    let max_bytes = json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
-                    unsafe { board_bus_init_spi(host, mosi, miso, sclk, max_bytes); }
-                } else {
-                    break;
-                }
-            }
-        }
-        if let Some(i2c_arr) = find_array(&buses_obj, "i2c") {
-            for i in 0..4 {
-                if let Some(bus) = nth_object(&i2c_arr, i) {
-                    let port    = json_get_int(&bus, "port").unwrap_or(0) as i32;
-                    let sda     = json_get_int(&bus, "sda").unwrap_or(-1) as i32;
-                    let scl     = json_get_int(&bus, "scl").unwrap_or(-1) as i32;
-                    let freq_hz = json_get_int(&bus, "freq_hz").unwrap_or(400000) as i32;
-                    unsafe { board_bus_init_i2c(port, sda, scl, freq_hz); }
-                } else {
-                    break;
-                }
-            }
+    {
+        let ret = initialize_configured_buses(
+            &json,
+            |host, mosi, miso, sclk, max_bytes| unsafe {
+                board_bus_init_spi(host, mosi, miso, sclk, max_bytes)
+            },
+            |port, sda, scl, freq_hz| unsafe { board_bus_init_i2c(port, sda, scl, freq_hz) },
+        );
+        if ret != ESP_OK {
+            // Do not load or start drivers whose configured bus is unavailable.
+            return ret;
         }
     }
 
@@ -441,6 +469,56 @@ pub extern "C" fn board_config_get_wm_name() -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn bus_failure_stops_initialization_before_dependent_buses() {
+        let json = r#"{
+            "buses": {
+                "spi": [
+                    {"host": 1},
+                    {"host": 2},
+                    {"host": 3}
+                ],
+                "i2c": [{"port": 0}]
+            }
+        }"#;
+        let spi_calls = Cell::new(0);
+        let i2c_calls = Cell::new(0);
+
+        let result = initialize_configured_buses(
+            json,
+            |host, _, _, _, _| {
+                spi_calls.set(spi_calls.get() + 1);
+                if host == 3 { ESP_ERR_NO_MEM } else { ESP_OK }
+            },
+            |_, _, _, _| {
+                i2c_calls.set(i2c_calls.get() + 1);
+                ESP_OK
+            },
+        );
+
+        assert_eq!(result, ESP_ERR_NO_MEM);
+        assert_eq!(spi_calls.get(), 3);
+        assert_eq!(i2c_calls.get(), 0);
+    }
+
+    #[test]
+    fn i2c_initialization_preserves_original_error() {
+        let json = r#"{"buses":{"i2c":[{"port":0},{"port":1}]}}"#;
+        let calls = Cell::new(0);
+        let result = initialize_configured_buses(
+            json,
+            |_, _, _, _, _| ESP_OK,
+            |port, _, _, _| {
+                calls.set(calls.get() + 1);
+                if port == 1 { ESP_ERR_INVALID_ARG } else { ESP_OK }
+            },
+        );
+
+        assert_eq!(result, ESP_ERR_INVALID_ARG);
+        assert_eq!(calls.get(), 2);
+    }
 
     #[test]
     fn test_normalize_tp4065b_power_config_adds_channel_fields_for_esp32s3() {

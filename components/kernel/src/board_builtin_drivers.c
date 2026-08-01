@@ -3,6 +3,9 @@
 // ELF driver files are not present on SPIFFS/SD. Provides bus init helpers
 // and maps driver IDs to compiled-in vtables.
 
+#ifdef THISTLE_BUS_INIT_HOST_TEST
+#include "board_bus_init_test_shim.h"
+#else
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -17,14 +20,18 @@
 #include "drv_epaper_gdeq031t10.h"
 #include "drv_kbd_tca8418.h"
 #include "drv_touch_cst328.h"
+#endif
 
+#ifndef THISTLE_BUS_INIT_HOST_TEST
 static const char *TAG = "board_builtin";
+#endif
 
 // ---------------------------------------------------------------------------
 // Minimal JSON int helper — handles bare integers and quoted hex ("0x34").
 // Searches for "key": <value> and parses the value.
 // ---------------------------------------------------------------------------
 
+#ifndef THISTLE_BUS_INIT_HOST_TEST
 static int json_int(const char *json, const char *key, int default_val)
 {
     if (!json || !key) return default_val;
@@ -43,6 +50,7 @@ static int json_int(const char *json, const char *key, int default_val)
     // Bare integer (possibly negative)
     return (int)strtol(p, NULL, 0);
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Bus initialisation helpers (called from board_config.rs via FFI)
@@ -68,7 +76,19 @@ esp_err_t board_bus_init_spi(int host, int mosi, int miso, int sclk, int max_tra
     }
     // Store host ID as the "handle" — ELF drivers call hal_bus_get_spi(idx)
     // and cast it back to spi_host_device_t.
-    hal_bus_register_spi(host, (void *)(intptr_t)host);
+    esp_err_t register_ret = hal_bus_register_spi(host, (void *)(intptr_t)host);
+    if (register_ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI host %d registration failed: %s",
+                 host, esp_err_to_name(register_ret));
+        if (ret == ESP_OK) {
+            esp_err_t cleanup_ret = spi_bus_free((spi_host_device_t)host);
+            if (cleanup_ret != ESP_OK) {
+                ESP_LOGE(TAG, "SPI host %d cleanup failed: %s",
+                         host, esp_err_to_name(cleanup_ret));
+            }
+        }
+        return register_ret;
+    }
     ESP_LOGI(TAG, "SPI host %d ready (MOSI=%d MISO=%d SCLK=%d)", host, mosi, miso, sclk);
     return ESP_OK;
 }
@@ -90,7 +110,17 @@ esp_err_t board_bus_init_i2c(int port, int sda, int scl, int freq_hz)
         ESP_LOGE(TAG, "i2c_new_master_bus port=%d failed: %s", port, esp_err_to_name(ret));
         return ret;
     }
-    hal_bus_register_i2c(port, handle);
+    esp_err_t register_ret = hal_bus_register_i2c(port, handle);
+    if (register_ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C port %d registration failed: %s",
+                 port, esp_err_to_name(register_ret));
+        esp_err_t cleanup_ret = i2c_del_master_bus(handle);
+        if (cleanup_ret != ESP_OK) {
+            ESP_LOGE(TAG, "I2C port %d cleanup failed: %s",
+                     port, esp_err_to_name(cleanup_ret));
+        }
+        return register_ret;
+    }
     ESP_LOGI(TAG, "I2C port %d ready (SDA=%d SCL=%d)", port, sda, scl);
     return ESP_OK;
 }
@@ -101,6 +131,7 @@ esp_err_t board_bus_init_i2c(int port, int sda, int scl, int freq_hz)
 // sub-object.
 // ---------------------------------------------------------------------------
 
+#ifndef THISTLE_BUS_INIT_HOST_TEST
 esp_err_t board_builtin_driver_init(const char *id, const char *hal_type,
                                     const char *config_json)
 {
@@ -154,12 +185,14 @@ esp_err_t board_builtin_driver_init(const char *id, const char *hal_type,
     ESP_LOGW(TAG, "no builtin for driver id=%s — skipping", id);
     return ESP_OK;
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // GPIO pre-init helper — called from board_config.rs to configure power-enable
 // and other board-level GPIOs before driver initialization.
 // ---------------------------------------------------------------------------
 
+#ifndef THISTLE_BUS_INIT_HOST_TEST
 esp_err_t board_gpio_set_output(int pin, int level, int delay_ms)
 {
     if (pin < 0) return ESP_OK;
@@ -193,3 +226,4 @@ esp_err_t board_gpio_set_output(int pin, int level, int delay_ms)
     }
     return ret;
 }
+#endif
