@@ -7,6 +7,7 @@
 use core::ffi::c_char;
 use std::ffi::CStr;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -48,6 +49,47 @@ fn bytes_to_hex(bytes: &[u8], out: &mut [u8]) {
 
 fn sig_path_for(elf_path: &str) -> String {
     format!("{}.sig", elf_path)
+}
+
+/// Stream one already-open object through Ed25519 verification and a consumer.
+/// The consumer receives the exact byte slices covered by the signature. This
+/// lets OTA write those slices to an inactive partition without reopening a
+/// mutable pathname between verification and use.
+pub(crate) fn verify_exact_reader_with(
+    reader: &mut impl Read,
+    expected_size: usize,
+    signature: &[u8],
+    mut consume: impl FnMut(&[u8]) -> Result<(), i32>,
+) -> Result<(), i32> {
+    if expected_size == 0 || expected_size > 16 * 1024 * 1024 || signature.len() != 64 {
+        return Err(ESP_ERR_INVALID_SIZE);
+    }
+
+    let key_guard = VERIFYING_KEY.lock().map_err(|_| ESP_ERR_NO_MEM)?;
+    let verifying_key = key_guard.as_ref().ok_or(ESP_ERR_INVALID_STATE)?;
+    let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| ESP_ERR_INVALID_SIZE)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    let mut verifier = verifying_key.verify_stream(&signature).map_err(|_| ESP_ERR_INVALID_CRC)?;
+
+    let mut buffer = [0u8; 4096];
+    let mut consumed = 0usize;
+    while consumed < expected_size {
+        let wanted = buffer.len().min(expected_size - consumed);
+        let count = reader.read(&mut buffer[..wanted]).map_err(|_| ESP_ERR_INVALID_SIZE)?;
+        if count == 0 {
+            return Err(ESP_ERR_INVALID_SIZE);
+        }
+        verifier.update(&buffer[..count]);
+        consume(&buffer[..count])?;
+        consumed += count;
+    }
+
+    let mut extra = [0u8; 1];
+    if reader.read(&mut extra).map_err(|_| ESP_ERR_INVALID_SIZE)? != 0 {
+        return Err(ESP_ERR_INVALID_SIZE);
+    }
+
+    verifier.finalize_and_verify().map_err(|_| ESP_ERR_INVALID_CRC)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +278,71 @@ mod tests {
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ))
+    }
+
+    #[test]
+    fn streamed_verification_binds_exact_consumed_bytes_before_activation() {
+        reset();
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
+        assert_eq!(unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) }, ESP_OK);
+        let payload = vec![0x5au8; 9000];
+        let signature = signing_key.sign(&payload).to_bytes();
+
+        let mut flashed = Vec::new();
+        let result = verify_exact_reader_with(
+            &mut std::io::Cursor::new(&payload),
+            payload.len(),
+            &signature,
+            |chunk| {
+                flashed.extend_from_slice(chunk);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(flashed, payload);
+
+        let mut swapped = payload.clone();
+        swapped[4097] ^= 1;
+        let mut boot_selected = false;
+        let result = verify_exact_reader_with(
+            &mut std::io::Cursor::new(&swapped),
+            swapped.len(),
+            &signature,
+            |_| Ok(()),
+        );
+        if result.is_ok() {
+            boot_selected = true;
+        }
+        assert_eq!(result, Err(ESP_ERR_INVALID_CRC));
+        assert!(!boot_selected);
+    }
+
+    #[test]
+    fn streamed_verification_rejects_truncation_and_overrun() {
+        reset();
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
+        assert_eq!(unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) }, ESP_OK);
+        let payload = b"signed firmware bytes";
+        let signature = signing_key.sign(payload).to_bytes();
+
+        assert_eq!(
+            verify_exact_reader_with(
+                &mut std::io::Cursor::new(&payload[..payload.len() - 1]),
+                payload.len(),
+                &signature,
+                |_| Ok(()),
+            ),
+            Err(ESP_ERR_INVALID_SIZE)
+        );
+        assert_eq!(
+            verify_exact_reader_with(
+                &mut std::io::Cursor::new(payload),
+                payload.len() - 1,
+                &signature,
+                |_| Ok(()),
+            ),
+            Err(ESP_ERR_INVALID_SIZE)
+        );
     }
 
     fn remove_payload_fixture(path: &std::path::Path) {

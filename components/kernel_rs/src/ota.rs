@@ -10,19 +10,18 @@ use std::os::raw::{c_char, c_void};
 use std::path::Path;
 use std::sync::Mutex;
 
+use crate::signing::verify_exact_reader_with;
+
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
 
 const ESP_OK: i32 = 0x000;
 const ESP_FAIL: i32 = -1;
-const ESP_ERR_NO_MEM: i32 = 0x101;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 const ESP_ERR_INVALID_SIZE: i32 = 0x104;
-const ESP_ERR_INVALID_CRC: i32 = 0x109;
 
-const OTA_BUF_SIZE: usize = 4096;
 const OTA_SD_UPDATE_PATH: &str = "/sdcard/update/thistle_os.bin\0";
 const BUNDLE_TRANSACTION_PATH: &str = "/sdcard/.thistle-bundle-transaction";
 const BUNDLE_DOWNLOAD_PATH: &str = "/sdcard/.thistle-bundle-download";
@@ -36,7 +35,6 @@ static TAG: &[u8] = b"ota\0";
 
 extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
-    fn signing_verify_file(path: *const c_char) -> i32;
 }
 
 const ESP_LOG_INFO: i32 = 3;
@@ -105,17 +103,6 @@ impl BootValidationState {
 
 static BOOT_VALIDATION_STATE: Mutex<BootValidationState> =
     Mutex::new(BootValidationState::NotPending);
-
-/// OTA images are production artifacts, so only an explicit verifier success
-/// may cross the firmware trust boundary. Preserve the verifier's exact error
-/// for diagnostics instead of treating non-CRC failures as success.
-fn require_valid_ota_signature(signature_result: i32) -> Result<(), i32> {
-    if signature_result == ESP_OK {
-        Ok(())
-    } else {
-        Err(signature_result)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // FFI exports
@@ -186,8 +173,8 @@ pub extern "C" fn ota_sd_update_available() -> bool {
 
 /// Apply a firmware OTA update from the SD card.
 ///
-/// Verifies the signature, reads the file, and writes it to the next OTA
-/// partition. Reboots on success.
+/// Opens the image once, streams those exact bytes through signature
+/// verification and the inactive OTA partition, and reboots on success.
 ///
 /// # Safety
 /// `progress_cb` may be NULL. `user_data` is passed through to the callback.
@@ -197,21 +184,9 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     user_data: *mut c_void,
 ) -> i32 {
     let update_path = OTA_SD_UPDATE_PATH.trim_end_matches('\0');
-    let update_path_cstr = OTA_SD_UPDATE_PATH.as_ptr() as *const c_char;
 
-    // 1. Verify signature
-    let sig_ret = signing_verify_file(update_path_cstr);
-    if let Err(err) = require_valid_ota_signature(sig_ret) {
-        esp_log_write(
-            ESP_LOG_ERROR,
-            TAG.as_ptr(),
-            b"OTA update signature verification failed: %d\0".as_ptr(),
-            err,
-        );
-        return err;
-    }
-
-    // 2. Open and size-check the update file
+    // Keep one file-description boundary from signature verification through
+    // flashing. The mutable pathname is never reopened.
     let mut file = match std::fs::File::open(update_path) {
         Ok(f) => f,
         Err(_) => {
@@ -224,8 +199,7 @@ pub unsafe extern "C" fn ota_apply_from_sd(
         }
     };
 
-    use std::io::Read;
-    let file_size = match std::fs::metadata(update_path) {
+    let file_size = match file.metadata() {
         Ok(m) => m.len(),
         Err(_) => return ESP_ERR_NOT_FOUND,
     };
@@ -244,6 +218,18 @@ pub unsafe extern "C" fn ota_apply_from_sd(
             TAG.as_ptr(),
             b"OTA file too large\0".as_ptr(),
         );
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    let signature = match std::fs::read(format!("{update_path}.sig")) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot open OTA signature\0".as_ptr());
+            return ESP_ERR_NOT_FOUND;
+        }
+    };
+    if signature.len() != 64 {
+        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"OTA signature has invalid size\0".as_ptr());
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -278,42 +264,32 @@ pub unsafe extern "C" fn ota_apply_from_sd(
             return ret;
         }
 
-        let mut buf = vec![0u8; OTA_BUF_SIZE];
         let mut written: u32 = 0;
-
-        loop {
-            let to_read = OTA_BUF_SIZE.min((file_size - written as u64) as usize);
-            if to_read == 0 {
-                break;
-            }
-
-            let nread = match file.read(&mut buf[..to_read]) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(_) => {
-                    esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"OTA read error\0".as_ptr());
-                    esp_ota_abort(ota_handle);
-                    return ESP_ERR_INVALID_SIZE;
+        let stream_result = verify_exact_reader_with(
+            &mut file,
+            file_size as usize,
+            &signature,
+            |chunk| {
+                let ret = esp_ota_write(ota_handle, chunk.as_ptr(), chunk.len());
+                if ret != ESP_OK {
+                    return Err(ret);
                 }
-            };
-
-            let ret = esp_ota_write(ota_handle, buf.as_ptr(), nread);
-            if ret != ESP_OK {
-                esp_log_write(
-                    ESP_LOG_ERROR,
-                    TAG.as_ptr(),
-                    b"esp_ota_write failed: %d\0".as_ptr(),
-                    ret,
-                );
-                esp_ota_abort(ota_handle);
-                return ret;
-            }
-
-            written += nread as u32;
-
-            if let Some(cb) = progress_cb {
-                cb(written, file_size as u32, user_data);
-            }
+                written += chunk.len() as u32;
+                if let Some(cb) = progress_cb {
+                    cb(written, file_size as u32, user_data);
+                }
+                Ok(())
+            },
+        );
+        if let Err(error) = stream_result {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"OTA stream verification/write failed: %d\0".as_ptr(),
+                error,
+            );
+            esp_ota_abort(ota_handle);
+            return error;
         }
 
         let ret = esp_ota_end(ota_handle);
@@ -349,8 +325,21 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
     #[cfg(not(target_os = "espidf"))]
     {
-        // Simulator: consume file to validate, but don't actually flash
-        let _ = file;
+        // Simulator: exercise the same one-open-object verification boundary.
+        if let Err(error) = verify_exact_reader_with(
+            &mut file,
+            file_size as usize,
+            &signature,
+            |_| Ok(()),
+        ) {
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"OTA stream verification failed: %d\0".as_ptr(),
+                error,
+            );
+            return error;
+        }
         let _ = progress_cb;
         let _ = user_data;
         esp_log_write(
@@ -481,22 +470,6 @@ pub extern "C" fn ota_rollback() -> i32 {
 mod tests {
     use super::*;
     use std::ffi::CStr;
-
-    #[test]
-    fn test_ota_signature_gate_fails_closed_for_all_verifier_errors() {
-        assert_eq!(require_valid_ota_signature(ESP_OK), Ok(()));
-
-        for error in [
-            ESP_ERR_NOT_FOUND,
-            ESP_ERR_INVALID_CRC,
-            ESP_ERR_INVALID_SIZE,
-            0x103, // ESP_ERR_INVALID_STATE
-            0x102, // ESP_ERR_INVALID_ARG
-            ESP_ERR_NO_MEM,
-        ] {
-            assert_eq!(require_valid_ota_signature(error), Err(error));
-        }
-    }
 
     #[test]
     fn test_pending_image_is_not_marked_before_health_milestone() {
