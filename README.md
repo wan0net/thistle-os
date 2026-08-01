@@ -469,6 +469,7 @@ All dependencies are permissively licensed. See [THIRD_PARTY_LICENSES.md](THIRD_
 | argon2 | MIT/Apache-2.0 | Memory-hard password key derivation |
 | pbkdf2 | MIT/Apache-2.0 | Rust software PBKDF2 |
 | getrandom | MIT/Apache-2.0 | Rust CSPRNG entropy |
+| serde_json | MIT/Apache-2.0 | Safe system configuration parsing and serialization |
 | embedded-graphics | MIT/Apache-2.0 | Rust 2D graphics primitives |
 | thistle-tk | BSD-3-Clause | Widget toolkit (embedded-graphics based) |
 | FreeRTOS | MIT | RTOS kernel |

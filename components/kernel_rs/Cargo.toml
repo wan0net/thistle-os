@@ -18,6 +18,7 @@ aes = { version = "0.9", default-features = false }
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 getrandom = { version = "0.4", default-features = false, features = ["std"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thistle-tk = { path = "../../crates/thistle-tk" }
 embedded-graphics = "0.8"
 libc = { version = "0.2", optional = true }

@@ -21,7 +21,7 @@ ThistleOS splits responsibility at the syscall boundary:
   C FFI functions declared in `thistle/kernel_rs.h`.
 
 The crate is `thistle-kernel` (version `0.1.0`). Current runtime dependencies:
-`log = "0.4"`, `ed25519-dalek`, `sha2`, `hmac`, `aes`, `argon2`, `pbkdf2`, `thistle-tk`,
+`log = "0.4"`, `ed25519-dalek`, `sha2`, `hmac`, `aes`, `argon2`, `pbkdf2`, `serde_json`, `thistle-tk`,
 `embedded-graphics`. Build depends on `embuild = "0.33"` for ESP-IDF path
 discovery.
 

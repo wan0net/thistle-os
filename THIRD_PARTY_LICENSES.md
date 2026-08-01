@@ -357,6 +357,17 @@ and: https://github.com/RustCrypto/password-hashes/blob/master/LICENSE-APACHE
 
 ---
 
+## serde_json
+
+**License:** MIT OR Apache-2.0
+**Source:** https://github.com/serde-rs/json
+**Used for:** Safe parsing and serialization of persistent system configuration.
+
+Full text: https://github.com/serde-rs/json/blob/master/LICENSE-MIT
+and: https://github.com/serde-rs/json/blob/master/LICENSE-APACHE
+
+---
+
 ## esp-idf-svc (Rust)
 
 **License:** MIT OR Apache-2.0
@@ -388,6 +399,6 @@ All dependencies are compatible with the ThistleOS BSD 3-Clause license:
 | MIT | Yes | LVGL, FreeRTOS, RadioLib, libcurl, Unity, esp-rs crates |
 | BSD-2-Clause | Yes | Monocypher |
 | zlib | Yes | SDL2 |
-| MIT OR Apache-2.0 | Yes | argon2, esp-idf-hal, esp-idf-svc, esp-idf-sys |
+| MIT OR Apache-2.0 | Yes | argon2, serde_json, esp-idf-hal, esp-idf-svc, esp-idf-sys |
 
 No GPL, LGPL, AGPL, or other copyleft licenses are present in this project.
