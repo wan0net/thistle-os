@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from build_catalog import scan_artifacts
+from build_catalog import merge_catalog_entries, scan_artifacts
 
 
 class BuildCatalogTests(unittest.TestCase):
@@ -75,6 +75,25 @@ class BuildCatalogTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 scan_artifacts(str(root), "https://example.test/apps",
                                require_signatures=True)
+
+    def test_merge_preserves_existing_packages_and_download_stats(self):
+        new_entries = [{"id": "com.thistle.hello", "rating": 0,
+                        "rating_count": 0, "downloads": 0}]
+        existing_entries = [
+            {"id": "com.thistle.hello", "rating": 4.5,
+             "rating_count": 12, "downloads": 99},
+            {"id": "com.thistle.legacy", "type": "app",
+             "url": "https://example.test/legacy.app.elf"},
+        ]
+
+        merged = merge_catalog_entries(new_entries, existing_entries)
+
+        by_id = {entry["id"]: entry for entry in merged}
+        self.assertEqual(set(by_id), {"com.thistle.hello", "com.thistle.legacy"})
+        self.assertEqual(by_id["com.thistle.hello"]["rating"], 4.5)
+        self.assertEqual(by_id["com.thistle.hello"]["downloads"], 99)
+        self.assertEqual(by_id["com.thistle.legacy"]["url"],
+                         "https://example.test/legacy.app.elf")
 
 
 if __name__ == "__main__":

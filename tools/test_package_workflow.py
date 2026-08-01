@@ -27,6 +27,14 @@ class PackageWorkflowTests(unittest.TestCase):
         self.assertIn('all-artifacts/. publish/apps/', self.workflow)
         self.assertNotIn("2>/dev/null || true", self.workflow)
 
+    def test_canonical_catalog_repository_is_the_deploy_target(self):
+        self.assertIn('repository: wan0net/thistle-apps', self.workflow)
+        self.assertIn('--merge existing-app-catalog/catalog.json', self.workflow)
+        self.assertIn('external_repository: wan0net/thistle-apps', self.workflow)
+        self.assertIn('deploy_key: ${{ secrets.THISTLE_APPS_DEPLOY_KEY }}',
+                      self.workflow)
+        self.assertIn('keep_files: true', self.workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
