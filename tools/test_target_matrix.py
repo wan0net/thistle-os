@@ -42,6 +42,8 @@ class TargetMatrixTests(unittest.TestCase):
         for arch in SUPPORTED_ARCHES:
             self.assertIn(f'"{arch}"', cmake)
         self.assertIn("riscv32imc-esp-espidf", cmake)
+        self.assertIn("target_link_libraries(${COMPONENT_LIB} INTERFACE atomic)",
+                      cmake)
 
     def test_matrix_artifacts_are_architecture_qualified(self):
         firmware = Path(".github/workflows/build.yml").read_text()

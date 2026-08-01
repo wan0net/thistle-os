@@ -21,6 +21,9 @@ elseif(IDF_TARGET STREQUAL "esp32s3")
     set(RUST_TARGET "xtensa-esp32s3-espidf")
 elseif(IDF_TARGET STREQUAL "esp32c3" OR IDF_TARGET STREQUAL "esp32c6")
     set(RUST_TARGET "riscv32imc-esp-espidf")
+    # The IMC target has no hardware atomic extension. Rust std emits GCC
+    # atomic runtime calls for Mutex/RwLock, which libatomic supplies.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE atomic)
 else()
     message(FATAL_ERROR "Unsupported ThistleOS target: ${IDF_TARGET}")
 endif()

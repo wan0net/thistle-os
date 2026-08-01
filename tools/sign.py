@@ -112,7 +112,7 @@ def manifest_destination(artifact_type, artifact_id):
 def canonical_manifest(*, artifact_type, artifact_id, version, security_version,
                        arch, compatible_boards, url, payload):
     boards = sorted(set(compatible_boards))
-    if not boards:
+    if not boards and artifact_type != "firmware":
         raise ValueError("at least one compatible board is required")
     fields = [artifact_id, version, arch, url, *boards]
     if any(not value or "\n" in value or "\r" in value for value in fields):
@@ -194,8 +194,9 @@ def main():
         choices=["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"],
     )
     manifest_parser.add_argument(
-        "--compatible-board", required=True, action="append",
-        help="Signed compatible board ID; repeat for multiple boards",
+        "--compatible-board", action="append", default=[],
+        help=("Signed compatible board ID; repeat for multiple boards. "
+              "Firmware may omit this for all boards of its architecture."),
     )
     manifest_parser.add_argument("--url", required=True)
 
