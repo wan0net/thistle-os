@@ -46,6 +46,10 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # Watchdog
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 
+# Keep newly installed OTA images rollback-eligible until app_main confirms
+# the post-initialization health milestone.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # LVGL fonts (enable sizes used by ThistleOS UI)
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_18=y

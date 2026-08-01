@@ -33,7 +33,8 @@ const char *ota_get_current_version(void);
 /* Get the currently running partition label */
 const char *ota_get_running_partition(void);
 
-/* Mark the current firmware as valid (prevents rollback) */
+/* Mark a pending current firmware as valid after the healthy-boot milestone.
+ * Idempotent: once confirmed, later calls do not invoke the OTA API again. */
 esp_err_t ota_mark_valid(void);
 
 /* Rollback to previous firmware */

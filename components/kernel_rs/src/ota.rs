@@ -7,12 +7,14 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
+use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
 
 const ESP_OK: i32 = 0x000;
+const ESP_FAIL: i32 = -1;
 const ESP_ERR_NO_MEM: i32 = 0x101;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
@@ -45,9 +47,8 @@ const ESP_LOG_ERROR: i32 = 1;
 /// ESP_OTA_IMG_PENDING_VERIFY state value from esp_ota_ops.h
 ///
 /// Replaces the C `esp_ota_img_pending_verify()` helper shim in kernel_shims.c.
-/// The constant value 0x107 matches ESP_OTA_IMG_PENDING_VERIFY in ESP-IDF v5.x.
-#[cfg(target_os = "espidf")]
-const ESP_OTA_IMG_PENDING_VERIFY: u32 = 0x107;
+/// ESP-IDF defines this enum value in `esp_flash_partitions.h` as 0x1.
+const ESP_OTA_IMG_PENDING_VERIFY: u32 = 0x1;
 
 #[cfg(target_os = "espidf")]
 extern "C" {
@@ -67,6 +68,41 @@ extern "C" {
 // Progress callback type — matches C typedef `void (*ota_progress_cb_t)(uint32_t written, uint32_t total, void *user_data)`
 pub type OtaProgressCb = unsafe extern "C" fn(written: u32, total: u32, user_data: *mut c_void);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootValidationState {
+    NotPending,
+    Pending,
+    Validated,
+}
+
+impl BootValidationState {
+    fn observe_partition(&mut self, pending: bool) {
+        *self = if pending {
+            Self::Pending
+        } else {
+            Self::NotPending
+        };
+    }
+
+    fn mark_valid_once_with<F>(&mut self, mark_valid: F) -> i32
+    where
+        F: FnOnce() -> i32,
+    {
+        if *self != Self::Pending {
+            return ESP_OK;
+        }
+
+        let result = mark_valid();
+        if result == ESP_OK {
+            *self = Self::Validated;
+        }
+        result
+    }
+}
+
+static BOOT_VALIDATION_STATE: Mutex<BootValidationState> =
+    Mutex::new(BootValidationState::NotPending);
+
 /// OTA images are production artifacts, so only an explicit verifier success
 /// may cross the firmware trust boundary. Preserve the verifier's exact error
 /// for diagnostics instead of treating non-CRC failures as success.
@@ -82,16 +118,18 @@ fn require_valid_ota_signature(signature_result: i32) -> Result<(), i32> {
 // FFI exports
 // ---------------------------------------------------------------------------
 
-/// Initialise the OTA subsystem. Confirms the current OTA partition if it is
-/// in PENDING_VERIFY state.
+/// Initialise the OTA subsystem and remember whether the running partition is
+/// pending verification. Confirmation is deliberately deferred until the
+/// explicit healthy-boot milestone calls `ota_mark_valid()`.
 ///
 /// # Safety
 /// May be called from C.
 #[no_mangle]
 pub extern "C" fn ota_init() -> i32 {
+    let mut pending = false;
+
     #[cfg(target_os = "espidf")]
     unsafe {
-        use std::os::raw::c_void;
         let running = esp_ota_get_running_partition();
         if !running.is_null() {
             esp_log_write(
@@ -99,19 +137,24 @@ pub extern "C" fn ota_init() -> i32 {
                 TAG.as_ptr(),
                 b"Running OTA partition initialised\0".as_ptr(),
             );
-        }
 
-        let mut state: u32 = 0;
-        if esp_ota_get_state_partition(running, &mut state) == ESP_OK {
-            if state == ESP_OTA_IMG_PENDING_VERIFY {
+            let mut state: u32 = 0;
+            if esp_ota_get_state_partition(running, &mut state) == ESP_OK
+                && state == ESP_OTA_IMG_PENDING_VERIFY
+            {
+                pending = true;
                 esp_log_write(
                     ESP_LOG_INFO,
                     TAG.as_ptr(),
-                    b"Confirming OTA update (marking valid)\0".as_ptr(),
+                    b"OTA update awaiting healthy-boot confirmation\0".as_ptr(),
                 );
-                esp_ota_mark_app_valid_cancel_rollback();
             }
         }
+    }
+
+    match BOOT_VALIDATION_STATE.lock() {
+        Ok(mut state) => state.observe_partition(pending),
+        Err(_) => return ESP_FAIL,
     }
 
     unsafe {
@@ -342,8 +385,15 @@ pub extern "C" fn ota_get_running_partition() -> *const c_char {
 #[no_mangle]
 pub extern "C" fn ota_mark_valid() -> i32 {
     #[cfg(target_os = "espidf")]
-    unsafe {
-        return esp_ota_mark_app_valid_cancel_rollback();
+    {
+        return match BOOT_VALIDATION_STATE.lock() {
+            Ok(mut state) => {
+                state.mark_valid_once_with(|| unsafe {
+                    esp_ota_mark_app_valid_cancel_rollback()
+                })
+            }
+            Err(_) => ESP_FAIL,
+        };
     }
     #[cfg(not(target_os = "espidf"))]
     ESP_OK
@@ -396,6 +446,51 @@ mod tests {
         ] {
             assert_eq!(require_valid_ota_signature(error), Err(error));
         }
+    }
+
+    #[test]
+    fn test_pending_image_is_not_marked_before_health_milestone() {
+        let mut state = BootValidationState::NotPending;
+        let mark_calls = std::cell::Cell::new(0);
+
+        state.observe_partition(true);
+
+        assert_eq!(state, BootValidationState::Pending);
+        assert_eq!(mark_calls.get(), 0);
+    }
+
+    #[test]
+    fn test_pending_verify_value_matches_esp_idf_abi() {
+        assert_eq!(ESP_OTA_IMG_PENDING_VERIFY, 0x1);
+    }
+
+    #[test]
+    fn test_healthy_boot_marks_pending_image_exactly_once() {
+        let mut state = BootValidationState::NotPending;
+        let mark_calls = std::cell::Cell::new(0);
+        state.observe_partition(true);
+
+        for _ in 0..2 {
+            assert_eq!(
+                state.mark_valid_once_with(|| {
+                    mark_calls.set(mark_calls.get() + 1);
+                    ESP_OK
+                }),
+                ESP_OK
+            );
+        }
+
+        assert_eq!(state, BootValidationState::Validated);
+        assert_eq!(mark_calls.get(), 1);
+    }
+
+    #[test]
+    fn test_failed_confirmation_remains_pending_for_retry() {
+        let mut state = BootValidationState::NotPending;
+        state.observe_partition(true);
+
+        assert_eq!(state.mark_valid_once_with(|| ESP_FAIL), ESP_FAIL);
+        assert_eq!(state, BootValidationState::Pending);
     }
 
     // -----------------------------------------------------------------------

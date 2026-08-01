@@ -223,7 +223,12 @@ void app_main(void)
         tk_register_input_callbacks();
 
         /* Launch the thistle-tk native launcher */
-        app_manager_launch("com.thistle.tk_launcher");
+        ret = app_manager_launch("com.thistle.tk_launcher");
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to launch thistle-tk launcher: %s",
+                     esp_err_to_name(ret));
+            return;
+        }
 
         /* Drive the display server for e-paper.
          * E-paper refresh is slow so we check every 100 ms; the WM
@@ -237,19 +242,41 @@ void app_main(void)
                                            16384, NULL, 5, NULL);
         if (task_ret != pdPASS) {
             ESP_LOGE(TAG, "tk_render: xTaskCreate failed (%d)", task_ret);
+            return;
         }
     } else {
-        app_manager_launch("com.thistle.launcher");
+        ret = app_manager_launch("com.thistle.launcher");
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to launch LVGL launcher: %s",
+                     esp_err_to_name(ret));
+            return;
+        }
 
         /* Start LVGL render loop AFTER all UI objects are created.
          * This prevents race conditions with e-paper's slow flush. */
-        ui_manager_start();
+        ret = ui_manager_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start LVGL render loop: %s",
+                     esp_err_to_name(ret));
+            return;
+        }
     }
 
     /* Check for SD card firmware update */
     if (ota_sd_update_available()) {
         ESP_LOGI(TAG, "Firmware update detected on SD card!");
         toast_show("Update available! Settings > About to install", TOAST_INFO, 5000);
+    }
+
+    /* Keep a newly flashed image rollback-eligible until all required boot
+     * services have initialized and remained alive through a short soak. */
+    ESP_LOGI(TAG, "Boot health milestone reached; soaking before OTA confirmation");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    ret = ota_mark_valid();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to confirm healthy OTA image: %s",
+                 esp_err_to_name(ret));
+        return;
     }
 
     ESP_LOGI(TAG, "ThistleOS ready");
