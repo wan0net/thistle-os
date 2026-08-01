@@ -3,12 +3,12 @@
  * ThistleOS — Vault app UI
  *
  * Three-screen password vault:
- *   Lock screen  — master-password entry, PBKDF2 key derivation
+ *   Lock screen  — master-password entry, Argon2id key derivation
  *   Entry list   — scrollable list of stored credentials
  *   Entry detail — name / username / password / notes editor
  *
- * Encryption: AES-256-CBC + PBKDF2-HMAC-SHA256 + HMAC-SHA256 integrity.
- * File layout: [16-byte salt][16-byte IV][encrypted JSON][32-byte HMAC]
+ * Encryption: AES-256-CBC + Argon2id + HMAC-SHA256 integrity.
+ * V2 layout: [versioned KDF header][encrypted JSON][32-byte HMAC]
  *
  * Works on all platforms (ESP32, simulator, WASM) via the kernel crypto module.
  */
@@ -34,6 +34,7 @@ extern int thistle_crypto_hmac_verify(const unsigned char *key, unsigned int key
 extern int thistle_crypto_aes256_cbc_encrypt(const unsigned char *key, const unsigned char *iv, const unsigned char *plaintext, unsigned int len, unsigned char *ciphertext_out);
 extern int thistle_crypto_aes256_cbc_decrypt(const unsigned char *key, const unsigned char *iv, const unsigned char *ciphertext, unsigned int len, unsigned char *plaintext_out);
 extern int thistle_crypto_pbkdf2_sha256(const char *password, const unsigned char *salt, unsigned int salt_len, unsigned int iterations, unsigned char *key_out, unsigned int key_len);
+extern int thistle_crypto_argon2id(const unsigned char *password, size_t password_len, const unsigned char *salt, size_t salt_len, unsigned char *key_out, size_t key_len);
 extern int thistle_crypto_random(unsigned char *buf, unsigned int len);
 
 static const char *TAG = "vault_ui";
@@ -50,16 +51,29 @@ static int s_app_h = 296;
 #define MAX_ENTRIES   32
 
 #define VAULT_PATH   THISTLE_SDCARD "/config/vault.enc"
+#define VAULT_TEMP_PATH THISTLE_SDCARD "/config/vault.enc.tmp"
+#define VAULT_BACKUP_PATH THISTLE_SDCARD "/config/vault.enc.bak"
 #define VAULT_CONFIG_DIR  THISTLE_SDCARD "/config"
 
-/* File format offsets */
+/* Legacy v1 file format offsets */
 #define SALT_LEN     16
 #define IV_LEN       16
 #define HMAC_LEN     32
-#define HEADER_LEN   (SALT_LEN + IV_LEN)   /* 32 bytes before ciphertext */
+#define LEGACY_HEADER_LEN (SALT_LEN + IV_LEN)
 
-/* PBKDF2 iterations — deliberately slow */
-#define PBKDF2_ITER  10000
+/* Versioned v2 KDF envelope. Numeric values are little-endian. */
+#define VAULT_MAGIC_LEN       4
+#define VAULT_VERSION         2
+#define VAULT_KDF_ARGON2ID    1
+#define ARGON2_MEMORY_KIB     64
+#define ARGON2_TIME_COST      6
+#define ARGON2_LANES          1
+#define V2_HEADER_LEN         52
+#define V2_SALT_OFFSET        20
+#define V2_IV_OFFSET          (V2_SALT_OFFSET + SALT_LEN)
+#define LEGACY_PBKDF2_ITER    10000
+
+static const uint8_t VAULT_MAGIC[VAULT_MAGIC_LEN] = {'T', 'H', 'V', '2'};
 
 /* ------------------------------------------------------------------ */
 /* Data types                                                           */
@@ -127,11 +141,21 @@ static esp_err_t vault_save(void);
 /* Crypto helpers — unified, backed by the kernel crypto module        */
 /* ------------------------------------------------------------------ */
 
-static esp_err_t derive_key(const char *password,
-                             const uint8_t salt[SALT_LEN],
-                             uint8_t key[32])
+static esp_err_t derive_key_v2(const char *password,
+                                const uint8_t salt[SALT_LEN],
+                                uint8_t key[32])
 {
-    return (thistle_crypto_pbkdf2_sha256(password, salt, SALT_LEN, PBKDF2_ITER, key, 32) == 0)
+    return (thistle_crypto_argon2id((const unsigned char *)password, strlen(password),
+                                    salt, SALT_LEN, key, 32) == 0)
+           ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t derive_key_legacy(const char *password,
+                                    const uint8_t salt[SALT_LEN],
+                                    uint8_t key[32])
+{
+    return (thistle_crypto_pbkdf2_sha256(password, salt, SALT_LEN,
+                                         LEGACY_PBKDF2_ITER, key, 32) == 0)
            ? ESP_OK : ESP_FAIL;
 }
 
@@ -153,16 +177,47 @@ static esp_err_t vault_decrypt(const uint8_t *ciphertext, size_t len,
            ? ESP_OK : ESP_FAIL;
 }
 
-static void compute_hmac(const uint8_t *data, size_t data_len,
-                          const uint8_t key[32],
-                          uint8_t hmac_out[HMAC_LEN])
+static esp_err_t compute_hmac(const uint8_t *data, size_t data_len,
+                              const uint8_t key[32],
+                              uint8_t hmac_out[HMAC_LEN])
 {
-    thistle_crypto_hmac_sha256(key, 32, data, data_len, hmac_out);
+    return (thistle_crypto_hmac_sha256(key, 32, data, data_len, hmac_out) == 0)
+           ? ESP_OK : ESP_FAIL;
 }
 
-static void fill_random(uint8_t *buf, size_t len)
+static esp_err_t fill_random(uint8_t *buf, size_t len)
 {
-    thistle_crypto_random(buf, len);
+    if (thistle_crypto_random(buf, len) != 0) {
+        memset(buf, 0, len);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static uint32_t read_u32_le(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void write_u32_le(uint8_t *p, uint32_t value)
+{
+    p[0] = (uint8_t)value;
+    p[1] = (uint8_t)(value >> 8);
+    p[2] = (uint8_t)(value >> 16);
+    p[3] = (uint8_t)(value >> 24);
+}
+
+static bool valid_v2_header(const uint8_t *header, size_t len)
+{
+    return len >= V2_HEADER_LEN &&
+           memcmp(header, VAULT_MAGIC, VAULT_MAGIC_LEN) == 0 &&
+           header[4] == VAULT_VERSION &&
+           header[5] == VAULT_KDF_ARGON2ID &&
+           header[6] == 0 && header[7] == 0 &&
+           read_u32_le(header + 8) == ARGON2_MEMORY_KIB &&
+           read_u32_le(header + 12) == ARGON2_TIME_COST &&
+           read_u32_le(header + 16) == ARGON2_LANES;
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,6 +415,41 @@ static bool vault_file_exists(void)
     return (stat(VAULT_PATH, &st) == 0);
 }
 
+static esp_err_t recover_interrupted_vault_write(void)
+{
+    struct stat st;
+    if (stat(VAULT_PATH, &st) == 0) {
+        return ESP_OK;
+    }
+    if (stat(VAULT_BACKUP_PATH, &st) == 0 &&
+        rename(VAULT_BACKUP_PATH, VAULT_PATH) == 0) {
+        ESP_LOGW(TAG, "Recovered vault backup after interrupted write");
+        return ESP_OK;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+static esp_err_t replace_vault_file(void)
+{
+    bool had_original = vault_file_exists();
+    remove(VAULT_BACKUP_PATH);
+    if (had_original && rename(VAULT_PATH, VAULT_BACKUP_PATH) != 0) {
+        remove(VAULT_TEMP_PATH);
+        return ESP_FAIL;
+    }
+    if (rename(VAULT_TEMP_PATH, VAULT_PATH) != 0) {
+        if (had_original) {
+            rename(VAULT_BACKUP_PATH, VAULT_PATH);
+        }
+        remove(VAULT_TEMP_PATH);
+        return ESP_FAIL;
+    }
+    if (had_original) {
+        remove(VAULT_BACKUP_PATH);
+    }
+    return ESP_OK;
+}
+
 /*
  * vault_load — open vault file, verify HMAC, decrypt, parse JSON.
  *
@@ -373,14 +463,18 @@ static bool vault_file_exists(void)
 static esp_err_t vault_load(const char *master_pw)
 {
     ensure_config_dir();
+    recover_interrupted_vault_write();
 
     if (!vault_file_exists()) {
         /* First use: create empty vault */
         ESP_LOGI(TAG, "First use — creating new vault");
-        fill_random(s_vault.salt, SALT_LEN);
+        if (fill_random(s_vault.salt, SALT_LEN) != ESP_OK) {
+            ESP_LOGE(TAG, "Salt generation failed on first use");
+            return ESP_FAIL;
+        }
         s_vault.entry_count = 0;
 
-        esp_err_t rc = derive_key(master_pw, s_vault.salt, s_vault.derived_key);
+        esp_err_t rc = derive_key_v2(master_pw, s_vault.salt, s_vault.derived_key);
         if (rc != ESP_OK) {
             ESP_LOGE(TAG, "Key derivation failed on first use");
             return rc;
@@ -389,8 +483,9 @@ static esp_err_t vault_load(const char *master_pw)
         /* Save the (empty) vault immediately */
         esp_err_t save_rc = vault_save();
         if (save_rc != ESP_OK) {
-            ESP_LOGW(TAG, "Could not write initial vault file: %d", save_rc);
-            /* Not fatal — carry on with in-memory empty vault */
+            memset(s_vault.derived_key, 0, sizeof(s_vault.derived_key));
+            ESP_LOGE(TAG, "Could not write initial vault file: %d", save_rc);
+            return save_rc;
         }
         return ESP_OK;
     }
@@ -402,8 +497,8 @@ static esp_err_t vault_load(const char *master_pw)
     long fsz = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    /* Minimum: salt + IV + 16 bytes ciphertext + HMAC */
-    if (fsz < (long)(HEADER_LEN + 16 + HMAC_LEN)) {
+    /* Minimum legacy envelope: salt + IV + one AES block + HMAC. */
+    if (fsz < (long)(LEGACY_HEADER_LEN + 16 + HMAC_LEN)) {
         fclose(f);
         ESP_LOGE(TAG, "Vault file too small (%ld bytes)", fsz);
         return ESP_ERR_INVALID_SIZE;
@@ -415,16 +510,34 @@ static esp_err_t vault_load(const char *master_pw)
     fclose(f);
     if (nread_vault != (size_t)fsz) { free(filebuf); return ESP_ERR_INVALID_SIZE; }
 
-    /* Split file */
-    uint8_t *file_salt = filebuf;                            /* [0..15]  */
-    uint8_t *file_iv   = filebuf + SALT_LEN;                /* [16..31] */
-    uint8_t *ciphertext = filebuf + HEADER_LEN;             /* [32..fsz-HMAC_LEN-1] */
-    size_t   cipher_len = (size_t)fsz - HEADER_LEN - HMAC_LEN;
+    bool is_v2 = memcmp(filebuf, VAULT_MAGIC, VAULT_MAGIC_LEN) == 0;
+    size_t header_len = is_v2 ? V2_HEADER_LEN : LEGACY_HEADER_LEN;
+    if (is_v2 && !valid_v2_header(filebuf, (size_t)fsz)) {
+        free(filebuf);
+        ESP_LOGE(TAG, "Unsupported or malformed vault KDF header");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if ((size_t)fsz < header_len + 16 + HMAC_LEN) {
+        free(filebuf);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    uint8_t *file_salt = is_v2 ? filebuf + V2_SALT_OFFSET : filebuf;
+    uint8_t *file_iv = is_v2 ? filebuf + V2_IV_OFFSET : filebuf + SALT_LEN;
+    uint8_t *ciphertext = filebuf + header_len;
+    size_t cipher_len = (size_t)fsz - header_len - HMAC_LEN;
     uint8_t *file_hmac  = filebuf + fsz - HMAC_LEN;
+
+    if (cipher_len == 0 || cipher_len % 16 != 0) {
+        free(filebuf);
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     /* Derive key from candidate password */
     uint8_t candidate_key[32];
-    esp_err_t rc = derive_key(master_pw, file_salt, candidate_key);
+    esp_err_t rc = is_v2
+        ? derive_key_v2(master_pw, file_salt, candidate_key)
+        : derive_key_legacy(master_pw, file_salt, candidate_key);
     if (rc != ESP_OK) {
         free(filebuf);
         return rc;
@@ -467,13 +580,42 @@ static esp_err_t vault_load(const char *master_pw)
     int cnt = json_to_entries((char *)plaintext);
     free(plaintext);
 
-    /* Accept key and salt only after successful authentication */
-    memcpy(s_vault.salt, file_salt, SALT_LEN);
-    memcpy(s_vault.derived_key, candidate_key, 32);
+    if (cnt < 0) {
+        free(filebuf);
+        memset(candidate_key, 0, sizeof(candidate_key));
+        ESP_LOGE(TAG, "Authenticated vault payload is malformed");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_vault.entry_count = cnt;
+
+    /* Legacy files are authenticated first, then atomically re-keyed to v2. */
+    if (!is_v2) {
+        uint8_t migrated_salt[SALT_LEN];
+        uint8_t migrated_key[32];
+        if (fill_random(migrated_salt, SALT_LEN) != ESP_OK ||
+            derive_key_v2(master_pw, migrated_salt, migrated_key) != ESP_OK) {
+            memset(candidate_key, 0, sizeof(candidate_key));
+            free(filebuf);
+            return ESP_FAIL;
+        }
+        memcpy(s_vault.salt, migrated_salt, SALT_LEN);
+        memcpy(s_vault.derived_key, migrated_key, sizeof(migrated_key));
+        memset(migrated_key, 0, sizeof(migrated_key));
+        if (vault_save() != ESP_OK) {
+            memset(s_vault.derived_key, 0, sizeof(s_vault.derived_key));
+            memset(candidate_key, 0, sizeof(candidate_key));
+            free(filebuf);
+            ESP_LOGE(TAG, "Legacy vault migration failed; original retained");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "Migrated legacy vault to Argon2id v2");
+    } else {
+        memcpy(s_vault.salt, file_salt, SALT_LEN);
+        memcpy(s_vault.derived_key, candidate_key, 32);
+    }
     memset(candidate_key, 0, 32);
     free(filebuf);
-
-    s_vault.entry_count = (cnt >= 0) ? cnt : 0;
     return ESP_OK;
 }
 
@@ -497,7 +639,10 @@ static esp_err_t vault_save(void)
 
     /* Generate fresh IV for this save */
     uint8_t iv[IV_LEN];
-    fill_random(iv, IV_LEN);
+    if (fill_random(iv, IV_LEN) != ESP_OK) {
+        free(padded);
+        return ESP_FAIL;
+    }
 
     /* Encrypt */
     uint8_t *ciphertext = (uint8_t *)malloc(padded_len);
@@ -509,25 +654,42 @@ static esp_err_t vault_save(void)
     free(padded);
     if (rc != ESP_OK) { free(ciphertext); return rc; }
 
-    /* Build file: salt || IV || ciphertext */
-    size_t body_len = SALT_LEN + IV_LEN + padded_len;
+    /* Build the authenticated, versioned v2 envelope. */
+    size_t body_len = V2_HEADER_LEN + padded_len;
     uint8_t *filebuf = (uint8_t *)malloc(body_len + HMAC_LEN);
     if (!filebuf) { free(ciphertext); return ESP_ERR_NO_MEM; }
 
-    memcpy(filebuf,                  s_vault.salt, SALT_LEN);
-    memcpy(filebuf + SALT_LEN,       iv,           IV_LEN);
-    memcpy(filebuf + SALT_LEN + IV_LEN, ciphertext, padded_len);
+    memcpy(filebuf, VAULT_MAGIC, VAULT_MAGIC_LEN);
+    filebuf[4] = VAULT_VERSION;
+    filebuf[5] = VAULT_KDF_ARGON2ID;
+    filebuf[6] = 0;
+    filebuf[7] = 0;
+    write_u32_le(filebuf + 8, ARGON2_MEMORY_KIB);
+    write_u32_le(filebuf + 12, ARGON2_TIME_COST);
+    write_u32_le(filebuf + 16, ARGON2_LANES);
+    memcpy(filebuf + V2_SALT_OFFSET, s_vault.salt, SALT_LEN);
+    memcpy(filebuf + V2_IV_OFFSET, iv, IV_LEN);
+    memcpy(filebuf + V2_HEADER_LEN, ciphertext, padded_len);
     free(ciphertext);
 
     /* Compute HMAC over (salt || IV || ciphertext) */
-    compute_hmac(filebuf, body_len, s_vault.derived_key,
-                 filebuf + body_len);
+    if (compute_hmac(filebuf, body_len, s_vault.derived_key,
+                     filebuf + body_len) != ESP_OK) {
+        free(filebuf);
+        return ESP_FAIL;
+    }
 
-    FILE *f = fopen(VAULT_PATH, "wb");
+    FILE *f = fopen(VAULT_TEMP_PATH, "wb");
     if (!f) { free(filebuf); return ESP_ERR_NOT_FOUND; }
-    fwrite(filebuf, 1, body_len + HMAC_LEN, f);
-    fclose(f);
+    size_t total_len = body_len + HMAC_LEN;
+    bool write_ok = fwrite(filebuf, 1, total_len, f) == total_len;
+    bool close_ok = fclose(f) == 0;
     free(filebuf);
+
+    if (!write_ok || !close_ok || replace_vault_file() != ESP_OK) {
+        remove(VAULT_TEMP_PATH);
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "Vault saved (%d entries)", s_vault.entry_count);
     return ESP_OK;
@@ -1002,6 +1164,7 @@ esp_err_t vault_ui_create(lv_obj_t *parent)
     lv_obj_set_size(s_vault.master_pw_ta, 220, 28);
     lv_obj_align(s_vault.master_pw_ta, LV_ALIGN_CENTER, 0, -20);
     lv_textarea_set_one_line(s_vault.master_pw_ta, true);
+    lv_textarea_set_max_length(s_vault.master_pw_ta, 128);
     lv_textarea_set_password_mode(s_vault.master_pw_ta, true);
     lv_textarea_set_placeholder_text(s_vault.master_pw_ta, "Master password");
     lv_obj_set_style_text_font(s_vault.master_pw_ta, &lv_font_montserrat_14, LV_PART_MAIN);

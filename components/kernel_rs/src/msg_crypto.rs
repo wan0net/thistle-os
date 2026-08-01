@@ -7,15 +7,15 @@
 // (encrypt-then-MAC) with per-message key derivation from a pre-computed
 // master key.
 //
-// Wire format: [version:1][nonce:16][ciphertext:N][hmac:32]
-// Total overhead: 49 bytes per message.
+// V2 wire format: [version:1][salt:16][nonce:16][ciphertext:N][hmac:32]
+// Total overhead: 65 bytes per message. Legacy v1 envelopes remain readable.
 
 use std::sync::Mutex;
 
 use aes::cipher::{BlockCipherEncrypt, KeyInit as AesKeyInit};
 use hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2_hmac;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
@@ -36,12 +36,16 @@ const ESP_FAIL: i32 = -1;
 // ---------------------------------------------------------------------------
 
 const MAX_CHANNELS: usize = 32;
+const MAX_PASSPHRASE_LEN: usize = 256;
 const MASTER_KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 16;
 const HMAC_LEN: usize = 32;
 const HEADER_LEN: usize = 1; // version byte
 const OVERHEAD: usize = HEADER_LEN + NONCE_LEN + HMAC_LEN; // 49 bytes
-const VERSION: u8 = 0x01;
+const V2_SALT_LEN: usize = 16;
+const V2_OVERHEAD: usize = HEADER_LEN + V2_SALT_LEN + NONCE_LEN + HMAC_LEN; // 65 bytes
+const LEGACY_VERSION: u8 = 0x01;
+const VERSION: u8 = 0x02;
 const PBKDF2_ITERATIONS: u32 = 10_000;
 const PBKDF2_SALT: &[u8] = b"ThistleOS-MsgCrypto-v1";
 
@@ -55,6 +59,9 @@ type HmacSha256 = Hmac<Sha256>;
 struct CryptoChannel {
     contact_id: u32,
     master_key: [u8; MASTER_KEY_LEN],
+    salt: [u8; V2_SALT_LEN],
+    password_material: [u8; MASTER_KEY_LEN],
+    legacy_master_key: [u8; MASTER_KEY_LEN],
     active: bool,
     msg_count_tx: u32,
     msg_count_rx: u32,
@@ -65,6 +72,9 @@ impl CryptoChannel {
         CryptoChannel {
             contact_id: 0,
             master_key: [0u8; MASTER_KEY_LEN],
+            salt: [0u8; V2_SALT_LEN],
+            password_material: [0u8; MASTER_KEY_LEN],
+            legacy_master_key: [0u8; MASTER_KEY_LEN],
             active: false,
             msg_count_tx: 0,
             msg_count_rx: 0,
@@ -216,10 +226,58 @@ fn derive_master_key(passphrase: &[u8]) -> [u8; MASTER_KEY_LEN] {
     key
 }
 
+fn prehash_passphrase(passphrase: &[u8]) -> [u8; MASTER_KEY_LEN] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"ThistleOS-MsgCrypto-v2\0");
+    hasher.update(passphrase);
+    let digest = hasher.finalize();
+    let mut material = [0u8; MASTER_KEY_LEN];
+    material.copy_from_slice(&digest);
+    material
+}
+
+fn derive_v2_master_key(
+    password_material: &[u8; MASTER_KEY_LEN],
+    salt: &[u8; V2_SALT_LEN],
+) -> Result<[u8; MASTER_KEY_LEN], i32> {
+    crate::crypto::derive_argon2id_key(password_material, salt)
+}
+
+fn derive_v2_envelope_key_with<F>(
+    password_material: &[u8; MASTER_KEY_LEN],
+    input: &[u8],
+    derive: F,
+) -> Result<[u8; MASTER_KEY_LEN], i32>
+where
+    F: FnOnce(
+        &[u8; MASTER_KEY_LEN],
+        &[u8; V2_SALT_LEN],
+    ) -> Result<[u8; MASTER_KEY_LEN], i32>,
+{
+    if input.len() < V2_OVERHEAD {
+        return Err(ESP_ERR_INVALID_SIZE);
+    }
+    if input[0] != VERSION {
+        return Err(ESP_ERR_NOT_SUPPORTED);
+    }
+    let mut salt = [0u8; V2_SALT_LEN];
+    salt.copy_from_slice(&input[1..1 + V2_SALT_LEN]);
+    derive(password_material, &salt)
+}
+
 /// Zeroize channel key material before deactivation.
 fn zeroize_channel(ch: &mut CryptoChannel) {
     // Overwrite key material with zeros
     for byte in ch.master_key.iter_mut() {
+        *byte = 0;
+    }
+    for byte in ch.salt.iter_mut() {
+        *byte = 0;
+    }
+    for byte in ch.password_material.iter_mut() {
+        *byte = 0;
+    }
+    for byte in ch.legacy_master_key.iter_mut() {
         *byte = 0;
     }
     ch.active = false;
@@ -249,7 +307,7 @@ fn encrypt_message(
     let (enc_key, mac_key) = derive_per_message_keys(master_key, &nonce);
 
     // 3. Write version byte
-    output[0] = VERSION;
+    output[0] = LEGACY_VERSION;
 
     // 4. Write nonce
     output[1..1 + NONCE_LEN].copy_from_slice(&nonce);
@@ -278,7 +336,7 @@ fn decrypt_message(
     }
 
     // 2. Check version
-    if input[0] != VERSION {
+    if input[0] != LEGACY_VERSION {
         return Err(ESP_ERR_NOT_SUPPORTED);
     }
 
@@ -311,6 +369,75 @@ fn decrypt_message(
     Ok(ct_len)
 }
 
+/// Encrypt a v2 message. The random channel salt is carried in and
+/// authenticated by every envelope so the peer can derive the same key.
+fn encrypt_message_v2(
+    master_key: &[u8; MASTER_KEY_LEN],
+    salt: &[u8; V2_SALT_LEN],
+    plaintext: &[u8],
+    output: &mut [u8],
+) -> Result<usize, i32> {
+    let total_len = V2_OVERHEAD + plaintext.len();
+    if output.len() < total_len {
+        return Err(ESP_ERR_NO_MEM);
+    }
+
+    let mut nonce = [0u8; NONCE_LEN];
+    if getrandom::fill(&mut nonce).is_err() {
+        return Err(ESP_FAIL);
+    }
+
+    output[0] = VERSION;
+    output[1..1 + V2_SALT_LEN].copy_from_slice(salt);
+    let nonce_start = HEADER_LEN + V2_SALT_LEN;
+    output[nonce_start..nonce_start + NONCE_LEN].copy_from_slice(&nonce);
+
+    let (enc_key, mac_key) = derive_per_message_keys(master_key, &nonce);
+    let ct_start = nonce_start + NONCE_LEN;
+    let ct_end = ct_start + plaintext.len();
+    aes256_ctr_process(&enc_key, &nonce, plaintext, &mut output[ct_start..ct_end]);
+    let hmac_val = compute_hmac(&mac_key, &output[..ct_end]);
+    output[ct_end..ct_end + HMAC_LEN].copy_from_slice(&hmac_val);
+    Ok(total_len)
+}
+
+fn decrypt_message_v2(
+    master_key: &[u8; MASTER_KEY_LEN],
+    input: &[u8],
+    plaintext: &mut [u8],
+) -> Result<usize, i32> {
+    if input.len() < V2_OVERHEAD {
+        return Err(ESP_ERR_INVALID_SIZE);
+    }
+    if input[0] != VERSION {
+        return Err(ESP_ERR_NOT_SUPPORTED);
+    }
+
+    let nonce_start = HEADER_LEN + V2_SALT_LEN;
+    let nonce: [u8; NONCE_LEN] = input[nonce_start..nonce_start + NONCE_LEN]
+        .try_into()
+        .map_err(|_| ESP_ERR_INVALID_SIZE)?;
+    let ct_len = input.len() - V2_OVERHEAD;
+    let ct_start = nonce_start + NONCE_LEN;
+    let ct_end = ct_start + ct_len;
+    if plaintext.len() < ct_len {
+        return Err(ESP_ERR_NO_MEM);
+    }
+
+    let (enc_key, mac_key) = derive_per_message_keys(master_key, &nonce);
+    let computed_hmac = compute_hmac(&mac_key, &input[..ct_end]);
+    if !constant_time_eq(&computed_hmac, &input[ct_end..ct_end + HMAC_LEN]) {
+        return Err(ESP_ERR_INVALID_CRC);
+    }
+    aes256_ctr_process(
+        &enc_key,
+        &nonce,
+        &input[ct_start..ct_end],
+        &mut plaintext[..ct_len],
+    );
+    Ok(ct_len)
+}
+
 // ---------------------------------------------------------------------------
 // FFI exports
 // ---------------------------------------------------------------------------
@@ -335,7 +462,10 @@ pub unsafe extern "C" fn rs_msg_crypto_establish(
     passphrase: *const u8,
     passphrase_len: usize,
 ) -> i32 {
-    if passphrase.is_null() || passphrase_len == 0 {
+    if passphrase.is_null()
+        || passphrase_len == 0
+        || passphrase_len > MAX_PASSPHRASE_LEN
+    {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -346,7 +476,16 @@ pub unsafe extern "C" fn rs_msg_crypto_establish(
 
     // SAFETY: Caller guarantees passphrase points to passphrase_len valid bytes.
     let pw = std::slice::from_raw_parts(passphrase, passphrase_len);
-    let master_key = derive_master_key(pw);
+    let password_material = prehash_passphrase(pw);
+    let legacy_master_key = derive_master_key(pw);
+    let mut salt = [0u8; V2_SALT_LEN];
+    if getrandom::fill(&mut salt).is_err() {
+        return ESP_FAIL;
+    }
+    let master_key = match derive_v2_master_key(&password_material, &salt) {
+        Ok(key) => key,
+        Err(err) => return err,
+    };
 
     // Check if channel already exists — replace it
     let slot = if let Some(idx) = state.find_channel(contact_id) {
@@ -363,6 +502,9 @@ pub unsafe extern "C" fn rs_msg_crypto_establish(
     state.channels[slot] = CryptoChannel {
         contact_id,
         master_key,
+        salt,
+        password_material,
+        legacy_master_key,
         active: true,
         msg_count_tx: 0,
         msg_count_rx: 0,
@@ -440,6 +582,7 @@ pub unsafe extern "C" fn rs_msg_crypto_encrypt(
     };
 
     let master_key = state.channels[idx].master_key;
+    let salt = state.channels[idx].salt;
 
     // SAFETY: Caller guarantees pointers are valid for the given lengths.
     let pt = if pt_len > 0 {
@@ -449,7 +592,7 @@ pub unsafe extern "C" fn rs_msg_crypto_encrypt(
     };
     let ct = std::slice::from_raw_parts_mut(ciphertext, ct_max);
 
-    match encrypt_message(&master_key, pt, ct) {
+    match encrypt_message_v2(&master_key, &salt, pt, ct) {
         Ok(len) => {
             state.channels[idx].msg_count_tx += 1;
             len as i32
@@ -481,13 +624,25 @@ pub unsafe extern "C" fn rs_msg_crypto_decrypt(
         None => return ESP_ERR_NOT_FOUND,
     };
 
-    let master_key = state.channels[idx].master_key;
-
     // SAFETY: Caller guarantees pointers are valid for the given lengths.
     let ct = std::slice::from_raw_parts(ciphertext, ct_len);
     let pt = std::slice::from_raw_parts_mut(plaintext, pt_max);
 
-    match decrypt_message(&master_key, ct, pt) {
+    let result = match ct.first().copied() {
+        Some(LEGACY_VERSION) => {
+            let legacy_master_key = state.channels[idx].legacy_master_key;
+            decrypt_message(&legacy_master_key, ct, pt)
+        }
+        Some(VERSION) => {
+            let password_material = state.channels[idx].password_material;
+            derive_v2_envelope_key_with(&password_material, ct, derive_v2_master_key)
+                .and_then(|master_key| decrypt_message_v2(&master_key, ct, pt))
+        }
+        Some(_) => Err(ESP_ERR_NOT_SUPPORTED),
+        None => Err(ESP_ERR_INVALID_SIZE),
+    };
+
+    match result {
         Ok(len) => {
             state.channels[idx].msg_count_rx += 1;
             len as i32
@@ -496,10 +651,10 @@ pub unsafe extern "C" fn rs_msg_crypto_decrypt(
     }
 }
 
-/// Returns the per-message overhead in bytes (49).
+/// Returns the v2 per-message overhead in bytes (65).
 #[no_mangle]
 pub extern "C" fn rs_msg_crypto_get_overhead() -> i32 {
-    OVERHEAD as i32
+    V2_OVERHEAD as i32
 }
 
 /// Returns the number of active encrypted channels.
@@ -559,22 +714,53 @@ pub unsafe extern "C" fn rs_msg_crypto_get_stats(out: *mut CMsgCryptoStats) -> i
     ESP_OK
 }
 
-/// Standalone PBKDF2 key derivation utility. Writes 32 bytes to key_out.
+/// Retained ABI entry point for old callers. Insecure unsalted derivation is
+/// disabled; callers must migrate to `rs_msg_crypto_derive_key_v2`.
 #[no_mangle]
 pub unsafe extern "C" fn rs_msg_crypto_derive_key(
     passphrase: *const u8,
     pw_len: usize,
     key_out: *mut u8,
 ) -> i32 {
-    if passphrase.is_null() || key_out.is_null() || pw_len == 0 {
+    if passphrase.is_null()
+        || key_out.is_null()
+        || pw_len == 0
+        || pw_len > MAX_PASSPHRASE_LEN
+    {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // SAFETY: Caller guarantees pointers are valid for the given lengths.
+    ESP_ERR_NOT_SUPPORTED
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rs_msg_crypto_derive_key_v2(
+    passphrase: *const u8,
+    pw_len: usize,
+    salt: *const u8,
+    salt_len: usize,
+    key_out: *mut u8,
+) -> i32 {
+    if passphrase.is_null()
+        || salt.is_null()
+        || key_out.is_null()
+        || pw_len == 0
+        || pw_len > MAX_PASSPHRASE_LEN
+        || salt_len != V2_SALT_LEN
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     let pw = std::slice::from_raw_parts(passphrase, pw_len);
-    let key = derive_master_key(pw);
-    std::ptr::copy_nonoverlapping(key.as_ptr(), key_out, MASTER_KEY_LEN);
-    ESP_OK
+    let salt = &*(salt as *const [u8; V2_SALT_LEN]);
+    let password_material = prehash_passphrase(pw);
+    match derive_v2_master_key(&password_material, salt) {
+        Ok(key) => {
+            std::ptr::copy_nonoverlapping(key.as_ptr(), key_out, MASTER_KEY_LEN);
+            ESP_OK
+        }
+        Err(err) => err,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +835,32 @@ mod tests {
         // Should still have only 1 channel
         assert_eq!(unsafe { rs_msg_crypto_channel_count() }, 1);
         assert!(unsafe { rs_msg_crypto_is_active(10) });
+    }
+
+    #[test]
+    fn test_reestablish_generates_a_fresh_v2_salt() {
+        reset_state();
+        unsafe { rs_msg_crypto_init() };
+        let pw = b"shared passphrase";
+        assert_eq!(
+            unsafe { rs_msg_crypto_establish(77, pw.as_ptr(), pw.len()) },
+            ESP_OK
+        );
+        let first_salt = {
+            let state = STATE.lock().unwrap();
+            state.channels[state.find_channel(77).unwrap()].salt
+        };
+
+        assert_eq!(
+            unsafe { rs_msg_crypto_establish(77, pw.as_ptr(), pw.len()) },
+            ESP_OK
+        );
+        let second_salt = {
+            let state = STATE.lock().unwrap();
+            state.channels[state.find_channel(77).unwrap()].salt
+        };
+
+        assert_ne!(first_salt, second_salt);
     }
 
     #[test]
@@ -824,6 +1036,62 @@ mod tests {
         let k1 = derive_master_key(b"alpha");
         let k2 = derive_master_key(b"bravo");
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn test_v2_master_key_changes_with_random_salt() {
+        let password_material = prehash_passphrase(b"shared passphrase");
+        let key_a = derive_v2_master_key(&password_material, &[0x41; 16]).unwrap();
+        let key_b = derive_v2_master_key(&password_material, &[0x42; 16]).unwrap();
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn test_v2_envelope_authenticates_its_salt() {
+        let password_material = prehash_passphrase(b"shared passphrase");
+        let salt = [0x51; 16];
+        let key = derive_v2_master_key(&password_material, &salt).unwrap();
+        let plaintext = b"authenticated salt";
+        let mut encrypted = vec![0u8; plaintext.len() + V2_OVERHEAD];
+        let len = encrypt_message_v2(&key, &salt, plaintext, &mut encrypted).unwrap();
+
+        encrypted[1] ^= 0x01;
+        let tampered_salt: [u8; 16] = encrypted[1..17].try_into().unwrap();
+        let tampered_key = derive_v2_master_key(&password_material, &tampered_salt).unwrap();
+        let mut decrypted = vec![0u8; plaintext.len()];
+        assert_eq!(
+            decrypt_message_v2(&tampered_key, &encrypted[..len], &mut decrypted),
+            Err(ESP_ERR_INVALID_CRC)
+        );
+    }
+
+    #[test]
+    fn test_malformed_v2_envelope_is_rejected_before_kdf() {
+        let password_material = prehash_passphrase(b"shared passphrase");
+        let mut derive_calls = 0;
+        let result = derive_v2_envelope_key_with(
+            &password_material,
+            &[VERSION; V2_OVERHEAD - 1],
+            |_, _| {
+                derive_calls += 1;
+                Ok([0u8; MASTER_KEY_LEN])
+            },
+        );
+        assert_eq!(result, Err(ESP_ERR_INVALID_SIZE));
+        assert_eq!(derive_calls, 0);
+
+        let mut wrong_version = [0u8; V2_OVERHEAD];
+        wrong_version[0] = 0xFF;
+        let result = derive_v2_envelope_key_with(
+            &password_material,
+            &wrong_version,
+            |_, _| {
+                derive_calls += 1;
+                Ok([0u8; MASTER_KEY_LEN])
+            },
+        );
+        assert_eq!(result, Err(ESP_ERR_NOT_SUPPORTED));
+        assert_eq!(derive_calls, 0);
     }
 
     // ── Per-message key derivation ───────────────────────────────────
@@ -1210,11 +1478,11 @@ mod tests {
         let pw = b"empty-msg-test";
         unsafe { rs_msg_crypto_establish(1, pw.as_ptr(), pw.len()) };
 
-        let mut ct = [0u8; OVERHEAD + 16]; // extra space
+        let mut ct = [0u8; V2_OVERHEAD + 16]; // extra space
         let enc_len = unsafe {
             rs_msg_crypto_encrypt(1, [].as_ptr(), 0, ct.as_mut_ptr(), ct.len())
         };
-        assert_eq!(enc_len, OVERHEAD as i32);
+        assert_eq!(enc_len, V2_OVERHEAD as i32);
 
         let mut pt = [0u8; 16];
         let dec_len = unsafe {
@@ -1239,7 +1507,7 @@ mod tests {
 
     #[test]
     fn test_overhead_constant() {
-        assert_eq!(rs_msg_crypto_get_overhead(), 49);
+        assert_eq!(rs_msg_crypto_get_overhead(), V2_OVERHEAD as i32);
         assert_eq!(OVERHEAD, 49);
         assert_eq!(HEADER_LEN + NONCE_LEN + HMAC_LEN, 49);
     }
@@ -1247,32 +1515,49 @@ mod tests {
     // ── FFI derive key utility ───────────────────────────────────────
 
     #[test]
-    fn test_derive_key_ffi() {
+    fn test_derive_key_v2_ffi() {
         let pw = b"ffi-derivation";
+        let salt = [0x61u8; V2_SALT_LEN];
         let mut key1 = [0u8; 32];
         let mut key2 = [0u8; 32];
         let ret = unsafe {
-            rs_msg_crypto_derive_key(pw.as_ptr(), pw.len(), key1.as_mut_ptr())
+            rs_msg_crypto_derive_key_v2(
+                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), key1.as_mut_ptr()
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(key1, [0u8; 32]);
 
         // Same passphrase produces same key
         unsafe {
-            rs_msg_crypto_derive_key(pw.as_ptr(), pw.len(), key2.as_mut_ptr());
+            rs_msg_crypto_derive_key_v2(
+                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), key2.as_mut_ptr()
+            );
         }
         assert_eq!(key1, key2);
     }
 
     #[test]
-    fn test_derive_key_matches_internal() {
+    fn test_derive_key_v2_matches_internal() {
         let pw = b"consistency-check";
-        let internal = derive_master_key(pw);
+        let salt = [0x62u8; V2_SALT_LEN];
+        let internal = derive_v2_master_key(&prehash_passphrase(pw), &salt).unwrap();
         let mut ffi_key = [0u8; 32];
         unsafe {
-            rs_msg_crypto_derive_key(pw.as_ptr(), pw.len(), ffi_key.as_mut_ptr());
+            rs_msg_crypto_derive_key_v2(
+                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), ffi_key.as_mut_ptr()
+            );
         }
         assert_eq!(ffi_key, internal);
+    }
+
+    #[test]
+    fn test_legacy_derive_key_api_fails_closed() {
+        let pw = b"legacy";
+        let mut output = [0xA5u8; MASTER_KEY_LEN];
+        let ret = unsafe { rs_msg_crypto_derive_key(pw.as_ptr(), pw.len(), output.as_mut_ptr()) };
+        assert_eq!(ret, ESP_ERR_NOT_SUPPORTED);
+        assert_eq!(output, [0xA5u8; MASTER_KEY_LEN]);
     }
 
     // ── Uninitialized state ──────────────────────────────────────────

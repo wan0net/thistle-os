@@ -230,7 +230,7 @@ Full text: https://github.com/LoupVaillant/Monocypher/blob/master/LICENCE.md
 
 **License:** Apache License 2.0
 **Source:** https://github.com/Mbed-TLS/mbedtls
-**Used for:** TLS (HTTPS app store), AES-256-CBC + PBKDF2-SHA256 (Vault), SHA-256 OTA verification. Included via ESP-IDF.
+**Used for:** TLS (HTTPS app store), AES-256-CBC (Vault), SHA-256 OTA verification, and legacy PBKDF2 vault migration. Included via ESP-IDF.
 
 ```
 Copyright The Mbed TLS Contributors
@@ -346,6 +346,17 @@ and: https://github.com/esp-rs/esp-idf-hal/blob/master/LICENSE-APACHE
 
 ---
 
+## argon2 (RustCrypto)
+
+**License:** MIT OR Apache-2.0
+**Source:** https://github.com/RustCrypto/password-hashes/tree/master/argon2
+**Used for:** Argon2id password key derivation for vault and messaging envelopes.
+
+Full text: https://github.com/RustCrypto/password-hashes/blob/master/LICENSE-MIT
+and: https://github.com/RustCrypto/password-hashes/blob/master/LICENSE-APACHE
+
+---
+
 ## esp-idf-svc (Rust)
 
 **License:** MIT OR Apache-2.0
@@ -377,6 +388,6 @@ All dependencies are compatible with the ThistleOS BSD 3-Clause license:
 | MIT | Yes | LVGL, FreeRTOS, RadioLib, libcurl, Unity, esp-rs crates |
 | BSD-2-Clause | Yes | Monocypher |
 | zlib | Yes | SDL2 |
-| MIT OR Apache-2.0 | Yes | esp-idf-hal, esp-idf-svc, esp-idf-sys |
+| MIT OR Apache-2.0 | Yes | argon2, esp-idf-hal, esp-idf-svc, esp-idf-sys |
 
 No GPL, LGPL, AGPL, or other copyleft licenses are present in this project.
