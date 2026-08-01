@@ -140,10 +140,12 @@ on_destroy() &#x2500;&#x2500; user closed app; free LVGL objects, free memory</d
 <span class="tok-keyword">int</span> <span class="tok-fn">thistle_gps_get_lat_lon</span>(<span class="tok-keyword">double</span> *lat, <span class="tok-keyword">double</span> *lon);</code></pre>
 
     <h3>Storage (requires <code>PERM_STORAGE</code>)</h3>
-    <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_open</span> (<span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *path, <span class="tok-keyword">int</span> flags);
-<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_read</span> (<span class="tok-keyword">int</span> fd, <span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> len);
-<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_write</span>(<span class="tok-keyword">int</span> fd, <span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> len);
-<span class="tok-keyword">int</span> <span class="tok-fn">thistle_fs_close</span>(<span class="tok-keyword">int</span> fd);</code></pre>
+    <p>App paths are relative to <code>/spiffs/data/apps/&lt;manifest-id&gt;/</code>. Absolute paths and paths containing <code>.</code> or <code>..</code> are rejected. File handles are private to the app that opened them; shared storage requires a future explicit broker API.</p>
+    <pre><code><span class="tok-keyword">void</span> *<span class="tok-fn">thistle_fs_open</span> (<span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *relative_path, <span class="tok-keyword">const</span> <span class="tok-keyword">char</span> *mode);
+<span class="tok-keyword">int</span>   <span class="tok-fn">thistle_fs_read</span> (<span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> size, <span class="tok-type">size_t</span> count, <span class="tok-keyword">void</span> *stream);
+<span class="tok-keyword">int</span>   <span class="tok-fn">thistle_fs_write</span>(<span class="tok-keyword">const</span> <span class="tok-keyword">void</span> *buf, <span class="tok-type">size_t</span> size, <span class="tok-type">size_t</span> count, <span class="tok-keyword">void</span> *stream);
+<span class="tok-keyword">int</span>   <span class="tok-fn">thistle_fs_close</span>(<span class="tok-keyword">void</span> *stream);</code></pre>
+    <p><strong>Migration:</strong> remove legacy <code>/spiffs/</code> or <code>/sdcard/</code> prefixes from app file paths. Existing data must be copied once into the app's manifest-ID root by a trusted system migration; apps cannot import arbitrary legacy paths themselves.</p>
 
     <h3>IPC (requires <code>PERM_IPC</code>)</h3>
     <pre><code><span class="tok-keyword">int</span> <span class="tok-fn">thistle_msg_send</span>(<span class="tok-type">uint32_t</span> dst_app, <span class="tok-type">uint32_t</span> type,

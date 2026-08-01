@@ -26,7 +26,7 @@ const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_ERR_INVALID_CRC: i32 = 0x109;
 const ESP_FAIL: i32 = -1;
 
-const MAX_LOADED_APPS: usize = 16;
+pub(crate) const MAX_LOADED_APPS: usize = 16;
 const ELF_MAX_SIZE_BYTES: usize = 1024 * 1024; // 1 MB
 const ELF_APP_TASK_STACK: u32 = 8192;
 const ELF_APP_TASK_PRIO: u32 = 5;
@@ -83,7 +83,7 @@ extern "C" {
 
     // Syscall table
     fn syscall_table_count() -> usize;
-    fn syscall_set_current_app(id: *const c_char);
+    fn syscall_set_current_app(id: *const c_char, slot: i32);
 
     // Logging
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
@@ -461,9 +461,9 @@ pub unsafe extern "C" fn elf_app_load(
         unsigned_app_symbol_resolver
     });
 
-    syscall_set_current_app(perm_id);
+    syscall_set_current_app(perm_id, slot_idx as i32);
     let ret = esp_elf_relocate(elf_ptr, buf as *const u8);
-    syscall_set_current_app(std::ptr::null());
+    syscall_set_current_app(std::ptr::null(), -1);
 
     free(buf);
 
@@ -588,6 +588,8 @@ pub unsafe extern "C" fn elf_app_unload(handle: *mut ElfAppHandle) -> i32 {
         );
         app.granted_permissions = 0;
     }
+
+    crate::syscall_table::syscall_clear_app_storage(app.slot);
 
     esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF app unloaded\0".as_ptr());
 

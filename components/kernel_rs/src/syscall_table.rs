@@ -5,8 +5,9 @@
 // Provides a static table of (name, function-pointer) pairs that maps
 // kernel/HAL symbol names to their addresses for ELF dynamic linking.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::permissions::{self, *};
@@ -15,7 +16,31 @@ use crate::permissions::{self, *};
 // Global context for permission checking
 // ---------------------------------------------------------------------------
 
-static CURRENT_APP_ID: Mutex<[u8; 64]> = Mutex::new([0u8; 64]);
+struct AppResolverContext {
+    id: [u8; 64],
+    slot: Option<usize>,
+}
+
+static CURRENT_APP_CONTEXT: Mutex<AppResolverContext> = Mutex::new(AppResolverContext {
+    id: [0u8; 64],
+    slot: None,
+});
+
+const MAX_APP_STORAGE_SLOTS: usize = crate::elf_loader::MAX_LOADED_APPS;
+const MAX_OPEN_APP_FILES: usize = 32;
+const APP_STORAGE_BASE: &str = "/spiffs/data/apps";
+
+static APP_STORAGE_IDS: Mutex<[[u8; 64]; MAX_APP_STORAGE_SLOTS]> =
+    Mutex::new([[0u8; 64]; MAX_APP_STORAGE_SLOTS]);
+
+#[derive(Clone, Copy)]
+struct AppFileOwner {
+    stream: usize,
+    slot: usize,
+}
+
+static OPEN_APP_FILES: Mutex<[Option<AppFileOwner>; MAX_OPEN_APP_FILES]> =
+    Mutex::new([None; MAX_OPEN_APP_FILES]);
 
 // Explicit app ABI allowlists. Driver ELFs use the full table; signed apps
 // receive only documented `thistle_*` wrappers, and unsigned debug apps are
@@ -109,18 +134,31 @@ const APP_VISIBLE_SYMBOLS: &[&str] = &[
     "thistle_ui_theme_text_secondary",
 ];
 
-/// Set the ID of the app currently resolving symbols.
-/// Used by elf_loader to enforce permissions during relocation.
+/// Set the identity and stable loader slot of the app currently resolving
+/// symbols. Storage imports are bound to this slot during relocation, so
+/// concurrent app tasks never depend on a process-global runtime identity.
 #[no_mangle]
-pub unsafe extern "C" fn syscall_set_current_app(id: *const c_char) {
-    let mut guard = CURRENT_APP_ID.lock().unwrap();
+pub unsafe extern "C" fn syscall_set_current_app(id: *const c_char, slot: i32) {
+    let mut context = CURRENT_APP_CONTEXT.lock().unwrap();
+    context.id = [0u8; 64];
+    context.slot = None;
     if id.is_null() {
-        *guard = [0u8; 64];
+        return;
     } else {
-        let bytes = CStr::from_ptr(id).to_bytes();
-        let len = bytes.len().min(63);
-        guard[..len].copy_from_slice(&bytes[..len]);
-        guard[len] = 0;
+        let app_id = match CStr::from_ptr(id).to_str() {
+            Ok(app_id) if app_id.len() <= 63 && valid_app_storage_id(app_id) => app_id,
+            _ => return,
+        };
+        context.id[..app_id.len()].copy_from_slice(app_id.as_bytes());
+        context.id[app_id.len()] = 0;
+
+        let bound_slot = usize::try_from(slot)
+            .ok()
+            .filter(|value| *value < MAX_APP_STORAGE_SLOTS);
+        context.slot = bound_slot;
+        if let Some(bound_slot) = bound_slot {
+            APP_STORAGE_IDS.lock().unwrap()[bound_slot] = context.id;
+        }
     }
 }
 
@@ -313,8 +351,8 @@ unsafe fn syscall_is_ptr_allowed(ptr: *const c_void) -> bool {
 unsafe extern "C" fn thistle_log(tag: *const c_char, msg: *const c_char) {
     // Only enforce pointer validation if we are in an ELF app context.
     let is_elf = {
-        let guard = CURRENT_APP_ID.lock().unwrap();
-        guard[0] != 0 && !CStr::from_ptr(guard.as_ptr() as *const c_char).to_str().unwrap_or("").starts_with("com.thistle.")
+        let context = CURRENT_APP_CONTEXT.lock().unwrap();
+        context.id[0] != 0 && !CStr::from_ptr(context.id.as_ptr() as *const c_char).to_str().unwrap_or("").starts_with("com.thistle.")
     };
 
     if is_elf && !syscall_is_ptr_allowed(msg as *const c_void) {
@@ -542,6 +580,309 @@ unsafe extern "C" fn thistle_power_get_battery_pct_impl() -> u8 {
 
 // ── File I/O syscall wrappers ─────────────────────────────────────────
 
+fn valid_app_storage_id(app_id: &str) -> bool {
+    let mut bytes = app_id.bytes();
+    matches!(bytes.next(), Some(first) if first.is_ascii_alphanumeric())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn valid_fopen_mode(mode: &str) -> bool {
+    matches!(
+        mode,
+        "r" | "rb" | "r+" | "rb+" | "r+b"
+            | "w" | "wb" | "w+" | "wb+" | "w+b"
+            | "a" | "ab" | "a+" | "ab+" | "a+b"
+    )
+}
+
+fn resolve_app_storage_path(app_id: &str, requested: &str, base: &Path) -> Option<PathBuf> {
+    if !valid_app_storage_id(app_id) || requested.is_empty() {
+        return None;
+    }
+    if requested
+        .split('/')
+        .any(|component| component.is_empty() || matches!(component, "." | ".."))
+    {
+        return None;
+    }
+
+    let requested = Path::new(requested);
+    if requested.is_absolute() {
+        return None;
+    }
+
+    let mut resolved = base.join(app_id);
+    let mut component_count = 0usize;
+    for component in requested.components() {
+        match component {
+            Component::Normal(value) => {
+                resolved.push(value);
+                component_count += 1;
+            }
+            Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+                return None;
+            }
+        }
+    }
+
+    (component_count != 0).then_some(resolved)
+}
+
+fn open_sandboxed_path_with(
+    app_id: &str,
+    requested: &str,
+    mode: &str,
+    base: &Path,
+    mut open_sink: impl FnMut(&Path, &str) -> *mut c_void,
+) -> *mut c_void {
+    if !valid_fopen_mode(mode) {
+        return std::ptr::null_mut();
+    }
+    match resolve_app_storage_path(app_id, requested, base) {
+        Some(path) => open_sink(&path, mode),
+        None => std::ptr::null_mut(),
+    }
+}
+
+fn app_storage_id(slot: usize) -> Option<String> {
+    let ids = APP_STORAGE_IDS.lock().ok()?;
+    let id = ids.get(slot)?;
+    let length = id.iter().position(|byte| *byte == 0)?;
+    std::str::from_utf8(&id[..length]).ok().map(str::to_owned)
+}
+
+fn register_app_stream(slot: usize, stream: *mut c_void) -> bool {
+    if stream.is_null() {
+        return false;
+    }
+    let mut files = match OPEN_APP_FILES.lock() {
+        Ok(files) => files,
+        Err(_) => return false,
+    };
+    match files.iter_mut().find(|entry| entry.is_none()) {
+        Some(entry) => {
+            *entry = Some(AppFileOwner { stream: stream as usize, slot });
+            true
+        }
+        None => false,
+    }
+}
+
+fn app_owns_stream(slot: usize, stream: *mut c_void) -> bool {
+    if stream.is_null() {
+        return false;
+    }
+    OPEN_APP_FILES.lock().map(|files| {
+        files.iter().flatten().any(|owner| owner.slot == slot && owner.stream == stream as usize)
+    }).unwrap_or(false)
+}
+
+fn take_owned_stream(slot: usize, stream: *mut c_void) -> bool {
+    if stream.is_null() {
+        return false;
+    }
+    let mut files = match OPEN_APP_FILES.lock() {
+        Ok(files) => files,
+        Err(_) => return false,
+    };
+    match files.iter_mut().find(|entry| {
+        matches!(entry, Some(owner) if owner.slot == slot && owner.stream == stream as usize)
+    }) {
+        Some(entry) => {
+            *entry = None;
+            true
+        }
+        None => false,
+    }
+}
+
+unsafe fn thistle_fs_open_for_slot(
+    slot: usize,
+    path: *const c_char,
+    mode: *const c_char,
+) -> *mut c_void {
+    if !syscall_is_ptr_allowed(path as *const c_void)
+        || !syscall_is_ptr_allowed(mode as *const c_void)
+    {
+        return std::ptr::null_mut();
+    }
+
+    let requested = match CStr::from_ptr(path).to_str() {
+        Ok(path) => path,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let mode = match CStr::from_ptr(mode).to_str() {
+        Ok(mode) => mode,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let app_id = match app_storage_id(slot) {
+        Some(app_id) => app_id,
+        None => return std::ptr::null_mut(),
+    };
+
+    let stream = open_sandboxed_path_with(
+        &app_id,
+        requested,
+        mode,
+        Path::new(APP_STORAGE_BASE),
+        |resolved, checked_mode| {
+            if checked_mode.contains('w') || checked_mode.contains('a') {
+                let Some(parent) = resolved.parent() else {
+                    return std::ptr::null_mut();
+                };
+                if std::fs::create_dir_all(parent).is_err() {
+                    return std::ptr::null_mut();
+                }
+            }
+            let resolved = match resolved.to_str().and_then(|path| CString::new(path).ok()) {
+                Some(path) => path,
+                None => return std::ptr::null_mut(),
+            };
+            let checked_mode = match CString::new(checked_mode) {
+                Ok(mode) => mode,
+                Err(_) => return std::ptr::null_mut(),
+            };
+            fopen(resolved.as_ptr(), checked_mode.as_ptr())
+        },
+    );
+
+    if !stream.is_null() && !register_app_stream(slot, stream) {
+        fclose(stream);
+        return std::ptr::null_mut();
+    }
+    stream
+}
+
+unsafe fn thistle_fs_read_for_slot(
+    slot: usize,
+    buf: *mut c_void,
+    size: usize,
+    count: usize,
+    stream: *mut c_void,
+) -> i32 {
+    if !syscall_is_ptr_allowed(buf) || !app_owns_stream(slot, stream) {
+        return -1;
+    }
+    fread(buf, size, count, stream) as i32
+}
+
+unsafe fn thistle_fs_write_for_slot(
+    slot: usize,
+    buf: *const c_void,
+    size: usize,
+    count: usize,
+    stream: *mut c_void,
+) -> i32 {
+    if !syscall_is_ptr_allowed(buf) || !app_owns_stream(slot, stream) {
+        return -1;
+    }
+    fwrite(buf, size, count, stream) as i32
+}
+
+unsafe fn thistle_fs_close_for_slot(slot: usize, stream: *mut c_void) -> i32 {
+    if !take_owned_stream(slot, stream) {
+        return -1;
+    }
+    fclose(stream)
+}
+
+macro_rules! make_app_fs_wrappers {
+    ($open:ident, $read:ident, $write:ident, $close:ident, $slot:expr) => {
+        unsafe extern "C" fn $open(path: *const c_char, mode: *const c_char) -> *mut c_void {
+            thistle_fs_open_for_slot($slot, path, mode)
+        }
+        unsafe extern "C" fn $read(buf: *mut c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+            thistle_fs_read_for_slot($slot, buf, size, count, stream)
+        }
+        unsafe extern "C" fn $write(buf: *const c_void, size: usize, count: usize, stream: *mut c_void) -> i32 {
+            thistle_fs_write_for_slot($slot, buf, size, count, stream)
+        }
+        unsafe extern "C" fn $close(stream: *mut c_void) -> i32 {
+            thistle_fs_close_for_slot($slot, stream)
+        }
+    };
+}
+
+make_app_fs_wrappers!(app_fs_open_0, app_fs_read_0, app_fs_write_0, app_fs_close_0, 0);
+make_app_fs_wrappers!(app_fs_open_1, app_fs_read_1, app_fs_write_1, app_fs_close_1, 1);
+make_app_fs_wrappers!(app_fs_open_2, app_fs_read_2, app_fs_write_2, app_fs_close_2, 2);
+make_app_fs_wrappers!(app_fs_open_3, app_fs_read_3, app_fs_write_3, app_fs_close_3, 3);
+make_app_fs_wrappers!(app_fs_open_4, app_fs_read_4, app_fs_write_4, app_fs_close_4, 4);
+make_app_fs_wrappers!(app_fs_open_5, app_fs_read_5, app_fs_write_5, app_fs_close_5, 5);
+make_app_fs_wrappers!(app_fs_open_6, app_fs_read_6, app_fs_write_6, app_fs_close_6, 6);
+make_app_fs_wrappers!(app_fs_open_7, app_fs_read_7, app_fs_write_7, app_fs_close_7, 7);
+make_app_fs_wrappers!(app_fs_open_8, app_fs_read_8, app_fs_write_8, app_fs_close_8, 8);
+make_app_fs_wrappers!(app_fs_open_9, app_fs_read_9, app_fs_write_9, app_fs_close_9, 9);
+make_app_fs_wrappers!(app_fs_open_10, app_fs_read_10, app_fs_write_10, app_fs_close_10, 10);
+make_app_fs_wrappers!(app_fs_open_11, app_fs_read_11, app_fs_write_11, app_fs_close_11, 11);
+make_app_fs_wrappers!(app_fs_open_12, app_fs_read_12, app_fs_write_12, app_fs_close_12, 12);
+make_app_fs_wrappers!(app_fs_open_13, app_fs_read_13, app_fs_write_13, app_fs_close_13, 13);
+make_app_fs_wrappers!(app_fs_open_14, app_fs_read_14, app_fs_write_14, app_fs_close_14, 14);
+make_app_fs_wrappers!(app_fs_open_15, app_fs_read_15, app_fs_write_15, app_fs_close_15, 15);
+
+const APP_FS_OPEN: [unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void; MAX_APP_STORAGE_SLOTS] = [
+    app_fs_open_0, app_fs_open_1, app_fs_open_2, app_fs_open_3,
+    app_fs_open_4, app_fs_open_5, app_fs_open_6, app_fs_open_7,
+    app_fs_open_8, app_fs_open_9, app_fs_open_10, app_fs_open_11,
+    app_fs_open_12, app_fs_open_13, app_fs_open_14, app_fs_open_15,
+];
+const APP_FS_READ: [unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32; MAX_APP_STORAGE_SLOTS] = [
+    app_fs_read_0, app_fs_read_1, app_fs_read_2, app_fs_read_3,
+    app_fs_read_4, app_fs_read_5, app_fs_read_6, app_fs_read_7,
+    app_fs_read_8, app_fs_read_9, app_fs_read_10, app_fs_read_11,
+    app_fs_read_12, app_fs_read_13, app_fs_read_14, app_fs_read_15,
+];
+const APP_FS_WRITE: [unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32; MAX_APP_STORAGE_SLOTS] = [
+    app_fs_write_0, app_fs_write_1, app_fs_write_2, app_fs_write_3,
+    app_fs_write_4, app_fs_write_5, app_fs_write_6, app_fs_write_7,
+    app_fs_write_8, app_fs_write_9, app_fs_write_10, app_fs_write_11,
+    app_fs_write_12, app_fs_write_13, app_fs_write_14, app_fs_write_15,
+];
+const APP_FS_CLOSE: [unsafe extern "C" fn(*mut c_void) -> i32; MAX_APP_STORAGE_SLOTS] = [
+    app_fs_close_0, app_fs_close_1, app_fs_close_2, app_fs_close_3,
+    app_fs_close_4, app_fs_close_5, app_fs_close_6, app_fs_close_7,
+    app_fs_close_8, app_fs_close_9, app_fs_close_10, app_fs_close_11,
+    app_fs_close_12, app_fs_close_13, app_fs_close_14, app_fs_close_15,
+];
+
+fn bound_app_fs_symbol(name: &str, slot: usize) -> Option<*mut c_void> {
+    match name {
+        "thistle_fs_open" => Some(APP_FS_OPEN[slot] as *mut c_void),
+        "thistle_fs_read" => Some(APP_FS_READ[slot] as *mut c_void),
+        "thistle_fs_write" => Some(APP_FS_WRITE[slot] as *mut c_void),
+        "thistle_fs_close" => Some(APP_FS_CLOSE[slot] as *mut c_void),
+        _ => None,
+    }
+}
+
+/// Close every file owned by an app slot before the loader reuses it.
+pub unsafe fn syscall_clear_app_storage(slot: usize) {
+    let streams = {
+        let mut files = match OPEN_APP_FILES.lock() {
+            Ok(files) => files,
+            Err(_) => return,
+        };
+        let mut streams = [0usize; MAX_OPEN_APP_FILES];
+        let mut count = 0usize;
+        for entry in files.iter_mut() {
+            if matches!(entry, Some(owner) if owner.slot == slot) {
+                streams[count] = entry.unwrap().stream;
+                count += 1;
+                *entry = None;
+            }
+        }
+        (streams, count)
+    };
+    for stream in &streams.0[..streams.1] {
+        fclose(*stream as *mut c_void);
+    }
+    if let Ok(mut ids) = APP_STORAGE_IDS.lock() {
+        if let Some(id) = ids.get_mut(slot) {
+            *id = [0u8; 64];
+        }
+    }
+}
+
 unsafe extern "C" fn thistle_fs_open_impl(path: *const c_char, mode: *const c_char) -> *mut c_void {
     if !syscall_is_ptr_allowed(path as *const c_void) || !syscall_is_ptr_allowed(mode as *const c_void) {
         return std::ptr::null_mut();
@@ -663,7 +1004,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
     entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
     entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
-    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32, PERM_STORAGE),
     entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void, PERM_STORAGE),
     entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
     entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
@@ -774,7 +1115,7 @@ static SYSCALL_TABLE: &[SyscallEntry] = &[
     entry!("thistle_event_publish",         thistle_event_publish               as unsafe extern "C" fn(*const c_void) -> i32),
     entry!("thistle_event_subscribe",       thistle_event_subscribe             as unsafe extern "C" fn(u32, *const c_void, *mut c_void) -> i32),
     entry!("thistle_free",                  thistle_free                        as unsafe extern "C" fn(*mut c_void)),
-    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32),
+    entry!("thistle_fs_close",              thistle_fs_close_impl               as unsafe extern "C" fn(*mut c_void) -> i32, PERM_STORAGE),
     entry!("thistle_fs_open",               thistle_fs_open_impl                as unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void, PERM_STORAGE),
     entry!("thistle_fs_read",               thistle_fs_read_impl                as unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
     entry!("thistle_fs_write",              thistle_fs_write_impl               as unsafe extern "C" fn(*const c_void, usize, usize, *mut c_void) -> i32, PERM_STORAGE),
@@ -861,20 +1202,6 @@ unsafe fn find_entry(name: *const c_char) -> Option<&'static SyscallEntry> {
     result.ok().map(|idx| &SYSCALL_TABLE[idx])
 }
 
-unsafe fn app_permission_allows(entry: &SyscallEntry) -> bool {
-    if entry.permission != 0 {
-        let app_id_bytes = CURRENT_APP_ID.lock().unwrap();
-        if app_id_bytes[0] == 0 {
-            return false;
-        }
-        let app_id = CStr::from_ptr(app_id_bytes.as_ptr() as *const c_char)
-            .to_str()
-            .unwrap_or("");
-        return permissions::check(app_id, entry.permission);
-    }
-    true
-}
-
 unsafe fn resolve_app_symbol(name: *const c_char, allowed: &[&str]) -> *mut c_void {
     let name_str = match (!name.is_null()).then(|| CStr::from_ptr(name).to_str()) {
         Some(Ok(s)) => s,
@@ -883,9 +1210,35 @@ unsafe fn resolve_app_symbol(name: *const c_char, allowed: &[&str]) -> *mut c_vo
     if allowed.binary_search(&name_str).is_err() {
         return std::ptr::null_mut();
     }
-    match find_entry(name) {
-        Some(entry) if app_permission_allows(entry) => entry.func_ptr as *mut c_void,
-        _ => std::ptr::null_mut(),
+    let entry = match find_entry(name) {
+        Some(entry) => entry,
+        None => return std::ptr::null_mut(),
+    };
+    let context = match CURRENT_APP_CONTEXT.lock() {
+        Ok(context) => context,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    if entry.permission != 0 {
+        if context.id[0] == 0 {
+            return std::ptr::null_mut();
+        }
+        let app_id = CStr::from_ptr(context.id.as_ptr() as *const c_char)
+            .to_str()
+            .unwrap_or("");
+        if !permissions::check(app_id, entry.permission) {
+            return std::ptr::null_mut();
+        }
+    }
+    if matches!(
+        name_str,
+        "thistle_fs_open" | "thistle_fs_read" | "thistle_fs_write" | "thistle_fs_close"
+    ) {
+        match context.slot {
+            Some(slot) => bound_app_fs_symbol(name_str, slot).unwrap_or(std::ptr::null_mut()),
+            None => std::ptr::null_mut(),
+        }
+    } else {
+        entry.func_ptr as *mut c_void
     }
 }
 
@@ -998,7 +1351,7 @@ mod tests {
         permissions::init();
         permissions::grant("app.unsigned", PERM_IPC);
         let app_id = std::ffi::CString::new("app.unsigned").unwrap();
-        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+        unsafe { syscall_set_current_app(app_id.as_ptr(), 0) };
 
         for entry in SYSCALL_TABLE {
             let name = unsafe { CStr::from_ptr(entry.name).to_str().unwrap() };
@@ -1011,7 +1364,7 @@ mod tests {
             );
         }
 
-        unsafe { syscall_set_current_app(std::ptr::null()) };
+        unsafe { syscall_set_current_app(std::ptr::null(), -1) };
     }
 
     #[test]
@@ -1062,13 +1415,13 @@ mod tests {
     fn test_permission_denied_without_grant() {
         permissions::init();
         let app_id = std::ffi::CString::new("app.unsigned").unwrap();
-        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+        unsafe { syscall_set_current_app(app_id.as_ptr(), 0) };
 
         let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
         let denied = unsafe { syscall_resolve_signed_app(sym.as_ptr()) };
         assert!(denied.is_null(), "protected syscall must be denied without permissions");
 
-        unsafe { syscall_set_current_app(std::ptr::null()) };
+        unsafe { syscall_set_current_app(std::ptr::null(), -1) };
     }
 
     #[test]
@@ -1076,13 +1429,13 @@ mod tests {
         permissions::init();
         let app_id = std::ffi::CString::new("app.signed").unwrap();
         permissions::grant("app.signed", PERM_STORAGE);
-        unsafe { syscall_set_current_app(app_id.as_ptr()) };
+        unsafe { syscall_set_current_app(app_id.as_ptr(), 0) };
 
         let sym = std::ffi::CString::new("thistle_fs_open").unwrap();
         let resolved = unsafe { syscall_resolve_signed_app(sym.as_ptr()) };
         assert!(!resolved.is_null(), "protected syscall must resolve after permission grant");
 
-        unsafe { syscall_set_current_app(std::ptr::null()) };
+        unsafe { syscall_set_current_app(std::ptr::null(), -1) };
     }
 
     #[test]
@@ -1090,5 +1443,123 @@ mod tests {
         assert!(unsafe { syscall_is_ptr_allowed(std::ptr::null()) });
         assert!(!unsafe { syscall_is_ptr_allowed(1usize as *const c_void) });
         assert!(unsafe { syscall_is_ptr_allowed(0x1000usize as *const c_void) });
+    }
+
+    #[test]
+    fn app_storage_rejects_absolute_and_escaping_paths_before_open_sink() {
+        let base = std::path::Path::new("/sandbox/apps");
+        let mut sink_calls = 0;
+
+        for unsafe_path in [
+            "/spiffs/config/system.json",
+            "/sdcard/update/thistle_os.bin",
+            "../vault/secrets.bin",
+            "notes/../../config/system.json",
+            "notes/./hidden",
+            "notes//hidden",
+            "./hidden",
+            "",
+        ] {
+            let result = open_sandboxed_path_with(
+                "com.example.notes",
+                unsafe_path,
+                "rb",
+                base,
+                |_, _| {
+                    sink_calls += 1;
+                    1usize as *mut c_void
+                },
+            );
+            assert!(result.is_null(), "unsafe path reached open sink: {unsafe_path}");
+        }
+
+        assert_eq!(sink_calls, 0, "rejected paths must not reach fopen");
+    }
+
+    #[test]
+    fn app_storage_maps_relative_paths_only_under_canonical_app_root() {
+        let base = std::path::Path::new("/sandbox/apps");
+        let mut opened_path = None;
+        let result = open_sandboxed_path_with(
+            "com.example.notes",
+            "notes/today.txt",
+            "wb",
+            base,
+            |path, mode| {
+                opened_path = Some((path.to_owned(), mode.to_owned()));
+                0x1234usize as *mut c_void
+            },
+        );
+
+        assert_eq!(result as usize, 0x1234);
+        assert_eq!(
+            opened_path,
+            Some((
+                std::path::PathBuf::from(
+                    "/sandbox/apps/com.example.notes/notes/today.txt"
+                ),
+                "wb".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn app_storage_rejects_invalid_identity_and_mode_before_open_sink() {
+        let base = std::path::Path::new("/sandbox/apps");
+        let mut sink_calls = 0;
+        for (app_id, mode) in [
+            ("", "rb"),
+            ("../system", "rb"),
+            ("com.example/other", "rb"),
+            ("com.example.notes", ""),
+            ("com.example.notes", "rx"),
+        ] {
+            let result = open_sandboxed_path_with(
+                app_id,
+                "notes.txt",
+                mode,
+                base,
+                |_, _| {
+                    sink_calls += 1;
+                    1usize as *mut c_void
+                },
+            );
+            assert!(result.is_null());
+        }
+        assert_eq!(sink_calls, 0);
+    }
+
+    #[test]
+    fn app_storage_imports_are_bound_to_distinct_loader_slots() {
+        permissions::init();
+        permissions::grant("com.example.one", PERM_STORAGE);
+        permissions::grant("com.example.two", PERM_STORAGE);
+
+        let symbol = std::ffi::CString::new("thistle_fs_open").unwrap();
+        let first_id = std::ffi::CString::new("com.example.one").unwrap();
+        unsafe { syscall_set_current_app(first_id.as_ptr(), 0) };
+        let first = unsafe { syscall_resolve_signed_app(symbol.as_ptr()) };
+
+        let second_id = std::ffi::CString::new("com.example.two").unwrap();
+        unsafe { syscall_set_current_app(second_id.as_ptr(), 1) };
+        let second = unsafe { syscall_resolve_signed_app(symbol.as_ptr()) };
+
+        unsafe { syscall_set_current_app(std::ptr::null(), -1) };
+        let unbound = unsafe { syscall_resolve_signed_app(symbol.as_ptr()) };
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+        assert_ne!(first, second, "apps must not share an unbound storage wrapper");
+        assert!(unbound.is_null(), "missing loader identity must fail closed");
+    }
+
+    #[test]
+    fn app_storage_stream_handles_cannot_cross_loader_slots() {
+        let stream = 0x1234usize as *mut c_void;
+        assert!(register_app_stream(0, stream));
+        assert!(app_owns_stream(0, stream));
+        assert!(!app_owns_stream(1, stream));
+        assert!(!take_owned_stream(1, stream));
+        assert!(take_owned_stream(0, stream));
+        assert!(!app_owns_stream(0, stream));
     }
 }
