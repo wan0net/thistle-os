@@ -21,7 +21,10 @@ class PackageWorkflowTests(unittest.TestCase):
 
     def test_publication_is_strict_and_architecture_qualified(self):
         self.assertIn("--require-signatures", self.workflow)
-        self.assertIn('publish/apps/$arch', self.workflow)
+        self.assertIn('artifacts/$TARGET_ARCH', self.workflow)
+        self.assertIn('path: artifacts/', self.workflow)
+        self.assertIn('merge-multiple: true', self.workflow)
+        self.assertIn('all-artifacts/. publish/apps/', self.workflow)
         self.assertNotIn("2>/dev/null || true", self.workflow)
 
 
