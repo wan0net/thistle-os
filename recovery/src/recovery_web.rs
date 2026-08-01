@@ -41,6 +41,8 @@ pub struct RecoveryState {
     pub board_catalog_url: String,
     /// Chip slug detected at boot, e.g. "esp32s3", "esp32c3".
     pub chip: String,
+    /// Short-lived bearer session for state-changing provisioning requests.
+    pub session: Option<crate::recovery_auth::RecoverySession>,
 }
 
 impl RecoveryState {
@@ -57,6 +59,7 @@ impl RecoveryState {
             catalog_url: String::new(),
             board_catalog_url: String::new(),
             chip: String::new(),
+            session: None,
         }
     }
 }
@@ -225,6 +228,16 @@ var wifiConnected = false;
 var boardSelected = null;
 var pollTimer = null;
 var bundlePollTimer = null;
+var recoveryToken = '__RECOVERY_TOKEN__';
+var recoveryNonce = __RECOVERY_NONCE__;
+
+function authFetch(url, options) {
+  options = options || {};
+  options.headers = options.headers || {};
+  options.headers['X-Recovery-Token'] = recoveryToken;
+  options.headers['X-Recovery-Nonce'] = String(recoveryNonce++);
+  return fetch(url, options);
+}
 
 // ---------------------------------------------------------------------------
 // Initialise board list and optional components from /api/boards
@@ -300,7 +313,7 @@ function initBoards() {
       if (d.detected) {
         document.getElementById('board-btn').disabled = false;
         document.getElementById('plan-btn').disabled = false;
-        fetch('/api/board/select', {
+        authFetch('/api/board/select', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({board: d.detected})
@@ -371,7 +384,7 @@ function connectWifi(e) {
   showStatus(st, 'Connecting...', 'info');
   btn.disabled = true;
 
-  fetch('/api/wifi/connect', {
+  authFetch('/api/wifi/connect', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ssid: ssid, password: pass})
@@ -456,7 +469,7 @@ function selectBoard() {
   btn.disabled = true;
   showStatus(st, 'Saving...', 'info');
 
-  fetch('/api/board/select', {
+  authFetch('/api/board/select', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({board: boardSelected})
@@ -481,7 +494,7 @@ function planInstall() {
   if (!boardSelected) { return; }
   var st = document.getElementById('board-status');
   showStatus(st, 'Checking install plan...', 'info');
-  fetch('/api/board/select', {
+  authFetch('/api/board/select', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({board: boardSelected})
@@ -522,7 +535,7 @@ function startInstall() {
   bar.style.width = '5%';
   showStatus(st, 'Starting download...', 'info');
 
-  fetch('/api/bundle/download', {method: 'POST'})
+  authFetch('/api/bundle/download', {method: 'POST'})
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.ok) {
@@ -579,7 +592,7 @@ function setInstallDone(items) {
     showStatus(st, 'Installed ' + items + ' item(s). Rebooting in ' + countdown + suffix + '...', '');
     if (countdown <= 0) {
       showStatus(st, 'Rebooting now...', '');
-      fetch('/api/reboot', {method: 'POST'}).catch(function() {});
+      authFetch('/api/reboot', {method: 'POST'}).catch(function() {});
       return;
     }
     countdown--;
@@ -597,7 +610,7 @@ function viewStatus() {
 
 function confirmReboot() {
   if (confirm('Reboot the device now?')) {
-    fetch('/api/reboot', {method: 'POST'}).catch(function() {});
+    authFetch('/api/reboot', {method: 'POST'}).catch(function() {});
   }
 }
 
@@ -627,8 +640,22 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/",
         esp_idf_svc::http::Method::Get,
         |req| -> anyhow::Result<()> {
-            let mut resp = req.into_response(200, None, &[("Content-Type", "text/html")])?;
-            resp.write(RECOVERY_HTML.as_bytes())?;
+            let (token, nonce) = {
+                let st = STATE.lock().unwrap();
+                st.session
+                    .as_ref()
+                    .map(|session| (session.token().to_string(), session.next_nonce()))
+                    .unwrap_or_else(|| (String::new(), 1))
+            };
+            let page = RECOVERY_HTML
+                .replace("__RECOVERY_TOKEN__", &token)
+                .replace("__RECOVERY_NONCE__", &nonce.to_string());
+            let mut resp = req.into_response(
+                200,
+                None,
+                &[("Content-Type", "text/html"), ("Cache-Control", "no-store")],
+            )?;
+            resp.write(page.as_bytes())?;
             Ok(())
         },
     )?;
@@ -790,6 +817,9 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/wifi/connect",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
+            if let Err(failure) = authorize_mutation(&req) {
+                return respond_auth_failure(req, failure);
+            }
             let body = match read_request_body(&mut req, MAX_WIFI_REQUEST_BODY) {
                 Ok(body) => body,
                 Err(error) => {
@@ -832,6 +862,9 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/board/select",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
+            if let Err(failure) = authorize_mutation(&req) {
+                return respond_auth_failure(req, failure);
+            }
             let body = match read_request_body(&mut req, MAX_BOARD_REQUEST_BODY) {
                 Ok(body) => body,
                 Err(error) => {
@@ -926,6 +959,9 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/bundle/download",
         esp_idf_svc::http::Method::Post,
         |req| -> anyhow::Result<()> {
+            if let Err(failure) = authorize_mutation(&req) {
+                return respond_auth_failure(req, failure);
+            }
             let (has_board, already_downloading) = {
                 let st = STATE.lock().unwrap();
                 (st.board_name.is_some(), st.bundle_status == "downloading")
@@ -1001,6 +1037,12 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/reboot",
         esp_idf_svc::http::Method::Post,
         |req| -> anyhow::Result<()> {
+            if let Err(failure) = authorize_mutation(&req) {
+                return respond_auth_failure(req, failure);
+            }
+            if let Some(session) = STATE.lock().unwrap().session.as_mut() {
+                session.expire();
+            }
             let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
             resp.write(b"{\"ok\":true}")?;
             info!("Reboot requested via web UI");
@@ -1013,6 +1055,47 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
     )?;
 
     info!("Web UI handlers registered (captive portal active)");
+    Ok(())
+}
+
+pub fn monotonic_ms() -> u64 {
+    let micros = unsafe { esp_idf_sys::esp_timer_get_time() };
+    u64::try_from(micros.max(0)).unwrap_or(0) / 1_000
+}
+
+fn authorize_mutation(
+    req: &embedded_svc::http::server::Request<&mut EspHttpConnection<'_>>,
+) -> Result<(), crate::recovery_auth::AuthFailure> {
+    let token = req.header("X-Recovery-Token");
+    let nonce = req.header("X-Recovery-Nonce");
+    let mut state = STATE.lock().unwrap();
+    let session = state
+        .session
+        .as_mut()
+        .ok_or(crate::recovery_auth::AuthFailure::Expired)?;
+    session.authorize(token, nonce, monotonic_ms())
+}
+
+fn respond_auth_failure(
+    req: embedded_svc::http::server::Request<&mut EspHttpConnection<'_>>,
+    failure: crate::recovery_auth::AuthFailure,
+) -> anyhow::Result<()> {
+    let (status, error) = match failure {
+        crate::recovery_auth::AuthFailure::Replay => (409, "replayed authorization"),
+        crate::recovery_auth::AuthFailure::Expired => (401, "pairing session expired"),
+        crate::recovery_auth::AuthFailure::Unauthorized => (401, "unauthorized"),
+    };
+    warn!("Rejected Recovery mutation: {}", error);
+    let body = format!(r#"{{"ok":false,"error":"{}"}}"#, error);
+    let mut resp = req.into_response(
+        status,
+        None,
+        &[
+            ("Content-Type", "application/json"),
+            ("Cache-Control", "no-store"),
+        ],
+    )?;
+    resp.write(body.as_bytes())?;
     Ok(())
 }
 

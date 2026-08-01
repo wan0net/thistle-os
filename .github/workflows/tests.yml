@@ -111,6 +111,16 @@ jobs:
             -o /tmp/test_bounded_io
           /tmp/test_bounded_io
 
+      - name: Test Recovery provisioning authorization
+        run: |
+          rustc --edition=2021 --test recovery/src/recovery_auth.rs \
+            -o /tmp/test_recovery_auth
+          /tmp/test_recovery_auth
+          test "$(grep -c 'authorize_mutation(&req)' recovery/src/recovery_web.rs)" -eq 4
+          grep -q "AuthMethod::WPA2Personal" recovery/src/main.rs
+          ! grep -q "AuthMethod::None" recovery/src/main.rs
+          test "$(grep -c "authFetch('/api/" recovery/src/recovery_web.rs)" -eq 7
+
   simulator-boot:
     name: Simulator Boot Test
     runs-on: ubuntu-latest

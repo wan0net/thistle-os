@@ -25,11 +25,13 @@ use log::*;
 mod bounded_io;
 mod bundle_transaction;
 mod catalog_path;
+mod recovery_auth;
 mod recovery_ota;
 mod recovery_web;
 
 const VERSION: &str = "0.1.0";
-const AP_SSID: &str = "ThistleOS-Recovery";
+const AP_SSID_PREFIX: &str = "ThistleOS-Recovery";
+const RECOVERY_SESSION_TTL_MS: u64 = 30 * 60 * 1000;
 const BUNDLE_CATALOG_URL: &str = "https://wan0net.github.io/thistle-apps/catalog.json";
 const BOARD_CATALOG_URL: &str = "https://wan0net.github.io/thistle-os/catalog.json";
 
@@ -109,11 +111,8 @@ fn main() -> anyhow::Result<()> {
     // so it does not drive board-specific pins before the user selects hardware.
     println!("Board selection is catalog-driven — select your board in the web UI");
 
-    // Step 3: Start WiFi AP + captive portal
-    info!("Starting WiFi Access Point: {}", AP_SSID);
-    println!("\nStarting WiFi hotspot: {}", AP_SSID);
-    println!("Connect your phone/laptop and open http://192.168.4.1");
-
+    // Step 3: Start an encrypted WiFi AP. The per-boot password will be shown
+    // only on the physically attached recovery console.
     // Seed catalog URLs in shared state so handlers can reference them.
     {
         let mut st = recovery_web::STATE.lock().unwrap();
@@ -132,19 +131,43 @@ fn main() -> anyhow::Result<()> {
         sysloop.clone(),
     )?;
 
+    // ESP-IDF documents esp_random() as a true hardware random source while
+    // WiFi is enabled. Start STA mode without connecting, generate the pairing
+    // secrets, then restart in the final encrypted AP+STA configuration.
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
+    wifi.start()?;
+    let ap_ssid = format!("{}-{}", AP_SSID_PREFIX, random_base32(4));
+    let ap_password = random_base32(16);
+    let recovery_token = random_hex(32);
+    wifi.stop()?;
+
+    info!("Starting encrypted WiFi Access Point: {}", ap_ssid);
+    println!("\nStarting WiFi hotspot: {}", ap_ssid);
+    println!("Recovery WiFi password: {}", ap_password);
+    println!("Connect your phone/laptop and open http://192.168.4.1");
+    {
+        let mut st = recovery_web::STATE.lock().unwrap();
+        st.session = Some(recovery_auth::RecoverySession::new(
+            recovery_token,
+            recovery_web::monotonic_ms(),
+            RECOVERY_SESSION_TTL_MS,
+        ));
+    }
+
     // Configure as AP (hotspot) + STA (client) simultaneously
     wifi.set_configuration(&Configuration::Mixed(
         ClientConfiguration::default(),
         AccessPointConfiguration {
-            ssid: AP_SSID.try_into().unwrap(),
-            auth_method: AuthMethod::None,
+            ssid: ap_ssid.as_str().try_into().unwrap(),
+            password: ap_password.as_str().try_into().unwrap(),
+            auth_method: AuthMethod::WPA2Personal,
             max_connections: 4,
             ..Default::default()
         },
     ))?;
 
     wifi.start()?;
-    info!("WiFi AP started: {} (192.168.4.1)", AP_SSID);
+    info!("WiFi AP started: {} (192.168.4.1)", ap_ssid);
 
     // Step 4: Start HTTP server for captive portal
     let mut server = EspHttpServer::new(&HttpConfig::default())?;
@@ -157,12 +180,12 @@ fn main() -> anyhow::Result<()> {
     println!("========================================");
     println!(
         "Use http://192.168.4.1 from any device connected to '{}'.",
-        AP_SSID
+        ap_ssid
     );
     println!("Recovery will keep polling web requests until install/reboot.");
 
     loop {
-        poll_web_state(&mut wifi);
+        poll_web_state(&mut wifi, &ap_ssid, &ap_password);
         FreeRtos::delay_ms(100);
     }
 }
@@ -171,7 +194,7 @@ fn main() -> anyhow::Result<()> {
 // Poll shared web UI state and act on any pending requests
 // ---------------------------------------------------------------------------
 
-fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>) {
+fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>, ap_ssid: &str, ap_password: &str) {
     // Check for pending WiFi connect request from web UI
     let wifi_req = {
         let mut st = recovery_web::STATE.lock().unwrap();
@@ -180,7 +203,7 @@ fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>) {
 
     if let Some((ssid, pass)) = wifi_req {
         info!("Web UI requested WiFi connect to '{}'", ssid);
-        match do_wifi_connect(wifi, &ssid, &pass) {
+        match do_wifi_connect(wifi, &ssid, &pass, ap_ssid, ap_password) {
             Ok(ip) => {
                 info!("Web UI WiFi connect succeeded: {}", ip);
                 let mut st = recovery_web::STATE.lock().unwrap();
@@ -241,6 +264,8 @@ fn do_wifi_connect(
     wifi: &mut BlockingWifi<EspWifi>,
     ssid: &str,
     pass: &str,
+    ap_ssid: &str,
+    ap_password: &str,
 ) -> anyhow::Result<String> {
     wifi.set_configuration(&Configuration::Mixed(
         ClientConfiguration {
@@ -249,8 +274,9 @@ fn do_wifi_connect(
             ..Default::default()
         },
         AccessPointConfiguration {
-            ssid: AP_SSID.try_into().unwrap(),
-            auth_method: AuthMethod::None,
+            ssid: ap_ssid.try_into().unwrap(),
+            password: ap_password.try_into().unwrap(),
+            auth_method: AuthMethod::WPA2Personal,
             max_connections: 4,
             ..Default::default()
         },
@@ -267,4 +293,32 @@ fn do_wifi_connect(
         .unwrap_or_else(|_| "assigned".to_string());
 
     Ok(ip)
+}
+
+fn random_base32(length: usize) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    (0..length)
+        .map(|_| {
+            let random = unsafe { esp_idf_sys::esp_random() };
+            ALPHABET[(random as usize) & 31] as char
+        })
+        .collect()
+}
+
+fn random_hex(byte_length: usize) -> String {
+    let mut result = String::with_capacity(byte_length * 2);
+    let mut generated = 0;
+    while generated < byte_length {
+        // esp_random() is the ESP-IDF hardware random source.
+        let random = unsafe { esp_idf_sys::esp_random() };
+        for byte in random.to_le_bytes() {
+            if generated == byte_length {
+                break;
+            }
+            use std::fmt::Write;
+            let _ = write!(result, "{:02x}", byte);
+            generated += 1;
+        }
+    }
+    result
 }
