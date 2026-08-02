@@ -308,9 +308,9 @@ dependencies = [
 
 [[package]]
 name = "embuild"
-version = "0.33.2"
+version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046502fa88871e9c2c7d0baa97a57ac8fa5f5da38a79bd3269024e48b65c1d7b"
+checksum = "1767ebe775033ebaed7a04fb02cc2ae7abfdc660656190957403f97594e687c7"
 dependencies = [
  "anyhow",
  "bitflags 1.3.2",
