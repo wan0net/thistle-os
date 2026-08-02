@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build a recovery-downloadable board catalog from sdcard board configs."""
+"""Build a recovery board catalog whose profiles require Ed25519 .sig files.
+
+The publishing step must place a matching 64-byte ``.json.sig`` beside every
+board JSON using Recovery's trusted signing key.
+"""
 
 from __future__ import annotations
 
@@ -34,7 +38,7 @@ def build_catalog(board_dir: Path, base_url: str) -> dict:
                 "arch": board.get("arch", ""),
                 "status": board_status(config),
                 "url": f"{base_url.rstrip('/')}/{path.name}",
-                "sig_url": "",
+                "sig_url": f"{base_url.rstrip('/')}/{path.name}.sig",
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "size_bytes": len(data),
                 "driver_count": len(config.get("drivers", [])),

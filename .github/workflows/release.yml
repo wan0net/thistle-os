@@ -24,25 +24,67 @@ jobs:
           fetch-depth: 0
 
       - name: Validate tag
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          git fetch --tags
-          git rev-parse "${{ inputs.tag }}^{}" >/dev/null
+          set -euo pipefail
+          git fetch --tags origin
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{}")"
+          printf 'tag_commit=%s\n' "$tag_commit" >> "$GITHUB_ENV"
+
+      - name: Validate CI run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in
+            ''|*[!0-9]*) echo "::error::run_id must be a numeric GitHub Actions run ID"; exit 1 ;;
+          esac
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > /tmp/release-run.json
+          python3 tools/validate_release_run.py \
+            --run-json /tmp/release-run.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow-name "ThistleOS CI" \
+            --workflow-path ".github/workflows/build.yml" \
+            --event push \
+            --ref main \
+            --sha "$tag_commit"
 
       - name: Download CI artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "${{ inputs.run_id }}" --dir release-artifacts
+          set -euo pipefail
+          for arch in esp32 esp32s3 esp32c3; do
+            gh run download "${{ inputs.run_id }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name "thistle-os-firmware-${arch}" \
+              --dir "release-artifacts/firmware/${arch}"
+          done
+          gh run download "${{ inputs.run_id }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name thistle-recovery \
+            --dir release-artifacts/recovery
 
       - name: Stage versioned assets
         run: |
           set -euo pipefail
           tag="${{ inputs.tag }}"
           mkdir -p dist
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin "dist/thistle_os-${tag}.bin"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.sig "dist/thistle_os-${tag}.bin.sig"
-          cp release-artifacts/thistle-os-firmware/thistle_os.bin.pub "dist/thistle_os-${tag}.bin.pub"
-          cp release-artifacts/thistle-recovery/thistle-recovery "dist/thistle-recovery-${tag}"
+          for arch in esp32 esp32s3 esp32c3; do
+            source="release-artifacts/firmware/${arch}"
+            for file in thistle_os.bin thistle_os.bin.sig thistle_os.bin.pub; do
+              if [ ! -f "${source}/${file}" ]; then
+                echo "::error::Missing ${file} for advertised ${arch} firmware"
+                exit 1
+              fi
+            done
+            cp "${source}/thistle_os.bin" "dist/thistle_os-${tag}-${arch}.bin"
+            cp "${source}/thistle_os.bin.sig" "dist/thistle_os-${tag}-${arch}.bin.sig"
+            cp "${source}/thistle_os.bin.pub" "dist/thistle_os-${tag}-${arch}.bin.pub"
+          done
+          cp release-artifacts/recovery/thistle-recovery "dist/thistle-recovery-${tag}"
           cd dist
           sha256sum * > SHA256SUMS
 

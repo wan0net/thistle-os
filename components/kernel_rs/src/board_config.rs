@@ -149,7 +149,10 @@ fn load_config(config_path: &str) -> i32 {
                     let miso      = json_get_int(&bus, "miso").unwrap_or(-1) as i32;
                     let sclk      = json_get_int(&bus, "sclk").unwrap_or(-1) as i32;
                     let max_bytes = json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
-                    unsafe { board_bus_init_spi(host, mosi, miso, sclk, max_bytes); }
+                    let ret = unsafe { board_bus_init_spi(host, mosi, miso, sclk, max_bytes) };
+                    if ret != ESP_OK {
+                        return ret;
+                    }
                 } else {
                     break;
                 }
@@ -162,7 +165,10 @@ fn load_config(config_path: &str) -> i32 {
                     let sda     = json_get_int(&bus, "sda").unwrap_or(-1) as i32;
                     let scl     = json_get_int(&bus, "scl").unwrap_or(-1) as i32;
                     let freq_hz = json_get_int(&bus, "freq_hz").unwrap_or(400000) as i32;
-                    unsafe { board_bus_init_i2c(port, sda, scl, freq_hz); }
+                    let ret = unsafe { board_bus_init_i2c(port, sda, scl, freq_hz) };
+                    if ret != ESP_OK {
+                        return ret;
+                    }
                 } else {
                     break;
                 }
@@ -219,8 +225,15 @@ fn load_config(config_path: &str) -> i32 {
                             CString::new(hal_type.as_str()),
                             CString::new(config.as_str()),
                         ) {
-                            unsafe {
-                                board_builtin_driver_init(cid.as_ptr(), chal.as_ptr(), cconfig.as_ptr());
+                            let ret = unsafe {
+                                board_builtin_driver_init(
+                                    cid.as_ptr(),
+                                    chal.as_ptr(),
+                                    cconfig.as_ptr(),
+                                )
+                            };
+                            if ret != ESP_OK {
+                                return ret;
                             }
                         }
                     }

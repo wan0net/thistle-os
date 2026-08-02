@@ -301,10 +301,12 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
 
     /* Slow path: arbitrary rectangle, bit-by-bit. */
     uint16_t src_w = x2 - x1 + 1;
+    size_t src_row_bytes = (src_w + 7) / 8;
     for (uint16_t row = y1; row <= y2; row++) {
         for (uint16_t col = x1; col <= x2; col++) {
-            uint32_t src_bit_idx = (uint32_t)(row - y1) * src_w + (col - x1);
-            uint8_t  src_bit     = (color_data[src_bit_idx >> 3] >> (7 - (src_bit_idx & 7))) & 1;
+            size_t src_bit_idx = (size_t)(col - x1);
+            const uint8_t *src_row = color_data + (size_t)(row - y1) * src_row_bytes;
+            uint8_t src_bit = (src_row[src_bit_idx >> 3] >> (7 - (src_bit_idx & 7))) & 1;
             uint32_t dst_bit_idx = (uint32_t)row * EPD_WIDTH + col;
             uint8_t  dst_mask    = 0x80u >> (dst_bit_idx & 7);
             if (src_bit) s_epd.fb[dst_bit_idx >> 3] |=  dst_mask;

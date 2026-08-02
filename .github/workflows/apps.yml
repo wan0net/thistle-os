@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'standalone_apps/**'
+      - 'standalone_drivers/**'
       - 'app_sdk/**'
       - 'driver_sdk/**'
       - 'tools/sign_elf.py'
@@ -20,9 +21,8 @@ jobs:
     container: espressif/idf:v5.5
     strategy:
       matrix:
-        arch: [esp32s3]
-        # Add more architectures as needed:
-        # arch: [esp32, esp32s2, esp32s3, esp32c3, esp32c6]
+        # Architectures currently advertised by sdcard board profiles.
+        arch: [esp32, esp32s3, esp32c3]
 
     steps:
       - uses: actions/checkout@v6
@@ -36,7 +36,7 @@ jobs:
           . $IDF_PATH/export.sh
           idf.py set-target "$TARGET_ARCH"
 
-      - name: Build standalone apps
+      - name: Build standalone apps and drivers
         env:
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
@@ -46,6 +46,11 @@ jobs:
 
           for app_dir in standalone_apps/*/; do
             app_name=$(basename "$app_dir")
+            app_arch="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("arch", ""))' "$app_dir/manifest.json")"
+            if [ "$app_arch" != "$TARGET_ARCH" ]; then
+              echo "Skipping $app_name: declared for $app_arch, not $TARGET_ARCH"
+              continue
+            fi
             echo "Building $app_name for $TARGET_ARCH..."
 
             mkdir -p "$app_dir/build"
@@ -63,21 +68,67 @@ jobs:
                 cp "$app_dir/manifest.json" "artifacts/$TARGET_ARCH/${app_name}.manifest.json"
               fi
             else
-              echo "::warning::No .app.elf found for $app_name"
+              echo "::error::Declared app package $app_name produced no .app.elf"
+              exit 1
             fi
           done
 
+          shopt -s nullglob
+          driver_manifests=(standalone_drivers/*/manifest.json)
+          if [ "${#driver_manifests[@]}" -eq 0 ]; then
+            echo "No standalone drivers declared"
+          fi
+          for manifest in "${driver_manifests[@]}"; do
+            driver_dir="$(dirname "$manifest")"
+            driver_name="$(basename "$driver_dir")"
+            entry="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["entry"])' "$manifest")"
+            driver_arch="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("arch", ""))' "$manifest")"
+            if [ "$driver_arch" != "$TARGET_ARCH" ]; then
+              echo "Skipping driver $driver_name: declared for $driver_arch, not $TARGET_ARCH"
+              continue
+            fi
+            case "$entry" in
+              *.drv.elf) ;;
+              *) echo "::error::Driver $driver_name manifest entry must end in .drv.elf"; exit 1 ;;
+            esac
+            echo "Building driver $driver_name for $TARGET_ARCH..."
+
+            mkdir -p "$driver_dir/build"
+            cd "$driver_dir/build"
+            cmake .. -DCMAKE_TOOLCHAIN_FILE="$IDF_PATH/tools/cmake/toolchain-${TARGET_ARCH}.cmake"
+            cmake --build . --parallel
+            cd -
+
+            elf="$(find "$driver_dir/build" -type f -name "$entry" -print -quit)"
+            if [ -z "$elf" ]; then
+              echo "::error::Declared driver package $driver_name produced no $entry"
+              exit 1
+            fi
+            package_dir="artifacts/$TARGET_ARCH/drivers/$driver_name"
+            mkdir -p "$package_dir"
+            cp "$elf" "$package_dir/$entry"
+            cp "$manifest" "$package_dir/manifest.json"
+          done
+
       - name: Sign artifacts
-        if: env.SIGNING_KEY != ''
         env:
           SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::THISTLE_SIGNING_KEY is required to publish signed packages"
+            exit 1
+          fi
           pip install pynacl
-          shopt -s nullglob
-          for elf in "artifacts/$TARGET_ARCH/"*.app.elf; do
+          while IFS= read -r -d '' elf; do
             python3 tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
-          done
+            sha256sum "$elf" | awk '{print $1}' > "$elf.sha256"
+          done < <(find "artifacts/$TARGET_ARCH" -type f \( -name '*.app.elf' -o -name '*.drv.elf' \) -print0)
+          # Keep an explicit empty matrix artifact so publication can validate
+          # that an advertised architecture was considered, even if no package
+          # declares support for it yet.
+          touch "artifacts/$TARGET_ARCH/.matrix-${TARGET_ARCH}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -104,18 +155,28 @@ jobs:
       - name: Merge artifacts
         run: |
           mkdir -p publish/apps
-          cp -r all-artifacts/*/. publish/apps/
+          for artifact in all-artifacts/apps-*; do
+            arch="${artifact##*/apps-}"
+            mkdir -p "publish/apps/$arch"
+            cp -r "$artifact"/. "publish/apps/$arch/"
+          done
+
+      - name: Validate published architecture packages
+        run: |
+          python3 tools/validate_arch_coverage.py \
+            --board-dir sdcard_layout/config/boards \
+            --package-dir publish/apps
 
       - name: Generate catalog
         run: |
           pip install pynacl
+          # Copy static assets first; copying afterwards would overwrite the
+          # freshly generated catalog and hide architecture-specific packages.
+          cp -r appstore-site/* publish/ 2>/dev/null || true
           python3 tools/build_catalog.py publish/apps \
             --base-url "https://wan0net.github.io/thistle-apps/apps" \
             --output publish/catalog.json \
             --merge appstore-site/catalog.json 2>/dev/null || true
-
-          # Copy any existing static assets
-          cp -r appstore-site/* publish/ 2>/dev/null || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

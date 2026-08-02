@@ -16,6 +16,7 @@ set(THISTLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(THISTLE_SRCS
     # HAL (registry moved to Rust — hal_registry.rs in kernel_rs)
     ${THISTLE_DIR}/components/thistle_hal/src/stub.c
+    ${THISTLE_DIR}/components/kernel_rs/appstore_http_shim.c
     # Widget shims (Rust widget.rs → WM vtable bridge)
     ${THISTLE_DIR}/components/ui/src/widget_shims.c
     # thistle-tk WM C vtable + HAL bridge

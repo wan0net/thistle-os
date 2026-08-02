@@ -16,6 +16,10 @@ typedef void (*ota_progress_cb_t)(uint32_t bytes_written, uint32_t total_bytes, 
 /* Initialize OTA subsystem */
 esp_err_t ota_init(void);
 
+/* Confirm that boot reached its health milestone and cancel OTA rollback.
+ * Safe to call more than once; only the first successful call writes state. */
+esp_err_t ota_confirm_boot_health(void);
+
 /* Check if an OTA update file exists on SD card */
 bool ota_sd_update_available(void);
 

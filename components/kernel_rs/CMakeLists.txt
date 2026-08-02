@@ -1,7 +1,7 @@
 # ThistleOS Rust kernel component (REQUIRED)
 
 idf_component_register(
-    SRCS "stub.c" "epaper_spi_shim.c"
+    SRCS "stub.c" "epaper_spi_shim.c" "appstore_http_shim.c"
     INCLUDE_DIRS "include"
     REQUIRES thistle_hal esp_timer freertos esp_partition fatfs vfs app_update
              esp_wifi esp_netif esp_event bt mbedtls esp_http_client
@@ -9,13 +9,35 @@ idf_component_register(
     WHOLE_ARCHIVE
 )
 
-set(RUST_TARGET "xtensa-esp32s3-espidf")
+idf_build_get_property(IDF_TARGET IDF_TARGET)
+
+if(IDF_TARGET STREQUAL "esp32")
+    set(RUST_TARGET "xtensa-esp32-espidf")
+    set(RUST_CHIP_FEATURE "esp32")
+elseif(IDF_TARGET STREQUAL "esp32s2")
+    set(RUST_TARGET "xtensa-esp32s2-espidf")
+    set(RUST_CHIP_FEATURE "esp32s2")
+elseif(IDF_TARGET STREQUAL "esp32s3")
+    set(RUST_TARGET "xtensa-esp32s3-espidf")
+    set(RUST_CHIP_FEATURE "esp32s3")
+elseif(IDF_TARGET STREQUAL "esp32c3")
+    set(RUST_TARGET "riscv32imc-esp-espidf")
+    set(RUST_CHIP_FEATURE "esp32c3")
+elseif(IDF_TARGET STREQUAL "esp32c6")
+    set(RUST_TARGET "riscv32imac-esp-espidf")
+    set(RUST_CHIP_FEATURE "esp32c6")
+elseif(IDF_TARGET STREQUAL "esp32h2")
+    set(RUST_TARGET "riscv32imac-esp-espidf")
+    set(RUST_CHIP_FEATURE "esp32h2")
+else()
+    message(FATAL_ERROR "Unsupported ESP-IDF target '${IDF_TARGET}': no canonical manifest architecture slug")
+endif()
 set(RUST_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/target/${RUST_TARGET}/release")
 set(RUST_LIB "${RUST_BUILD_DIR}/libthistle_kernel.a")
 
 # Write a build script that sources the ESP Rust env in isolation
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_rust.sh"
-"#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\nif [ -f \"$ENV{HOME}/export-esp.sh\" ]; then . \"$ENV{HOME}/export-esp.sh\" 2>/dev/null; fi\ncd \"${CMAKE_CURRENT_SOURCE_DIR}\"\ncargo +esp build --release --target ${RUST_TARGET} -Zbuild-std=std,panic_abort\n")
+"#!/bin/bash\nexport PATH=\"$ENV{HOME}/.cargo/bin:$PATH\"\nif [ -f \"$ENV{HOME}/export-esp.sh\" ]; then . \"$ENV{HOME}/export-esp.sh\" 2>/dev/null; fi\ncd \"${CMAKE_CURRENT_SOURCE_DIR}\"\ncargo +esp build --release --target ${RUST_TARGET} --features ${RUST_CHIP_FEATURE} -Zbuild-std=std,panic_abort\n")
 
 file(GLOB_RECURSE RUST_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs")
 

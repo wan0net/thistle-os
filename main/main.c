@@ -252,6 +252,13 @@ void app_main(void)
         toast_show("Update available! Settings > About to install", TOAST_INFO, 5000);
     }
 
+    /* The display server, selected WM, launcher, and render loop are now up.
+     * Only this late milestone proves the pending OTA image booted healthily. */
+    ret = ota_confirm_boot_health();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "OTA health confirmation failed: %s", esp_err_to_name(ret));
+    }
+
     ESP_LOGI(TAG, "ThistleOS ready");
 
     /* Enter the kernel main loop — does not return */

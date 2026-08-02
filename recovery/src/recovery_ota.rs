@@ -2,6 +2,8 @@
 // Recovery OTA — check/flash firmware from SD card or HTTP
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+#[cfg(test)]
+use ed25519_dalek::{Signer, SigningKey};
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_sys::*;
 use log::*;
@@ -77,7 +79,31 @@ pub fn catalog_entry_arch_matches(obj: &str, chip: &str) -> bool {
 
 const SD_FIRMWARE_PATH: &str = "/sdcard/update/thistle_os.bin";
 const MAX_FIRMWARE_SIZE: usize = 4 * 1024 * 1024; // 4MB
-const REQUIRE_EXECUTABLE_SIGNATURES: bool = true;
+const MAX_CATALOG_SIZE: usize = 128 * 1024;
+const MAX_SIGNATURE_SIZE: usize = 128;
+const MAX_BOARD_JSON_SIZE: usize = 64 * 1024;
+const MAX_EXECUTABLE_SIZE: usize = 2 * 1024 * 1024;
+/// Catalog identifiers are ASCII slugs: 1–64 characters, beginning with a
+/// lowercase letter or digit and followed only by lowercase letters, digits,
+/// or hyphens.  This intentionally excludes dots, separators, and escapes.
+const MAX_CATALOG_ID_LENGTH: usize = 64;
+fn catalog_entry_requires_signature(entry_type: &str) -> bool {
+    matches!(entry_type, "firmware" | "board" | "driver" | "wm")
+}
+
+fn validate_signature_policy(entry_type: &str, sig_url: Option<&str>) -> anyhow::Result<()> {
+    if !catalog_entry_requires_signature(entry_type) {
+        anyhow::bail!("unsupported installable catalog entry type {}", entry_type);
+    }
+    if sig_url
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .is_none()
+    {
+        anyhow::bail!("Catalog {} entry missing sig_url", entry_type);
+    }
+    Ok(())
+}
 
 #[cfg(not(debug_assertions))]
 const RECOVERY_SIGNING_KEY: [u8; 32] = [
@@ -186,7 +212,8 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
         &fw_url,
         Some(&expected_sha),
         sig_url.as_deref(),
-        REQUIRE_EXECUTABLE_SIGNATURES,
+        "firmware",
+        MAX_FIRMWARE_SIZE,
     )?;
     info!("Downloaded {} bytes", firmware_data.len());
     println!("Downloaded {} bytes. Flashing...", firmware_data.len());
@@ -200,6 +227,14 @@ pub fn download_and_flash(catalog_url: &str) -> anyhow::Result<()> {
 
 /// Write firmware data to the ota_1 partition
 fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
+    flash_to_ota1_staged(data)?;
+    activate_ota1()
+}
+
+/// Write a verified image to the inactive OTA partition without changing the
+/// boot target.  Bundle installs use this so that a filesystem failure cannot
+/// make a partially installed bundle bootable.
+fn flash_to_ota1_staged(data: &[u8]) -> anyhow::Result<()> {
     unsafe {
         let part = esp_ota_get_next_update_partition(std::ptr::null());
         if part.is_null() {
@@ -243,12 +278,24 @@ fn flash_to_ota1(data: &[u8]) -> anyhow::Result<()> {
             anyhow::bail!("esp_ota_end failed: {}", ret);
         }
 
+        Ok(())
+    }
+}
+
+/// Make the already-written update partition bootable.  This is deliberately
+/// separate from flashing so callers can make it their final transaction step.
+fn activate_ota1() -> anyhow::Result<()> {
+    unsafe {
+        let part = esp_ota_get_next_update_partition(std::ptr::null());
+        if part.is_null() {
+            anyhow::bail!("No OTA update partition");
+        }
         let ret = esp_ota_set_boot_partition(part);
         if ret != ESP_OK as i32 {
             anyhow::bail!("esp_ota_set_boot_partition failed: {}", ret);
         }
 
-        info!("OTA flash complete, boot partition set");
+        info!("OTA boot partition set");
         Ok(())
     }
 }
@@ -725,6 +772,74 @@ const FALLBACK_BOARD: &str = "tdeck-pro";
 const SD_DRIVERS_DIR: &str = "/sdcard/drivers";
 const SD_WM_DIR: &str = "/sdcard/wm";
 const SD_BOARDS_DIR: &str = "/sdcard/config/boards";
+const BUNDLE_STAGE_DIR: &str = "/sdcard/.recovery-bundle-stage";
+const BUNDLE_BACKUP_DIR: &str = "/sdcard/.recovery-bundle-backup";
+
+#[derive(Debug)]
+struct BundleArtifact {
+    destination: String,
+    data: Vec<u8>,
+    signature: Option<Vec<u8>>,
+}
+
+/// The only permitted activation order for a board bundle.  Keeping this
+/// sequence explicit makes it harder to accidentally make OTA bootable before
+/// all accompanying filesystem content has been installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BundleActivationStep {
+    FlashInactiveOta,
+    CommitFilesystem,
+    SetBootPartition,
+}
+
+const BUNDLE_ACTIVATION_ORDER: [BundleActivationStep; 3] = [
+    BundleActivationStep::FlashInactiveOta,
+    BundleActivationStep::CommitFilesystem,
+    BundleActivationStep::SetBootPartition,
+];
+
+fn validate_catalog_id(id: &str) -> anyhow::Result<()> {
+    let bytes = id.as_bytes();
+    if bytes.is_empty() || bytes.len() > MAX_CATALOG_ID_LENGTH {
+        anyhow::bail!("catalog id must be 1-{} characters", MAX_CATALOG_ID_LENGTH);
+    }
+    if !matches!(bytes[0], b'a'..=b'z' | b'0'..=b'9')
+        || !bytes[1..]
+            .iter()
+            .all(|byte| matches!(*byte, b'a'..=b'z' | b'0'..=b'9' | b'-'))
+    {
+        anyhow::bail!("catalog id must use the lowercase slug grammar");
+    }
+    Ok(())
+}
+
+fn path_is_within(path: &std::path::Path, root: &str) -> bool {
+    path.starts_with(root)
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn catalog_destination(root: &str, id: &str, suffix: &str) -> anyhow::Result<String> {
+    validate_catalog_id(id)?;
+    let destination = std::path::Path::new(root).join(format!("{}{}", id, suffix));
+    if !path_is_within(&destination, root) {
+        anyhow::bail!("catalog destination escapes its root");
+    }
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+fn validate_bundle_destination(destination: &str) -> anyhow::Result<()> {
+    let allowed = [SD_BOARDS_DIR, SD_DRIVERS_DIR, SD_WM_DIR, "/sdcard/config"];
+    if allowed
+        .iter()
+        .any(|root| path_is_within(std::path::Path::new(destination), root))
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("bundle destination escapes an approved root")
+    }
+}
 
 /// Read the board name from /spiffs/config/board.json, falling back to a
 /// hardcoded default when the file is absent or unparseable.
@@ -1048,24 +1163,188 @@ impl<'a> Iterator for JsonObjects<'a> {
     }
 }
 
-/// Download a single catalog entry, verify it, and write it to `dest_path`.
-fn download_file(
-    url: &str,
-    expected_sha256: Option<&str>,
-    sig_url: Option<&str>,
-    require_signature: bool,
-    dest_path: &str,
-) -> anyhow::Result<()> {
-    let (data, sig) =
-        download_catalog_entry_bytes(url, expected_sha256, sig_url, require_signature)?;
-    std::fs::create_dir_all(
-        std::path::Path::new(dest_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/")),
-    )?;
-    std::fs::write(dest_path, &data)?;
-    if let Some(sig_bytes) = sig {
-        std::fs::write(format!("{}.sig", dest_path), &sig_bytes)?;
+fn artifact_stage_path(index: usize, signature: bool) -> String {
+    format!(
+        "{}/{}.{}",
+        BUNDLE_STAGE_DIR,
+        index,
+        if signature { "sig" } else { "data" }
+    )
+}
+
+fn remove_directory_if_present(path: &str) -> anyhow::Result<()> {
+    if std::path::Path::new(path).exists() {
+        std::fs::remove_dir_all(path)?;
+    }
+    Ok(())
+}
+
+/// Synchronize staged and activated files so supported VFS implementations
+/// persist the replacement before recovery reports success or selects OTA.
+fn write_file_durable(path: &str, data: &[u8]) -> anyhow::Result<()> {
+    std::fs::write(path, data)?;
+    std::fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+fn sync_activated_file(path: &str) -> anyhow::Result<()> {
+    std::fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+/// Persist the already verified artifacts under a private directory on the
+/// same VFS mount as their destinations.  A failed write here cannot affect an
+/// active driver, WM, or board configuration.
+fn stage_bundle_artifacts(artifacts: &[BundleArtifact]) -> anyhow::Result<()> {
+    remove_directory_if_present(BUNDLE_STAGE_DIR)?;
+    std::fs::create_dir_all(BUNDLE_STAGE_DIR)?;
+    for (index, artifact) in artifacts.iter().enumerate() {
+        validate_bundle_destination(&artifact.destination)?;
+        let staged_data = artifact_stage_path(index, false);
+        if !path_is_within(std::path::Path::new(&staged_data), BUNDLE_STAGE_DIR) {
+            anyhow::bail!("bundle staging path escapes its root");
+        }
+        write_file_durable(&staged_data, &artifact.data)?;
+        if let Some(signature) = &artifact.signature {
+            let staged_signature = artifact_stage_path(index, true);
+            if !path_is_within(std::path::Path::new(&staged_signature), BUNDLE_STAGE_DIR) {
+                anyhow::bail!("bundle staging path escapes its root");
+            }
+            write_file_durable(&staged_signature, signature)?;
+        }
+    }
+    Ok(())
+}
+
+/// Rename staged files into place, retaining old files until every rename has
+/// succeeded.  FAT/VFS does not provide a multi-file transaction, so this is a
+/// best-effort rollback: each individual rename is atomic on its mount and any
+/// ordinary error restores the prior files before OTA activation is attempted.
+fn commit_staged_bundle_artifacts(
+    artifacts: &[BundleArtifact],
+) -> anyhow::Result<Vec<(String, Option<String>)>> {
+    remove_directory_if_present(BUNDLE_BACKUP_DIR)?;
+    std::fs::create_dir_all(BUNDLE_BACKUP_DIR)?;
+    for artifact in artifacts {
+        if let Some(parent) = std::path::Path::new(&artifact.destination).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let mut moved: Vec<(String, Option<String>)> = Vec::new();
+
+    for (index, artifact) in artifacts.iter().enumerate() {
+        validate_bundle_destination(&artifact.destination)?;
+        let mut files = vec![(
+            artifact_stage_path(index, false),
+            artifact.destination.clone(),
+        )];
+        if artifact.signature.is_some() {
+            files.push((
+                artifact_stage_path(index, true),
+                format!("{}.sig", artifact.destination),
+            ));
+        }
+        for (part, (staged, destination)) in files.into_iter().enumerate() {
+            let backup = format!("{}/{}-{}", BUNDLE_BACKUP_DIR, index, part);
+            if !path_is_within(std::path::Path::new(&staged), BUNDLE_STAGE_DIR)
+                || !path_is_within(std::path::Path::new(&backup), BUNDLE_BACKUP_DIR)
+                || !path_is_within(std::path::Path::new(&destination), "/sdcard")
+            {
+                return Err(rollback_after_error(
+                    &moved,
+                    anyhow::anyhow!("bundle transaction path escapes its root"),
+                ));
+            }
+            let prior = if std::path::Path::new(&destination).exists() {
+                if let Err(error) = std::fs::rename(&destination, &backup) {
+                    return Err(rollback_after_error(&moved, error.into()));
+                }
+                Some(backup)
+            } else {
+                None
+            };
+            if let Err(error) = std::fs::rename(&staged, &destination) {
+                if let Some(backup) = prior.as_deref() {
+                    if let Err(restore_error) = std::fs::rename(backup, &destination) {
+                        return Err(rollback_after_error(
+                            &moved,
+                            anyhow::anyhow!(
+                                "activation rename failed: {}; profile restore failed: {}",
+                                error,
+                                restore_error
+                            ),
+                        ));
+                    }
+                }
+                return Err(rollback_after_error(&moved, error.into()));
+            }
+            moved.push((destination, prior));
+            if let Err(error) = sync_activated_file(&moved.last().expect("just moved").0) {
+                return Err(rollback_after_error(&moved, error.into()));
+            }
+        }
+    }
+
+    Ok(moved)
+}
+
+fn rollback_after_error(moved: &[(String, Option<String>)], error: anyhow::Error) -> anyhow::Error {
+    match rollback_bundle_artifacts(moved) {
+        Ok(()) => error,
+        Err(rollback_error) => anyhow::anyhow!("{}; rollback failed: {}", error, rollback_error),
+    }
+}
+
+fn rollback_bundle_artifacts(moved: &[(String, Option<String>)]) -> anyhow::Result<()> {
+    for (destination, backup) in moved.iter().rev() {
+        if std::path::Path::new(destination).exists() {
+            std::fs::remove_file(destination)?;
+        }
+        if let Some(backup) = backup {
+            std::fs::rename(backup, destination)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoardProfileStep {
+    Mkdir,
+    WriteAndSync,
+    Backup,
+    AtomicReplace,
+}
+
+/// Small failure-injection model for the board-profile transaction.  The real
+/// implementation performs these same operations with VFS calls above; this
+/// helper verifies that a failed post-backup operation invokes rollback and
+/// never reaches a successful activation result.
+#[cfg(test)]
+fn run_board_profile_transaction<F, R>(mut step: F, mut rollback: R) -> anyhow::Result<()>
+where
+    F: FnMut(BoardProfileStep) -> anyhow::Result<()>,
+    R: FnMut() -> anyhow::Result<()>,
+{
+    for operation in [
+        BoardProfileStep::Mkdir,
+        BoardProfileStep::WriteAndSync,
+        BoardProfileStep::Backup,
+        BoardProfileStep::AtomicReplace,
+    ] {
+        if let Err(error) = step(operation) {
+            if matches!(operation, BoardProfileStep::AtomicReplace) {
+                return match rollback() {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(anyhow::anyhow!(
+                        "{}; rollback failed: {}",
+                        error,
+                        rollback_error
+                    )),
+                };
+            }
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -1074,9 +1353,11 @@ fn download_catalog_entry_bytes(
     url: &str,
     expected_sha256: Option<&str>,
     sig_url: Option<&str>,
-    require_signature: bool,
+    entry_type: &str,
+    max_data_size: usize,
 ) -> anyhow::Result<(Vec<u8>, Option<Vec<u8>>)> {
-    let data = http_get_bytes(url)?;
+    validate_signature_policy(entry_type, sig_url)?;
+    let data = http_get_bytes_limited(url, max_data_size)?;
     match expected_sha256.filter(|s| !s.trim().is_empty()) {
         Some(expected) => verify_sha256(&data, expected)?,
         None => anyhow::bail!("Catalog entry missing sha256 for {}", url),
@@ -1084,11 +1365,13 @@ fn download_catalog_entry_bytes(
 
     let sig = match sig_url.filter(|s| !s.trim().is_empty()) {
         Some(sig_url) => {
-            let sig = http_get_bytes(sig_url)?;
+            let sig = http_get_bytes_limited(sig_url, MAX_SIGNATURE_SIZE)?;
             verify_ed25519(&data, &sig)?;
             Some(sig)
         }
-        None if require_signature => anyhow::bail!("Catalog entry missing sig_url for {}", url),
+        None if catalog_entry_requires_signature(entry_type) => {
+            anyhow::bail!("Catalog entry missing sig_url for {}", url)
+        }
         None => None,
     };
 
@@ -1128,11 +1411,19 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 fn verify_ed25519(data: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+    verify_ed25519_with_key(data, signature, &RECOVERY_SIGNING_KEY)
+}
+
+fn verify_ed25519_with_key(
+    data: &[u8],
+    signature: &[u8],
+    verifying_key_bytes: &[u8; 32],
+) -> anyhow::Result<()> {
     if signature.len() != 64 {
         anyhow::bail!("Invalid Ed25519 signature size: {} bytes", signature.len());
     }
 
-    let verifying_key = VerifyingKey::from_bytes(&RECOVERY_SIGNING_KEY)
+    let verifying_key = VerifyingKey::from_bytes(verifying_key_bytes)
         .map_err(|_| anyhow::anyhow!("Invalid recovery signing public key"))?;
     let sig_bytes: [u8; 64] = signature
         .try_into()
@@ -1167,12 +1458,16 @@ pub fn recovery_download_board_bundle(catalog_url: &str) -> anyhow::Result<u32> 
 /// Steps:
 /// 1. Fetch catalog JSON from `catalog_url`.
 /// 2. Count compatible entries to compute per-item progress increments.
-/// 3. For each compatible catalog entry:
-///    - firmware → verified and flashed directly to ota_1
+/// 3. Download and verify every compatible catalog entry into staging.
+/// 4. Write firmware to the inactive OTA partition, commit filesystem entries
+///    with rollback support, then set the OTA boot partition last.
+///
+/// Bundle files are therefore never activated when staging fails.
+///
+/// Artifact destinations:
 ///    - board    → /sdcard/config/boards/<id>.json and /sdcard/config/board.json
 ///    - driver   → /sdcard/drivers/<id>.drv.elf
 ///    - wm       → /sdcard/wm/<id>.wm.elf
-/// 4. Verify and store matching .sig files alongside non-firmware bundle files.
 ///
 /// Returns the number of items successfully downloaded.
 pub fn recovery_download_board_bundle_for(
@@ -1218,8 +1513,8 @@ pub fn recovery_download_board_bundle_for(
         .filter(|obj| entry_should_download(obj))
         .count() as u32;
 
-    let mut downloaded = 0u32;
-    let mut errors = 0u32;
+    let mut artifacts = Vec::new();
+    let mut firmware = None;
 
     for obj in iter_json_objects(&catalog_json) {
         if !entry_should_download(obj) {
@@ -1231,6 +1526,7 @@ pub fn recovery_download_board_bundle_for(
             Some(v) => v,
             None => continue,
         };
+        validate_catalog_id(&id)?;
         let url = match json_extract_string(obj, "url") {
             Some(v) => v,
             None => continue,
@@ -1241,9 +1537,9 @@ pub fn recovery_download_board_bundle_for(
 
         let dest_path = match entry_type.as_str() {
             "firmware" => String::new(),
-            "board" => format!("{}/{}.json", SD_BOARDS_DIR, id),
-            "driver" => format!("{}/{}.drv.elf", SD_DRIVERS_DIR, id),
-            "wm" => format!("{}/{}.wm.elf", SD_WM_DIR, id),
+            "board" => catalog_destination(SD_BOARDS_DIR, &id, ".json")?,
+            "driver" => catalog_destination(SD_DRIVERS_DIR, &id, ".drv.elf")?,
+            "wm" => catalog_destination(SD_WM_DIR, &id, ".wm.elf")?,
             other => {
                 info!("Skipping '{}' (type={})", id, other);
                 continue;
@@ -1252,87 +1548,112 @@ pub fn recovery_download_board_bundle_for(
 
         if entry_type == "firmware" {
             let Some(expected_sha) = expected_sha.as_deref().filter(|s| !s.is_empty()) else {
-                error!("Firmware '{}' missing sha256 — skipping install", name);
-                errors += 1;
-                continue;
+                anyhow::bail!("Firmware '{}' missing sha256", name);
             };
-            info!("Downloading firmware {} -> ota_1", name);
-            println!("  {} [firmware -> ota_1]", name);
-            match download_catalog_entry_bytes(
+            if firmware.is_some() {
+                anyhow::bail!("Bundle contains more than one firmware entry");
+            }
+            info!("Staging firmware {}", name);
+            println!("  {} [firmware staged]", name);
+            let (data, _) = download_catalog_entry_bytes(
                 &url,
                 Some(expected_sha),
                 sig_url.as_deref(),
-                REQUIRE_EXECUTABLE_SIGNATURES,
-            )
-            .and_then(|(data, _)| flash_to_ota1(&data))
-            {
-                Ok(()) => {
-                    downloaded += 1;
-                    info!("Firmware '{}' flashed to ota_1", name);
-                    if total_entries > 0 {
-                        let pct = (downloaded * 100 / total_entries).min(99) as u8;
-                        BUNDLE_PROGRESS.store(pct, Ordering::Relaxed);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to flash firmware '{}': {}", name, e);
-                    errors += 1;
-                }
-            }
+                "firmware",
+                MAX_FIRMWARE_SIZE,
+            )?;
+            firmware = Some(data);
             continue;
         }
 
-        info!("Downloading {} -> {}", name, dest_path);
-        println!("  {} [{}]", name, entry_type);
+        info!("Staging {} -> {}", name, dest_path);
+        println!("  {} [{} staged]", name, entry_type);
 
-        let require_signature =
-            matches!(entry_type.as_str(), "driver" | "wm") && REQUIRE_EXECUTABLE_SIGNATURES;
-        if let Err(e) = download_file(
+        let max_data_size = match entry_type.as_str() {
+            "board" => MAX_BOARD_JSON_SIZE,
+            "driver" | "wm" => MAX_EXECUTABLE_SIZE,
+            _ => unreachable!("only bundle artifact types reach this point"),
+        };
+        let (data, signature) = download_catalog_entry_bytes(
             &url,
             expected_sha.as_deref(),
             sig_url.as_deref(),
-            require_signature,
-            &dest_path,
-        ) {
-            error!("Failed to download '{}': {}", name, e);
-            errors += 1;
-            continue;
-        }
+            &entry_type,
+            max_data_size,
+        )?;
+        artifacts.push(BundleArtifact {
+            destination: dest_path,
+            data,
+            signature,
+        });
 
         if entry_type == "board" {
-            let _ = std::fs::create_dir_all("/sdcard/config");
-            let _ = std::fs::copy(&dest_path, "/sdcard/config/board.json");
-        }
-
-        if !sig_url.as_deref().unwrap_or_default().is_empty() {
-            info!("Signature downloaded for '{}'", name);
-        }
-
-        downloaded += 1;
-        info!("Installed '{}'", name);
-
-        // Update progress
-        if total_entries > 0 {
-            let pct = (downloaded * 100 / total_entries).min(99) as u8;
-            BUNDLE_PROGRESS.store(pct, Ordering::Relaxed);
+            let board = artifacts.last().expect("board artifact just pushed");
+            artifacts.push(BundleArtifact {
+                destination: "/sdcard/config/board.json".to_string(),
+                data: board.data.clone(),
+                signature: None,
+            });
         }
     }
 
-    if errors > 0 {
-        anyhow::bail!(
-            "Bundle download completed with {} error(s) ({} succeeded)",
-            errors,
-            downloaded
-        );
+    // Nothing visible to the running system is changed until every network
+    // download and verification above has succeeded.
+    stage_bundle_artifacts(&artifacts)?;
+
+    if let Some(image) = firmware.as_deref() {
+        flash_to_ota1_staged(image)?;
     }
+    let committed = commit_staged_bundle_artifacts(&artifacts)?;
+    if firmware.is_some() {
+        if let Err(error) = activate_ota1() {
+            let failure = rollback_after_error(&committed, error);
+            if let Err(cleanup_error) = remove_directory_if_present(BUNDLE_BACKUP_DIR) {
+                return Err(anyhow::anyhow!(
+                    "{}; backup cleanup failed: {}",
+                    failure,
+                    cleanup_error
+                ));
+            }
+            return Err(failure);
+        }
+    }
+    remove_directory_if_present(BUNDLE_BACKUP_DIR)?;
+    remove_directory_if_present(BUNDLE_STAGE_DIR)?;
 
     BUNDLE_PROGRESS.store(100, Ordering::Relaxed);
     info!(
         "Bundle download complete: {} item(s) installed for board '{}'",
-        downloaded, board_name
+        total_entries, board_name
     );
-    println!("Bundle complete: {} items installed", downloaded);
-    Ok(downloaded)
+    println!("Bundle complete: {} items installed", total_entries);
+    Ok(total_entries)
+}
+
+fn execute_bundle_activation<F, C, A>(
+    firmware: Option<&[u8]>,
+    mut flash_inactive_ota: F,
+    mut commit_filesystem: C,
+    mut set_boot_partition: A,
+) -> anyhow::Result<()>
+where
+    F: FnMut(&[u8]) -> anyhow::Result<()>,
+    C: FnMut() -> anyhow::Result<()>,
+    A: FnMut() -> anyhow::Result<()>,
+{
+    for step in BUNDLE_ACTIVATION_ORDER {
+        match step {
+            BundleActivationStep::FlashInactiveOta => {
+                if let Some(image) = firmware {
+                    flash_inactive_ota(image)?;
+                }
+            }
+            BundleActivationStep::CommitFilesystem => commit_filesystem()?,
+            BundleActivationStep::SetBootPartition if firmware.is_some() => set_boot_partition()?,
+            BundleActivationStep::SetBootPartition => {}
+        }
+    }
+    Ok(())
 }
 
 /// Build a dry-run JSON plan for the bundle entries recovery would download.
@@ -1390,12 +1711,31 @@ fn find_catalog_entry_by_type<'a>(json: &'a str, entry_type: &str) -> Option<&'a
 
 /// HTTP GET returning a string
 fn http_get_string(url: &str) -> anyhow::Result<String> {
-    let bytes = http_get_bytes(url)?;
+    let bytes = http_get_bytes_limited(url, MAX_CATALOG_SIZE)?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// HTTP GET returning bytes
-fn http_get_bytes(url: &str) -> anyhow::Result<Vec<u8>> {
+fn content_length_within_limit(content_length: Option<&str>, limit: usize) -> bool {
+    match content_length {
+        Some(value) => value
+            .trim()
+            .parse::<usize>()
+            .is_ok_and(|length| length <= limit),
+        None => true, // Chunked responses are checked while they stream.
+    }
+}
+
+fn would_exceed_limit(current: usize, incoming: usize, limit: usize) -> bool {
+    match current.checked_add(incoming) {
+        Some(total) => total > limit,
+        None => true,
+    }
+}
+
+/// HTTP GET returning bytes with an upper bound enforced for both declared and
+/// chunked response bodies.  The bound is checked before reserving/growing the
+/// response buffer so a malicious Content-Length cannot exhaust recovery RAM.
+fn http_get_bytes_limited(url: &str, limit: usize) -> anyhow::Result<Vec<u8>> {
     use embedded_svc::http::client::Client;
 
     let connection = EspHttpConnection::new(&HttpConfig {
@@ -1410,17 +1750,193 @@ fn http_get_bytes(url: &str) -> anyhow::Result<Vec<u8>> {
     if status != 200 {
         anyhow::bail!("HTTP {} for {}", status, url);
     }
+    if !content_length_within_limit(response.header("Content-Length"), limit) {
+        anyhow::bail!("HTTP response exceeds {} byte limit for {}", limit, url);
+    }
 
-    let mut body = Vec::new();
+    let mut body = Vec::with_capacity(limit.min(4096));
     let mut reader = response;
     let mut buf = [0u8; 4096];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
+            Ok(n) if would_exceed_limit(body.len(), n, limit) => {
+                anyhow::bail!("HTTP response exceeds {} byte limit for {}", limit, url)
+            }
             Ok(n) => body.extend_from_slice(&buf[..n]),
             Err(e) => anyhow::bail!("Read error: {}", e),
         }
     }
 
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_limits_allow_exactly_the_limit_and_reject_one_byte_over() {
+        assert!(content_length_within_limit(Some("4096"), 4096));
+        assert!(!content_length_within_limit(Some("4097"), 4096));
+        assert!(!would_exceed_limit(4095, 1, 4096));
+        assert!(would_exceed_limit(4096, 1, 4096));
+    }
+
+    #[test]
+    fn catalog_id_slug_validation_rejects_traversal_and_encoded_tricks() {
+        let overlong = "a".repeat(MAX_CATALOG_ID_LENGTH + 1);
+        for invalid in [
+            "../driver",
+            "/absolute",
+            "driver/child",
+            r"driver\\child",
+            "%2e%2e%2fdriver",
+            ".",
+            "",
+            "UPPERCASE",
+            overlong.as_str(),
+        ] {
+            assert!(
+                validate_catalog_id(invalid).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_id_slug_validation_accepts_known_safe_ids() {
+        for id in ["tdeck-pro", "c3-mini", "driver2", "a", "0"] {
+            assert!(validate_catalog_id(id).is_ok(), "rejected {id:?}");
+            let destination = catalog_destination(SD_DRIVERS_DIR, id, ".drv.elf").unwrap();
+            assert!(path_is_within(
+                std::path::Path::new(&destination),
+                SD_DRIVERS_DIR
+            ));
+        }
+    }
+
+    #[test]
+    fn every_installable_type_requires_a_nonempty_signature_url() {
+        for entry_type in ["firmware", "board", "driver", "wm"] {
+            assert!(catalog_entry_requires_signature(entry_type));
+            assert!(
+                validate_signature_policy(entry_type, Some("https://example.invalid/x.sig"))
+                    .is_ok()
+            );
+            assert!(validate_signature_policy(entry_type, None).is_err());
+            assert!(validate_signature_policy(entry_type, Some(" ")).is_err());
+        }
+        assert!(validate_signature_policy("app", Some("https://example.invalid/x.sig")).is_err());
+    }
+
+    #[test]
+    fn signature_verification_accepts_valid_and_rejects_malformed_or_bad_signatures() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let data = b"signed board profile";
+        let signature = signing_key.sign(data).to_bytes();
+        assert!(
+            verify_ed25519_with_key(data, &signature, &signing_key.verifying_key().to_bytes())
+                .is_ok()
+        );
+
+        for entry_type in ["firmware", "board", "driver", "wm"] {
+            assert!(
+                validate_signature_policy(entry_type, Some("https://example.invalid/x.sig"))
+                    .is_ok()
+            );
+            assert!(verify_ed25519_with_key(
+                data,
+                &[0u8; 63],
+                &signing_key.verifying_key().to_bytes()
+            )
+            .is_err());
+            assert!(verify_ed25519_with_key(
+                data,
+                &[0u8; 64],
+                &signing_key.verifying_key().to_bytes()
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn board_profile_mkdir_write_backup_and_rename_failures_propagate() {
+        for failed_step in [
+            BoardProfileStep::Mkdir,
+            BoardProfileStep::WriteAndSync,
+            BoardProfileStep::Backup,
+            BoardProfileStep::AtomicReplace,
+        ] {
+            let result = run_board_profile_transaction(
+                |step| {
+                    if step == failed_step {
+                        anyhow::bail!("injected {step:?} failure")
+                    }
+                    Ok(())
+                },
+                || Ok(()),
+            );
+            assert!(result.is_err(), "failure at {failed_step:?} was ignored");
+        }
+    }
+
+    #[test]
+    fn board_profile_rename_failure_reports_rollback_failure() {
+        let error = run_board_profile_transaction(
+            |step| {
+                if step == BoardProfileStep::AtomicReplace {
+                    anyhow::bail!("injected rename failure")
+                }
+                Ok(())
+            },
+            || anyhow::bail!("injected rollback failure"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("rollback failed"));
+    }
+
+    #[test]
+    fn bundle_activation_sets_boot_partition_last() {
+        let events = std::cell::RefCell::new(Vec::new());
+        execute_bundle_activation(
+            Some(b"firmware"),
+            |_| {
+                events.borrow_mut().push("flash");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("filesystem");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("boot");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(events.into_inner(), ["flash", "filesystem", "boot"]);
+    }
+
+    #[test]
+    fn failed_filesystem_commit_never_activates_ota() {
+        let events = std::cell::RefCell::new(Vec::new());
+        let result = execute_bundle_activation(
+            Some(b"firmware"),
+            |_| {
+                events.borrow_mut().push("flash");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("filesystem");
+                anyhow::bail!("injected staging/commit failure")
+            },
+            || {
+                events.borrow_mut().push("boot");
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(events.into_inner(), ["flash", "filesystem"]);
+    }
 }

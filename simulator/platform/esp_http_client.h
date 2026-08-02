@@ -14,10 +14,12 @@
 typedef sim_http_client_handle_t esp_http_client_handle_t;
 
 typedef esp_err_t (*crt_bundle_attach_fn)(void *);
+typedef struct esp_http_client_event esp_http_client_event_t;
+typedef esp_err_t (*esp_http_client_event_cb_t)(esp_http_client_event_t *event);
 
 typedef struct {
     const char *url;
-    void       *event_handler;      /* ignored in simulator */
+    esp_http_client_event_cb_t event_handler; /* ignored in simulator */
     void       *user_data;          /* ignored in simulator */
     crt_bundle_attach_fn crt_bundle_attach; /* ignored in simulator */
     int         timeout_ms;
@@ -34,12 +36,12 @@ typedef enum {
     HTTP_METHOD_DELETE = 3,
 } esp_http_client_method_t;
 
-typedef struct {
+struct esp_http_client_event {
     esp_http_client_event_id_t event_id;
     void *data;
     int   data_len;
     void *user_data;
-} esp_http_client_event_t;
+};
 
 static inline esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)
 {

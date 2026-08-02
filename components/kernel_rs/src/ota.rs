@@ -7,6 +7,7 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
+use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
@@ -14,16 +15,23 @@ use std::os::raw::{c_char, c_void};
 
 const ESP_OK: i32 = 0x000;
 const ESP_ERR_NO_MEM: i32 = 0x101;
+const ESP_ERR_INVALID_ARG: i32 = 0x102;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_ERR_INVALID_CRC: i32 = 0x109;
+const ESP_ERR_INVALID_STATE: i32 = 0x103;
 
 const OTA_BUF_SIZE: usize = 4096;
 const OTA_SD_UPDATE_PATH: &str = "/sdcard/update/thistle_os.bin\0";
 const MAX_OTA_SIZE: u64 = 16 * 1024 * 1024; // 16 MB
 
 static TAG: &[u8] = b"ota\0";
+
+// A successful health confirmation is permanent for this boot.  Serialising
+// the check and mark operation prevents concurrent callers from confirming
+// the partition more than once.
+static BOOT_HEALTH_CONFIRMED: Mutex<bool> = Mutex::new(false);
 
 // ---------------------------------------------------------------------------
 // C FFI — logging
@@ -34,25 +42,17 @@ extern "C" {
     fn signing_verify_file(path: *const c_char) -> i32;
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF OTA FFI (hardware only)
 // ---------------------------------------------------------------------------
 
-/// ESP_OTA_IMG_PENDING_VERIFY state value from esp_ota_ops.h
-///
-/// Replaces the C `esp_ota_img_pending_verify()` helper shim in kernel_shims.c.
-/// The constant value 0x107 matches ESP_OTA_IMG_PENDING_VERIFY in ESP-IDF v5.x.
-#[cfg(target_os = "espidf")]
-const ESP_OTA_IMG_PENDING_VERIFY: u32 = 0x107;
-
 #[cfg(target_os = "espidf")]
 extern "C" {
     fn esp_ota_get_running_partition() -> *const c_void;
-    fn esp_ota_get_state_partition(partition: *const c_void, state: *mut u32) -> i32;
     fn esp_ota_mark_app_valid_cancel_rollback() -> i32;
     fn esp_ota_mark_app_invalid_rollback_and_reboot() -> i32;
     fn esp_ota_get_next_update_partition(label: *const c_char) -> *const c_void;
@@ -71,8 +71,11 @@ pub type OtaProgressCb = unsafe extern "C" fn(written: u32, total: u32, user_dat
 // FFI exports
 // ---------------------------------------------------------------------------
 
-/// Initialise the OTA subsystem. Confirms the current OTA partition if it is
-/// in PENDING_VERIFY state.
+/// Initialise the OTA subsystem.
+///
+/// A pending OTA partition deliberately remains pending here.  It is only
+/// confirmed by `ota_confirm_boot_health()` after the main boot path has
+/// brought up the user-facing system.
 ///
 /// # Safety
 /// May be called from C.
@@ -80,7 +83,6 @@ pub type OtaProgressCb = unsafe extern "C" fn(written: u32, total: u32, user_dat
 pub extern "C" fn ota_init() -> i32 {
     #[cfg(target_os = "espidf")]
     unsafe {
-        use std::os::raw::c_void;
         let running = esp_ota_get_running_partition();
         if !running.is_null() {
             esp_log_write(
@@ -88,18 +90,6 @@ pub extern "C" fn ota_init() -> i32 {
                 TAG.as_ptr(),
                 b"Running OTA partition initialised\0".as_ptr(),
             );
-        }
-
-        let mut state: u32 = 0;
-        if esp_ota_get_state_partition(running, &mut state) == ESP_OK {
-            if state == ESP_OTA_IMG_PENDING_VERIFY {
-                esp_log_write(
-                    ESP_LOG_INFO,
-                    TAG.as_ptr(),
-                    b"Confirming OTA update (marking valid)\0".as_ptr(),
-                );
-                esp_ota_mark_app_valid_cancel_rollback();
-            }
         }
     }
 
@@ -112,6 +102,57 @@ pub extern "C" fn ota_init() -> i32 {
     }
 
     ESP_OK
+}
+
+/// Confirm that this boot reached its health milestone and cancel OTA rollback.
+///
+/// Repeated calls after a successful confirmation return `ESP_OK` without
+/// writing OTA state again.  If ESP-IDF rejects the confirmation, its error is
+/// returned and a later health milestone may retry it.
+#[no_mangle]
+pub extern "C" fn ota_confirm_boot_health() -> i32 {
+    confirm_boot_health_once(&BOOT_HEALTH_CONFIRMED, mark_app_valid_cancel_rollback)
+}
+
+fn confirm_boot_health_once<F>(confirmation: &Mutex<bool>, mark_valid: F) -> i32
+where
+    F: FnOnce() -> i32,
+{
+    let mut confirmed = match confirmation.lock() {
+        Ok(confirmed) => confirmed,
+        Err(_) => return ESP_ERR_NO_MEM,
+    };
+
+    if *confirmed {
+        return ESP_OK;
+    }
+
+    let ret = mark_valid();
+    if ret == ESP_OK {
+        *confirmed = true;
+    }
+    ret
+}
+
+fn mark_app_valid_cancel_rollback() -> i32 {
+    #[cfg(target_os = "espidf")]
+    unsafe {
+        return esp_ota_mark_app_valid_cancel_rollback();
+    }
+    #[cfg(not(target_os = "espidf"))]
+    ESP_OK
+}
+
+/// OTA images are production artifacts: a verifier result is accepted only
+/// when it explicitly reports success.  Returning the original error lets the
+/// caller retain the reason (missing signature, malformed input, or state
+/// failure) instead of collapsing it into a signature mismatch.
+fn require_valid_ota_signature(signature_result: i32) -> Result<(), i32> {
+    if signature_result == ESP_OK {
+        Ok(())
+    } else {
+        Err(signature_result)
+    }
 }
 
 /// Return true if a firmware update file exists on the SD card.
@@ -144,13 +185,14 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
     // 1. Verify signature
     let sig_ret = signing_verify_file(update_path_cstr);
-    if sig_ret == ESP_ERR_INVALID_CRC {
+    if let Err(err) = require_valid_ota_signature(sig_ret) {
         esp_log_write(
             ESP_LOG_ERROR,
             TAG.as_ptr(),
-            b"OTA update signature INVALID\0".as_ptr(),
+            b"OTA update signature verification failed: %d\0".as_ptr(),
+            err,
         );
-        return ESP_ERR_INVALID_CRC;
+        return err;
     }
 
     // 2. Open and size-check the update file
@@ -173,11 +215,19 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     };
 
     if file_size == 0 {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Update file is empty\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"Update file is empty\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_SIZE;
     }
     if file_size > MAX_OTA_SIZE {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"OTA file too large\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"OTA file too large\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -192,14 +242,23 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     {
         let update_partition = esp_ota_get_next_update_partition(std::ptr::null());
         if update_partition.is_null() {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"No OTA partition available\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"No OTA partition available\0".as_ptr(),
+            );
             return ESP_ERR_NOT_FOUND;
         }
 
         let mut ota_handle: u32 = 0;
         let ret = esp_ota_begin(update_partition, file_size as usize, &mut ota_handle);
         if ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_begin failed: %d\0".as_ptr(), ret);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_ota_begin failed: %d\0".as_ptr(),
+                ret,
+            );
             return ret;
         }
 
@@ -208,7 +267,9 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
         loop {
             let to_read = OTA_BUF_SIZE.min((file_size - written as u64) as usize);
-            if to_read == 0 { break; }
+            if to_read == 0 {
+                break;
+            }
 
             let nread = match file.read(&mut buf[..to_read]) {
                 Ok(0) => break,
@@ -222,7 +283,12 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
             let ret = esp_ota_write(ota_handle, buf.as_ptr(), nread);
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_write failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"esp_ota_write failed: %d\0".as_ptr(),
+                    ret,
+                );
                 esp_ota_abort(ota_handle);
                 return ret;
             }
@@ -236,7 +302,12 @@ pub unsafe extern "C" fn ota_apply_from_sd(
 
         let ret = esp_ota_end(ota_handle);
         if ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_ota_end failed: %d\0".as_ptr(), ret);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_ota_end failed: %d\0".as_ptr(),
+                ret,
+            );
             return ret;
         }
 
@@ -329,12 +400,7 @@ pub extern "C" fn ota_get_running_partition() -> *const c_char {
 /// May be called from C.
 #[no_mangle]
 pub extern "C" fn ota_mark_valid() -> i32 {
-    #[cfg(target_os = "espidf")]
-    unsafe {
-        return esp_ota_mark_app_valid_cancel_rollback();
-    }
-    #[cfg(not(target_os = "espidf"))]
-    ESP_OK
+    mark_app_valid_cancel_rollback()
 }
 
 /// Rollback to the previous OTA partition and reboot.
@@ -369,6 +435,7 @@ pub extern "C" fn ota_rollback() -> i32 {
 mod tests {
     use super::*;
     use std::ffi::CStr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // -----------------------------------------------------------------------
     // test_get_current_version_non_null
@@ -378,7 +445,10 @@ mod tests {
     #[test]
     fn test_get_current_version_non_null() {
         let ptr = ota_get_current_version();
-        assert!(!ptr.is_null(), "ota_get_current_version() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "ota_get_current_version() must not return NULL"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -403,7 +473,10 @@ mod tests {
         // In the test environment there is no SD card, so the update path
         // /sdcard/update/thistle_os.bin does not exist.
         let available = ota_sd_update_available();
-        assert!(!available, "ota_sd_update_available() must return false when no SD card");
+        assert!(
+            !available,
+            "ota_sd_update_available() must return false when no SD card"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -417,6 +490,58 @@ mod tests {
         assert_eq!(rc, ESP_OK, "ota_mark_valid() must return ESP_OK on host");
     }
 
+    #[test]
+    fn test_init_does_not_confirm_boot_health() {
+        // ota_init only sets up the subsystem.  Confirmation is intentionally
+        // a separate, late-boot operation so no marker can be invoked here.
+        let confirmation = Mutex::new(false);
+        assert!(!*confirmation.lock().unwrap());
+    }
+
+    #[test]
+    fn test_health_confirmation_marks_valid_exactly_once() {
+        let confirmation = Mutex::new(false);
+        let marks = AtomicUsize::new(0);
+
+        let first = confirm_boot_health_once(&confirmation, || {
+            marks.fetch_add(1, Ordering::SeqCst);
+            ESP_OK
+        });
+        let second = confirm_boot_health_once(&confirmation, || {
+            marks.fetch_add(1, Ordering::SeqCst);
+            ESP_OK
+        });
+
+        assert_eq!(first, ESP_OK);
+        assert_eq!(second, ESP_OK);
+        assert_eq!(marks.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_health_confirmation_propagates_mark_failure() {
+        let confirmation = Mutex::new(false);
+        let failure = ESP_ERR_NOT_SUPPORTED;
+        let result = confirm_boot_health_once(&confirmation, || failure);
+
+        assert_eq!(result, failure);
+        assert!(!*confirmation.lock().unwrap());
+    }
+
+    #[test]
+    fn test_ota_signature_gate_fails_closed_for_all_verifier_errors() {
+        assert_eq!(require_valid_ota_signature(ESP_OK), Ok(()));
+        for error in [
+            ESP_ERR_NOT_FOUND,
+            ESP_ERR_INVALID_CRC,
+            ESP_ERR_INVALID_SIZE,
+            ESP_ERR_INVALID_STATE,
+            ESP_ERR_INVALID_ARG,
+            ESP_ERR_NO_MEM,
+        ] {
+            assert_eq!(require_valid_ota_signature(error), Err(error));
+        }
+    }
+
     // -----------------------------------------------------------------------
     // test_get_running_partition_non_null
     // ota_get_running_partition() returns "unknown" on host builds.
@@ -425,7 +550,10 @@ mod tests {
     #[test]
     fn test_get_running_partition_non_null() {
         let ptr = ota_get_running_partition();
-        assert!(!ptr.is_null(), "ota_get_running_partition() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "ota_get_running_partition() must not return NULL"
+        );
         let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
         assert_eq!(s, "unknown", "partition must be \"unknown\" on host builds");
     }

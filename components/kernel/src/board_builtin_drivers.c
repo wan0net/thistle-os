@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/board.h"
+#include "thistle/board_bus_registration.h"
 #include "drv_epaper_gdeq031t10.h"
 #include "drv_kbd_tca8418.h"
 #include "drv_touch_cst328.h"
@@ -48,8 +49,45 @@ static int json_int(const char *json, const char *key, int default_val)
 // Bus initialisation helpers (called from board_config.rs via FFI)
 // ---------------------------------------------------------------------------
 
+esp_err_t board_bus_register_resource(int bus_id, void *resource,
+                                      board_bus_register_fn_t register_fn,
+                                      board_bus_cleanup_fn_t cleanup_on_failure)
+{
+    if (!resource || !register_fn) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t ret = register_fn(bus_id, resource);
+    if (ret != ESP_OK && cleanup_on_failure) {
+        esp_err_t cleanup_ret = cleanup_on_failure(resource);
+        if (cleanup_ret != ESP_OK) {
+            ESP_LOGE(TAG, "bus cleanup after registration failure failed: %s",
+                     esp_err_to_name(cleanup_ret));
+        }
+    }
+    return ret;
+}
+
+static esp_err_t cleanup_spi_bus(void *resource)
+{
+    return spi_bus_free((spi_host_device_t)(intptr_t)resource);
+}
+
+static esp_err_t cleanup_i2c_bus(void *resource)
+{
+    return i2c_del_master_bus((i2c_master_bus_handle_t)resource);
+}
+
 esp_err_t board_bus_init_spi(int host, int mosi, int miso, int sclk, int max_transfer_bytes)
 {
+    /* SPI host IDs are encoded directly as opaque pointers for loaded drivers.
+     * SPI1_HOST is zero (and reserved for flash), which would become NULL and
+     * cannot be represented safely in the HAL registry. */
+    if (host == 0) {
+        ESP_LOGE(TAG, "SPI host 0 is reserved and cannot be registered");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     spi_bus_config_t cfg = {
         .mosi_io_num     = mosi,
         .miso_io_num     = miso,
@@ -63,12 +101,20 @@ esp_err_t board_bus_init_spi(int host, int mosi, int miso, int sclk, int max_tra
         ESP_LOGE(TAG, "spi_bus_initialize host=%d failed: %s", host, esp_err_to_name(ret));
         return ret;
     }
-    if (ret == ESP_ERR_INVALID_STATE) {
+    bool newly_initialized = (ret == ESP_OK);
+    if (!newly_initialized) {
         ESP_LOGW(TAG, "SPI host %d already initialized", host);
     }
     // Store host ID as the "handle" — ELF drivers call hal_bus_get_spi(idx)
     // and cast it back to spi_host_device_t.
-    hal_bus_register_spi(host, (void *)(intptr_t)host);
+    void *resource = (void *)(intptr_t)host;
+    ret = board_bus_register_resource(host, resource, hal_bus_register_spi,
+                                      newly_initialized ? cleanup_spi_bus : NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI host %d HAL registration failed: %s",
+                 host, esp_err_to_name(ret));
+        return ret;
+    }
     ESP_LOGI(TAG, "SPI host %d ready (MOSI=%d MISO=%d SCLK=%d)", host, mosi, miso, sclk);
     return ESP_OK;
 }
@@ -90,7 +136,13 @@ esp_err_t board_bus_init_i2c(int port, int sda, int scl, int freq_hz)
         ESP_LOGE(TAG, "i2c_new_master_bus port=%d failed: %s", port, esp_err_to_name(ret));
         return ret;
     }
-    hal_bus_register_i2c(port, handle);
+    ret = board_bus_register_resource(port, handle, hal_bus_register_i2c,
+                                      cleanup_i2c_bus);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C port %d HAL registration failed: %s",
+                 port, esp_err_to_name(ret));
+        return ret;
+    }
     ESP_LOGI(TAG, "I2C port %d ready (SDA=%d SCL=%d)", port, sda, scl);
     return ESP_OK;
 }

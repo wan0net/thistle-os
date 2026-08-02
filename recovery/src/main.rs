@@ -30,6 +30,19 @@ const AP_SSID: &str = "ThistleOS-Recovery";
 const BUNDLE_CATALOG_URL: &str = "https://wan0net.github.io/thistle-apps/catalog.json";
 const BOARD_CATALOG_URL: &str = "https://wan0net.github.io/thistle-os/catalog.json";
 
+/// ESP-IDF's hardware RNG is available on every supported ESP32 family.
+/// Hex avoids characters that are awkward to enter into a Wi-Fi password UI.
+fn random_hex(byte_count: usize) -> String {
+    use std::fmt::Write;
+
+    let mut value = String::with_capacity(byte_count * 2);
+    for _ in 0..byte_count {
+        let byte = unsafe { esp_idf_sys::esp_random() } as u8;
+        write!(&mut value, "{:02x}", byte).expect("writing to String cannot fail");
+    }
+    value
+}
+
 fn main() -> anyhow::Result<()> {
     // Initialize ESP-IDF
     esp_idf_svc::sys::link_patches();
@@ -103,8 +116,16 @@ fn main() -> anyhow::Result<()> {
     println!("Board selection is catalog-driven — select your board in the web UI");
 
     // Step 3: Start WiFi AP + captive portal
-    info!("Starting WiFi Access Point: {}", AP_SSID);
+    // Generate independent per-boot secrets.  Do not put either value in the
+    // logger: the physical serial console is the recovery pairing channel.
+    let ap_password = random_hex(16); // WPA2 PSK, 128 bits
+    let pairing_token = random_hex(32); // request/CSRF token, 256 bits
+    recovery_web::set_pairing_token(pairing_token.clone());
+
+    info!("Starting protected WiFi Access Point: {}", AP_SSID);
     println!("\nStarting WiFi hotspot: {}", AP_SSID);
+    println!("Recovery WiFi password (this boot only): {}", ap_password);
+    println!("Recovery pairing token (this boot only): {}", pairing_token);
     println!("Connect your phone/laptop and open http://192.168.4.1");
 
     // Seed catalog URLs in shared state so handlers can reference them.
@@ -130,7 +151,8 @@ fn main() -> anyhow::Result<()> {
         ClientConfiguration::default(),
         AccessPointConfiguration {
             ssid: AP_SSID.try_into().unwrap(),
-            auth_method: AuthMethod::None,
+            password: ap_password.as_str().try_into().unwrap(),
+            auth_method: AuthMethod::WPA2Personal,
             max_connections: 4,
             ..Default::default()
         },
@@ -155,7 +177,7 @@ fn main() -> anyhow::Result<()> {
     println!("Recovery will keep polling web requests until install/reboot.");
 
     loop {
-        poll_web_state(&mut wifi);
+        poll_web_state(&mut wifi, &ap_password);
         FreeRtos::delay_ms(100);
     }
 }
@@ -164,7 +186,7 @@ fn main() -> anyhow::Result<()> {
 // Poll shared web UI state and act on any pending requests
 // ---------------------------------------------------------------------------
 
-fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>) {
+fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>, ap_password: &str) {
     // Check for pending WiFi connect request from web UI
     let wifi_req = {
         let mut st = recovery_web::STATE.lock().unwrap();
@@ -173,7 +195,7 @@ fn poll_web_state(wifi: &mut BlockingWifi<EspWifi>) {
 
     if let Some((ssid, pass)) = wifi_req {
         info!("Web UI requested WiFi connect to '{}'", ssid);
-        match do_wifi_connect(wifi, &ssid, &pass) {
+        match do_wifi_connect(wifi, &ssid, &pass, ap_password) {
             Ok(ip) => {
                 info!("Web UI WiFi connect succeeded: {}", ip);
                 let mut st = recovery_web::STATE.lock().unwrap();
@@ -234,6 +256,7 @@ fn do_wifi_connect(
     wifi: &mut BlockingWifi<EspWifi>,
     ssid: &str,
     pass: &str,
+    ap_password: &str,
 ) -> anyhow::Result<String> {
     wifi.set_configuration(&Configuration::Mixed(
         ClientConfiguration {
@@ -243,7 +266,8 @@ fn do_wifi_connect(
         },
         AccessPointConfiguration {
             ssid: AP_SSID.try_into().unwrap(),
-            auth_method: AuthMethod::None,
+            password: ap_password.try_into().unwrap_or_default(),
+            auth_method: AuthMethod::WPA2Personal,
             max_connections: 4,
             ..Default::default()
         },

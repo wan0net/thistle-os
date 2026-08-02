@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use crate::app_manager::{CAppEntry, CAppManifest};
 use crate::ffi::CManifest;
+use crate::manifest::current_arch;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
@@ -37,9 +38,6 @@ const MALLOC_CAP_SPIRAM: u32 = 1 << 9;
 // Permission flags (must match permissions.h)
 const PERM_ALL: u32 = 0x7F;
 const PERM_IPC: u32 = 1 << 6;
-
-// Current architecture string for manifest compatibility checks
-static CURRENT_ARCH: &[u8] = b"xtensa-esp32s3\0";
 
 // ---------------------------------------------------------------------------
 // C FFI declarations
@@ -74,23 +72,22 @@ extern "C" {
 
     // Permissions (Rust)
     fn permissions_grant(app_id: *const c_char, perms: u32) -> i32;
+    fn permissions_revoke(app_id: *const c_char, perms: u32) -> i32;
 
     // Manifest (C/Rust)
-    fn manifest_parse_file(path: *const c_char, out: *mut c_void) -> i32;
-    fn manifest_is_compatible(manifest: *const c_void, current_arch: *const c_char) -> bool;
+    fn manifest_parse_file(path: *const c_char, out: *mut CManifest) -> i32;
+    fn manifest_is_compatible(manifest: *const CManifest, current_arch: *const c_char) -> bool;
     fn manifest_path_from_elf(elf_path: *const c_char, out: *mut c_char, out_size: usize);
 
     // Syscall table
-    fn syscall_resolve(name: *const c_char) -> *mut c_void;
     fn syscall_table_count() -> usize;
-    fn syscall_set_current_app(id: *const c_char);
 
     // Logging
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 const ESP_LOG_DEBUG: i32 = 4;
 
@@ -101,6 +98,22 @@ static TAG: &[u8] = b"elf_loader\0";
 
 // Size of esp_elf_t opaque struct storage blob.
 const ESP_ELF_T_SIZE: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppTrust {
+    None,
+    Signed,
+    UnsignedDebug,
+}
+
+fn effective_permissions(trust: AppTrust, requested: u32) -> u32 {
+    match trust {
+        AppTrust::Signed => requested,
+        // Debug-only unsigned apps retain the deliberately minimal IPC path.
+        AppTrust::UnsignedDebug => PERM_IPC,
+        AppTrust::None => 0,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // App handle type (opaque pointer exported to C)
@@ -115,6 +128,9 @@ pub struct ElfAppHandle {
     running: bool,
     load_addr: usize,
     load_size: usize,
+    trust: AppTrust,
+    identity: [u8; 64],
+    granted_permissions: u32,
     // Slot index in the global array
     slot: usize,
 }
@@ -132,6 +148,9 @@ impl ElfAppHandle {
             running: false,
             load_addr: 0,
             load_size: 0,
+            trust: AppTrust::None,
+            identity: [0; 64],
+            granted_permissions: 0,
             slot: 0,
         }
     }
@@ -147,22 +166,28 @@ struct ElfLoaderState {
 
 impl ElfLoaderState {
     const fn new() -> Self {
-        ElfLoaderState {
-            apps: None,
-        }
+        ElfLoaderState { apps: None }
     }
 
     fn ensure_apps(&mut self) -> &mut [ElfAppHandle; MAX_LOADED_APPS] {
         if self.apps.is_none() {
             self.apps = Some(Box::new([
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
             ]));
         }
         self.apps.as_mut().unwrap()
@@ -174,12 +199,20 @@ unsafe impl Send for ElfLoaderState {}
 
 static STATE: Mutex<ElfLoaderState> = Mutex::new(ElfLoaderState::new());
 
+fn clear_app_slot(slot: usize) {
+    if let Ok(mut state) = STATE.lock() {
+        let app = &mut state.ensure_apps()[slot];
+        *app = ElfAppHandle::empty();
+        app.slot = slot;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Symbol resolver
 // ---------------------------------------------------------------------------
 
-unsafe extern "C" fn thistle_symbol_resolver(sym_name: *const c_char) -> usize {
-    let addr = syscall_resolve(sym_name);
+unsafe extern "C" fn signed_app_symbol_resolver(sym_name: *const c_char) -> usize {
+    let addr = crate::syscall_table::syscall_resolve_signed_app(sym_name);
     if addr.is_null() {
         esp_log_write(
             ESP_LOG_WARN,
@@ -191,6 +224,10 @@ unsafe extern "C" fn thistle_symbol_resolver(sym_name: *const c_char) -> usize {
     } else {
         addr as usize
     }
+}
+
+unsafe extern "C" fn unsigned_app_symbol_resolver(sym_name: *const c_char) -> usize {
+    crate::syscall_table::syscall_resolve_unsigned_app(sym_name) as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -265,10 +302,7 @@ pub extern "C" fn elf_loader_init() -> i32 {
 /// `path` must be a valid null-terminated C string.
 /// `handle` must point to a valid `*mut ElfAppHandle` location.
 #[no_mangle]
-pub unsafe extern "C" fn elf_app_load(
-    path: *const c_char,
-    handle: *mut *mut ElfAppHandle,
-) -> i32 {
+pub unsafe extern "C" fn elf_app_load(path: *const c_char, handle: *mut *mut ElfAppHandle) -> i32 {
     if path.is_null() || handle.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -303,7 +337,12 @@ pub unsafe extern "C" fn elf_app_load(
     let file_data = match std::fs::read(path_str) {
         Ok(d) => d,
         Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot open ELF: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Cannot open ELF: %s\0".as_ptr(),
+                path,
+            );
             return ESP_ERR_NOT_FOUND;
         }
     };
@@ -331,7 +370,10 @@ pub unsafe extern "C" fn elf_app_load(
     {
         let mut state = match STATE.lock() {
             Ok(s) => s,
-            Err(_) => { free(buf); return ESP_FAIL; }
+            Err(_) => {
+                free(buf);
+                return ESP_FAIL;
+            }
         };
         let app = &mut state.ensure_apps()[slot_idx];
         app.load_addr = buf as usize;
@@ -343,21 +385,28 @@ pub unsafe extern "C" fn elf_app_load(
     let mut has_manifest_id = false;
     {
         let mut manifest_path_buf = [0u8; 280];
-        manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
-        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
-        if !manifest_buf.is_null() {
-            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                // Extract the "id" field from the parsed manifest
-                let id_ptr = (manifest_buf as *const u8).add(1); // type is first byte, id starts at offset 1
-                // The CManifest struct has id at offset 1 (after u8 type), as [u8; 64]
-                let id_bytes = std::slice::from_raw_parts(id_ptr, 64);
-                let id_len = id_bytes.iter().position(|&b| b == 0).unwrap_or(64);
-                if id_len > 0 {
-                    app_id_buf[..id_len].copy_from_slice(&id_bytes[..id_len]);
-                    has_manifest_id = true;
-                }
+        manifest_path_from_elf(
+            path,
+            manifest_path_buf.as_mut_ptr() as *mut c_char,
+            manifest_path_buf.len(),
+        );
+        let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
+        if manifest_parse_file(
+            manifest_path_buf.as_ptr() as *const c_char,
+            manifest.as_mut_ptr(),
+        ) == ESP_OK
+        {
+            let manifest = manifest.assume_init();
+            // Extract the "id" field from the parsed manifest
+            let id_len = manifest
+                .id
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(manifest.id.len());
+            if id_len > 0 {
+                app_id_buf[..id_len].copy_from_slice(&manifest.id[..id_len]);
+                has_manifest_id = true;
             }
-            free(manifest_buf);
         }
     }
 
@@ -379,32 +428,58 @@ pub unsafe extern "C" fn elf_app_load(
             Err(_) => ESP_ERR_NOT_FOUND,
         }
     };
-    if sig_ret == ESP_OK {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF signature verified: %s\0".as_ptr(), path);
-        permissions_grant(perm_id, PERM_ALL);
+    let trust = if sig_ret == ESP_OK {
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"ELF signature verified: %s\0".as_ptr(),
+            path,
+        );
+        AppTrust::Signed
     } else if sig_ret == ESP_ERR_NOT_FOUND {
-        // Unsigned ELF — refuse in production, allow with zero permissions in debug
+        // Unsigned ELF — refuse in production; debug builds grant IPC only
+        // when registration completes, never the manifest's requested bits.
         #[cfg(not(debug_assertions))]
         {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF unsigned: %s (REFUSED - production)\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"ELF unsigned: %s (REFUSED - production)\0".as_ptr(),
+                path,
+            );
             free(buf);
+            clear_app_slot(slot_idx);
             return ESP_ERR_INVALID_CRC;
         }
         #[cfg(debug_assertions)]
         {
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF unsigned: %s (dev mode, no permissions)\0".as_ptr(), path);
-            // Zero permissions — unsigned apps cannot access any resources
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"ELF unsigned: %s (dev mode, IPC only)\0".as_ptr(),
+                path,
+            );
+            AppTrust::UnsignedDebug
         }
     } else {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF signature INVALID: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"ELF signature INVALID: %s\0".as_ptr(),
+            path,
+        );
         free(buf);
-        return ESP_ERR_INVALID_CRC;
-    }
+        clear_app_slot(slot_idx);
+        return sig_ret;
+    };
 
     // 4. Init esp_elf context
     let mut state = match STATE.lock() {
         Ok(s) => s,
-        Err(_) => { free(buf); return ESP_FAIL; }
+        Err(_) => {
+            free(buf);
+            return ESP_FAIL;
+        }
     };
 
     let app = &mut state.ensure_apps()[slot_idx];
@@ -412,8 +487,15 @@ pub unsafe extern "C" fn elf_app_load(
 
     let ret = esp_elf_init(elf_ptr);
     if ret != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_init failed: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"esp_elf_init failed: %s\0".as_ptr(),
+            path,
+        );
         free(buf);
+        *app = ElfAppHandle::empty();
+        app.slot = slot_idx;
         return ret;
     }
 
@@ -428,37 +510,64 @@ pub unsafe extern "C" fn elf_app_load(
         sym_count as c_int,
     );
 
-    elf_set_symbol_resolver(thistle_symbol_resolver);
+    elf_set_symbol_resolver(match trust {
+        AppTrust::Signed => signed_app_symbol_resolver,
+        AppTrust::UnsignedDebug => unsigned_app_symbol_resolver,
+        AppTrust::None => unreachable!("untrusted app cannot be relocated"),
+    });
 
-    syscall_set_current_app(perm_id);
     let ret = esp_elf_relocate(elf_ptr, buf as *const u8);
-    syscall_set_current_app(std::ptr::null());
 
     free(buf);
 
     if ret != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_relocate failed: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"esp_elf_relocate failed: %s\0".as_ptr(),
+            path,
+        );
         esp_elf_deinit(elf_ptr);
+        *app = ElfAppHandle::empty();
+        app.slot = slot_idx;
         return ret;
     }
 
     // 6. Parse manifest alongside ELF
     {
         let mut manifest_path_buf = [0u8; 280];
-        manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
+        manifest_path_from_elf(
+            path,
+            manifest_path_buf.as_mut_ptr() as *mut c_char,
+            manifest_path_buf.len(),
+        );
 
-        let manifest_buf = heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
-        if !manifest_buf.is_null() {
-            if manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, manifest_buf) == ESP_OK {
-                if !manifest_is_compatible(manifest_buf as *const c_void, CURRENT_ARCH.as_ptr() as *const c_char) {
-                    esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
-                    esp_elf_deinit(elf_ptr);
-                    free(manifest_buf);
-                    return ESP_ERR_NOT_SUPPORTED;
-                }
-                esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Manifest OK: %s\0".as_ptr(), path);
+        let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
+        if manifest_parse_file(
+            manifest_path_buf.as_ptr() as *const c_char,
+            manifest.as_mut_ptr(),
+        ) == ESP_OK
+        {
+            let manifest = manifest.assume_init();
+            let current_arch = std::ffi::CString::new(current_arch()).unwrap();
+            if !manifest_is_compatible(&manifest, current_arch.as_ptr()) {
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"App incompatible: %s\0".as_ptr(),
+                    path,
+                );
+                esp_elf_deinit(elf_ptr);
+                *app = ElfAppHandle::empty();
+                app.slot = slot_idx;
+                return ESP_ERR_NOT_SUPPORTED;
             }
-            free(manifest_buf);
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Manifest OK: %s\0".as_ptr(),
+                path,
+            );
         }
     }
 
@@ -467,14 +576,25 @@ pub unsafe extern "C" fn elf_app_load(
     let copy_len = path_bytes.len().min(app.path.len() - 1);
     app.path[..copy_len].copy_from_slice(&path_bytes[..copy_len]);
     app.path[copy_len] = 0;
-    app.loaded  = true;
+    app.loaded = true;
     app.running = false;
-    app.task    = std::ptr::null_mut();
-    app.slot    = slot_idx;
+    app.task = std::ptr::null_mut();
+    app.slot = slot_idx;
+    app.trust = trust;
+    app.granted_permissions = 0;
+    let identity_bytes = CStr::from_ptr(perm_id).to_bytes_with_nul();
+    let identity_len = identity_bytes.len().min(app.identity.len() - 1);
+    app.identity[..identity_len].copy_from_slice(&identity_bytes[..identity_len]);
+    app.identity[identity_len] = 0;
 
     *handle = app as *mut ElfAppHandle;
 
-    esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF loaded: %s\0".as_ptr(), path);
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"ELF loaded: %s\0".as_ptr(),
+        path,
+    );
     ESP_OK
 }
 
@@ -493,7 +613,11 @@ pub unsafe extern "C" fn elf_app_start(handle: *mut ElfAppHandle) -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
     if app.running {
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF app already running\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"ELF app already running\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -504,16 +628,25 @@ pub unsafe extern "C" fn elf_app_start(handle: *mut ElfAppHandle) -> i32 {
         handle as *mut c_void,
         ELF_APP_TASK_PRIO,
         &mut app.task,
-        -1,  // tskNO_AFFINITY
+        -1, // tskNO_AFFINITY
     );
 
     if rc != PD_PASS {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"xTaskCreate failed for ELF app\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"xTaskCreate failed for ELF app\0".as_ptr(),
+        );
         return ESP_ERR_NO_MEM;
     }
 
     app.running = true;
-    esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF app task started: %s\0".as_ptr(), app.path.as_ptr());
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"ELF app task started: %s\0".as_ptr(),
+        app.path.as_ptr(),
+    );
     ESP_OK
 }
 
@@ -532,7 +665,7 @@ pub unsafe extern "C" fn elf_app_unload(handle: *mut ElfAppHandle) -> i32 {
     // Kill task if running
     if app.running && !app.task.is_null() {
         vTaskDelete(app.task);
-        app.task    = std::ptr::null_mut();
+        app.task = std::ptr::null_mut();
         app.running = false;
     }
 
@@ -542,6 +675,16 @@ pub unsafe extern "C" fn elf_app_unload(handle: *mut ElfAppHandle) -> i32 {
         esp_elf_deinit(elf_ptr);
         app.loaded = false;
     }
+
+    if app.granted_permissions != 0 && app.identity[0] != 0 {
+        permissions_revoke(
+            app.identity.as_ptr() as *const c_char,
+            app.granted_permissions,
+        );
+        app.granted_permissions = 0;
+    }
+    app.trust = AppTrust::None;
+    app.identity = [0; 64];
 
     esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF app unloaded\0".as_ptr());
 
@@ -594,19 +737,19 @@ impl ElfAppRegistration {
     const fn empty() -> Self {
         ElfAppRegistration {
             manifest: CAppManifest {
-                id:               std::ptr::null(),
-                name:             std::ptr::null(),
-                version:          b"0.0.0\0".as_ptr() as *const c_char,
+                id: std::ptr::null(),
+                name: std::ptr::null(),
+                version: b"0.0.0\0".as_ptr() as *const c_char,
                 allow_background: false,
-                min_memory_kb:    0,
+                min_memory_kb: 0,
             },
             entry: CAppEntry {
-                on_create:  None,
-                on_start:   None,
-                on_pause:   None,
-                on_resume:  None,
+                on_create: None,
+                on_start: None,
+                on_pause: None,
+                on_resume: None,
                 on_destroy: None,
-                manifest:   std::ptr::null(),
+                manifest: std::ptr::null(),
             },
             handle: std::ptr::null_mut(),
             used: false,
@@ -619,17 +762,27 @@ unsafe impl Send for ElfAppRegistration {}
 
 static REG_MUTEX: Mutex<Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>> = Mutex::new(None);
 
-fn ensure_regs(guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>) -> &mut [ElfAppRegistration; MAX_LOADED_APPS] {
+fn ensure_regs(
+    guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>,
+) -> &mut [ElfAppRegistration; MAX_LOADED_APPS] {
     if guard.is_none() {
         *guard = Some(Box::new([
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
         ]));
     }
     guard.as_mut().unwrap()
@@ -638,14 +791,14 @@ fn ensure_regs(guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>) -
 /// Static string storage for manifest id/name fields.
 /// Each registration slot gets its own id and name buffer that lives forever.
 struct RegStrings {
-    id:   [u8; 64],
+    id: [u8; 64],
     name: [u8; 32],
 }
 
 impl RegStrings {
     const fn empty() -> Self {
         RegStrings {
-            id:   [0u8; 64],
+            id: [0u8; 64],
             name: [0u8; 32],
         }
     }
@@ -656,17 +809,27 @@ unsafe impl Send for RegStrings {}
 
 static REG_STR_MUTEX: Mutex<Option<Box<[RegStrings; MAX_LOADED_APPS]>>> = Mutex::new(None);
 
-fn ensure_reg_strings(guard: &mut Option<Box<[RegStrings; MAX_LOADED_APPS]>>) -> &mut [RegStrings; MAX_LOADED_APPS] {
+fn ensure_reg_strings(
+    guard: &mut Option<Box<[RegStrings; MAX_LOADED_APPS]>>,
+) -> &mut [RegStrings; MAX_LOADED_APPS] {
     if guard.is_none() {
         *guard = Some(Box::new([
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
         ]));
     }
     guard.as_mut().unwrap()
@@ -679,12 +842,10 @@ macro_rules! make_on_create {
         unsafe extern "C" fn $fn_name() -> i32 {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => {
-                        match regs.as_ref() {
-                            Some(r) => r[$slot].handle,
-                            None => return ESP_ERR_INVALID_STATE,
-                        }
-                    }
+                    Ok(regs) => match regs.as_ref() {
+                        Some(r) => r[$slot].handle,
+                        None => return ESP_ERR_INVALID_STATE,
+                    },
                     Err(_) => return ESP_FAIL,
                 }
             };
@@ -696,16 +857,16 @@ macro_rules! make_on_create {
     };
 }
 
-make_on_create!(on_create_slot_0,  0);
-make_on_create!(on_create_slot_1,  1);
-make_on_create!(on_create_slot_2,  2);
-make_on_create!(on_create_slot_3,  3);
-make_on_create!(on_create_slot_4,  4);
-make_on_create!(on_create_slot_5,  5);
-make_on_create!(on_create_slot_6,  6);
-make_on_create!(on_create_slot_7,  7);
-make_on_create!(on_create_slot_8,  8);
-make_on_create!(on_create_slot_9,  9);
+make_on_create!(on_create_slot_0, 0);
+make_on_create!(on_create_slot_1, 1);
+make_on_create!(on_create_slot_2, 2);
+make_on_create!(on_create_slot_3, 3);
+make_on_create!(on_create_slot_4, 4);
+make_on_create!(on_create_slot_5, 5);
+make_on_create!(on_create_slot_6, 6);
+make_on_create!(on_create_slot_7, 7);
+make_on_create!(on_create_slot_8, 8);
+make_on_create!(on_create_slot_9, 9);
 make_on_create!(on_create_slot_10, 10);
 make_on_create!(on_create_slot_11, 11);
 make_on_create!(on_create_slot_12, 12);
@@ -719,12 +880,10 @@ macro_rules! make_on_destroy {
         unsafe extern "C" fn $fn_name() {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => {
-                        match regs.as_ref() {
-                            Some(r) => r[$slot].handle,
-                            None => return,
-                        }
-                    }
+                    Ok(regs) => match regs.as_ref() {
+                        Some(r) => r[$slot].handle,
+                        None => return,
+                    },
                     Err(_) => return,
                 }
             };
@@ -735,16 +894,16 @@ macro_rules! make_on_destroy {
     };
 }
 
-make_on_destroy!(on_destroy_slot_0,  0);
-make_on_destroy!(on_destroy_slot_1,  1);
-make_on_destroy!(on_destroy_slot_2,  2);
-make_on_destroy!(on_destroy_slot_3,  3);
-make_on_destroy!(on_destroy_slot_4,  4);
-make_on_destroy!(on_destroy_slot_5,  5);
-make_on_destroy!(on_destroy_slot_6,  6);
-make_on_destroy!(on_destroy_slot_7,  7);
-make_on_destroy!(on_destroy_slot_8,  8);
-make_on_destroy!(on_destroy_slot_9,  9);
+make_on_destroy!(on_destroy_slot_0, 0);
+make_on_destroy!(on_destroy_slot_1, 1);
+make_on_destroy!(on_destroy_slot_2, 2);
+make_on_destroy!(on_destroy_slot_3, 3);
+make_on_destroy!(on_destroy_slot_4, 4);
+make_on_destroy!(on_destroy_slot_5, 5);
+make_on_destroy!(on_destroy_slot_6, 6);
+make_on_destroy!(on_destroy_slot_7, 7);
+make_on_destroy!(on_destroy_slot_8, 8);
+make_on_destroy!(on_destroy_slot_9, 9);
 make_on_destroy!(on_destroy_slot_10, 10);
 make_on_destroy!(on_destroy_slot_11, 11);
 make_on_destroy!(on_destroy_slot_12, 12);
@@ -753,17 +912,41 @@ make_on_destroy!(on_destroy_slot_14, 14);
 make_on_destroy!(on_destroy_slot_15, 15);
 
 const ON_CREATE_TABLE: [unsafe extern "C" fn() -> i32; MAX_LOADED_APPS] = [
-    on_create_slot_0,  on_create_slot_1,  on_create_slot_2,  on_create_slot_3,
-    on_create_slot_4,  on_create_slot_5,  on_create_slot_6,  on_create_slot_7,
-    on_create_slot_8,  on_create_slot_9,  on_create_slot_10, on_create_slot_11,
-    on_create_slot_12, on_create_slot_13, on_create_slot_14, on_create_slot_15,
+    on_create_slot_0,
+    on_create_slot_1,
+    on_create_slot_2,
+    on_create_slot_3,
+    on_create_slot_4,
+    on_create_slot_5,
+    on_create_slot_6,
+    on_create_slot_7,
+    on_create_slot_8,
+    on_create_slot_9,
+    on_create_slot_10,
+    on_create_slot_11,
+    on_create_slot_12,
+    on_create_slot_13,
+    on_create_slot_14,
+    on_create_slot_15,
 ];
 
 const ON_DESTROY_TABLE: [unsafe extern "C" fn(); MAX_LOADED_APPS] = [
-    on_destroy_slot_0,  on_destroy_slot_1,  on_destroy_slot_2,  on_destroy_slot_3,
-    on_destroy_slot_4,  on_destroy_slot_5,  on_destroy_slot_6,  on_destroy_slot_7,
-    on_destroy_slot_8,  on_destroy_slot_9,  on_destroy_slot_10, on_destroy_slot_11,
-    on_destroy_slot_12, on_destroy_slot_13, on_destroy_slot_14, on_destroy_slot_15,
+    on_destroy_slot_0,
+    on_destroy_slot_1,
+    on_destroy_slot_2,
+    on_destroy_slot_3,
+    on_destroy_slot_4,
+    on_destroy_slot_5,
+    on_destroy_slot_6,
+    on_destroy_slot_7,
+    on_destroy_slot_8,
+    on_destroy_slot_9,
+    on_destroy_slot_10,
+    on_destroy_slot_11,
+    on_destroy_slot_12,
+    on_destroy_slot_13,
+    on_destroy_slot_14,
+    on_destroy_slot_15,
 ];
 
 /// Scan `/spiffs/apps/` and `/sdcard/apps/` for `*.app.elf` files, load each
@@ -833,7 +1016,7 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             let mut c_manifest = std::mem::zeroed::<CManifest>();
             let manifest_ret = manifest_parse_file(
                 manifest_path_buf.as_ptr() as *const c_char,
-                &mut c_manifest as *mut CManifest as *mut c_void,
+                &mut c_manifest as *mut CManifest,
             );
 
             if manifest_ret != ESP_OK {
@@ -847,8 +1030,16 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             }
 
             // Extract id and name from the parsed manifest
-            let id_len = c_manifest.id.iter().position(|&b| b == 0).unwrap_or(c_manifest.id.len());
-            let name_len = c_manifest.name.iter().position(|&b| b == 0).unwrap_or(c_manifest.name.len());
+            let id_len = c_manifest
+                .id
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(c_manifest.id.len());
+            let name_len = c_manifest
+                .name
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(c_manifest.name.len());
 
             if id_len == 0 {
                 esp_log_write(
@@ -918,20 +1109,20 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                 let reg = &mut ensure_regs(&mut regs)[reg_slot];
 
                 reg.manifest = CAppManifest {
-                    id:               id_ptr,
-                    name:             name_ptr,
-                    version:          b"0.0.0\0".as_ptr() as *const c_char,
+                    id: id_ptr,
+                    name: name_ptr,
+                    version: b"0.0.0\0".as_ptr() as *const c_char,
                     allow_background: c_manifest.background,
-                    min_memory_kb:    c_manifest.min_memory_kb,
+                    min_memory_kb: c_manifest.min_memory_kb,
                 };
                 reg.handle = handle;
                 reg.entry = CAppEntry {
-                    on_create:  Some(ON_CREATE_TABLE[reg_slot]),
-                    on_start:   None,
-                    on_pause:   None,
-                    on_resume:  None,
+                    on_create: Some(ON_CREATE_TABLE[reg_slot]),
+                    on_start: None,
+                    on_pause: None,
+                    on_resume: None,
                     on_destroy: Some(ON_DESTROY_TABLE[reg_slot]),
-                    manifest:   &reg.manifest as *const CAppManifest,
+                    manifest: &reg.manifest as *const CAppManifest,
                 };
                 reg.used = true;
             }
@@ -961,10 +1152,13 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                 continue;
             }
 
-            // 7. Grant permissions from manifest
-            let perms = c_manifest.permissions;
-            if perms != 0 {
-                permissions_grant(id_ptr, perms);
+            // 7. Apply the trust decision captured when this ELF was loaded.
+            // Never derive grants solely from an untrusted manifest here.
+            let perms = effective_permissions((*handle).trust, c_manifest.permissions);
+            if perms != 0
+                && permissions_grant((*handle).identity.as_ptr() as *const c_char, perms) == ESP_OK
+            {
+                (*handle).granted_permissions = perms;
             }
 
             esp_log_write(
@@ -986,4 +1180,36 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
     );
 
     registered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsigned_debug_manifest_cannot_escalate_to_requested_permissions() {
+        assert_eq!(
+            effective_permissions(AppTrust::UnsignedDebug, PERM_ALL),
+            PERM_IPC
+        );
+        assert_eq!(
+            effective_permissions(AppTrust::UnsignedDebug, PERM_ALL & !PERM_IPC),
+            PERM_IPC
+        );
+    }
+
+    #[test]
+    fn signed_app_receives_its_requested_manifest_permissions() {
+        assert_eq!(effective_permissions(AppTrust::Signed, PERM_ALL), PERM_ALL);
+        assert_eq!(effective_permissions(AppTrust::Signed, PERM_IPC), PERM_IPC);
+    }
+
+    #[test]
+    fn empty_or_unloaded_handle_has_no_trust_or_permissions() {
+        let app = ElfAppHandle::empty();
+        assert_eq!(app.trust, AppTrust::None);
+        assert_eq!(app.granted_permissions, 0);
+        assert_eq!(effective_permissions(app.trust, PERM_ALL), 0);
+        assert_eq!(app.identity, [0; 64]);
+    }
 }

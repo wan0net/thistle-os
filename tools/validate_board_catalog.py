@@ -91,6 +91,9 @@ def validate_catalog(path: Path, board_ids: set[str]) -> list[str]:
             errors.append(f"{path}: {entry.get('id')} url must be absolute http(s)")
         if not entry.get("sha256"):
             errors.append(f"{path}: {entry.get('id')} missing sha256")
+        sig_url = entry.get("sig_url", "")
+        if not isinstance(sig_url, str) or not re.match(r"^https?://", sig_url):
+            errors.append(f"{path}: {entry.get('id')} missing absolute sig_url")
     return errors
 
 

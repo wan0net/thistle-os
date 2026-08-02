@@ -228,7 +228,21 @@ static esp_err_t sx1262_init(const void *config) {
     s_radio.radio->setDio1Action(dio1_isr);
 
     /* Create IRQ handler task */
-    xTaskCreate(radio_irq_task, "radio_irq", 4096, nullptr, configMAX_PRIORITIES - 1, &s_radio.irq_task);
+    if (xTaskCreate(radio_irq_task, "radio_irq", 4096, nullptr,
+                    configMAX_PRIORITIES - 1, &s_radio.irq_task) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create IRQ handler task");
+
+        /* The DIO1 action is live before the task exists, so remove it first. */
+        s_radio.irq_task = nullptr;
+        s_radio.radio->clearDio1Action();
+        s_radio.radio->standby();
+
+        delete s_radio.radio; s_radio.radio = nullptr;
+        delete s_radio.mod; s_radio.mod = nullptr;
+        delete s_radio.hal; s_radio.hal = nullptr;
+        memset(&s_radio, 0, sizeof(s_radio));
+        return ESP_ERR_NO_MEM;
+    }
 
     s_radio.initialized = true;
     ESP_LOGI(TAG, "SX1262 initialized via RadioLib");
@@ -238,9 +252,21 @@ static esp_err_t sx1262_init(const void *config) {
 static void sx1262_deinit(void) {
     if (!s_radio.initialized) return;
 
-    if (s_radio.irq_task) {
-        vTaskDelete(s_radio.irq_task);
-        s_radio.irq_task = nullptr;
+    /* Prevent both the ISR and worker from observing live radio state. */
+    s_radio.initialized = false;
+    s_radio.receiving = false;
+    s_radio.rx_cb = nullptr;
+    s_radio.rx_cb_data = nullptr;
+    s_radio.irq_pending = false;
+
+    TaskHandle_t irq_task = s_radio.irq_task;
+    s_radio.irq_task = nullptr;
+
+    /* Detach DIO1 before deleting the task or freeing the RadioLib objects. */
+    s_radio.radio->clearDio1Action();
+
+    if (irq_task) {
+        vTaskDelete(irq_task);
     }
 
     s_radio.radio->standby();
@@ -249,7 +275,7 @@ static void sx1262_deinit(void) {
     delete s_radio.mod; s_radio.mod = nullptr;
     delete s_radio.hal; s_radio.hal = nullptr;
 
-    s_radio.initialized = false;
+    memset(&s_radio, 0, sizeof(s_radio));
     ESP_LOGI(TAG, "SX1262 deinitialized");
 }
 

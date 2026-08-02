@@ -44,9 +44,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
 
-      # Note: On-target ESP-IDF Unity tests require hardware.
-      # This job verifies the test code compiles and the simulator builds.
-      - name: Verify test compilation
+      # Host simulator tests exercise the portable C simulator components.
+      - name: Configure simulator unit tests
+        run: cmake -S simulator -B simulator/build-tests
+
+      - name: Build simulator unit tests
+        run: cmake --build simulator/build-tests --target thistle_sim_tests --parallel
+
+      - name: Run simulator unit tests
+        run: ./simulator/build-tests/thistle_sim_tests
+
+      - name: Report on-target Unity test inventory
         run: |
           echo "Test files:"
           find components/test_thistle -name "*.c" -exec wc -l {} + | sort -n

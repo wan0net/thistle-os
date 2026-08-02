@@ -13,6 +13,8 @@ use esp_idf_svc::http::server::EspHttpServer;
 use log::*;
 use std::sync::Mutex;
 
+const MAX_POST_BODY_SIZE: usize = 1024;
+
 // ---------------------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------------------
@@ -38,6 +40,8 @@ pub struct RecoveryState {
     pub board_catalog_url: String,
     /// Chip slug detected at boot, e.g. "esp32s3", "esp32c3".
     pub chip: String,
+    /// Per-boot bearer/CSRF token shown only on the device-local console.
+    pairing_token: String,
 }
 
 impl RecoveryState {
@@ -54,11 +58,73 @@ impl RecoveryState {
             catalog_url: String::new(),
             board_catalog_url: String::new(),
             chip: String::new(),
+            pairing_token: String::new(),
         }
     }
 }
 
 pub static STATE: Mutex<RecoveryState> = Mutex::new(RecoveryState::new());
+
+/// Set once during recovery boot.  It is held in RAM only, so it is cleared by
+/// reboot and never written to NVS, SD, or logs.
+pub fn set_pairing_token(token: String) {
+    STATE.lock().unwrap().pairing_token = token;
+}
+
+fn tokens_match(expected: &str, supplied: Option<&str>) -> bool {
+    let Some(supplied) = supplied else {
+        return false;
+    };
+    if expected.is_empty() || expected.len() != supplied.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (left, right) in expected.bytes().zip(supplied.bytes()) {
+        difference |= left ^ right;
+    }
+    difference == 0
+}
+
+fn request_is_authorized(supplied: Option<&str>) -> bool {
+    let state = STATE.lock().unwrap();
+    tokens_match(&state.pairing_token, supplied)
+}
+
+fn content_length_within_limit(content_length: Option<&str>, limit: usize) -> bool {
+    match content_length {
+        Some(value) => value
+            .trim()
+            .parse::<usize>()
+            .is_ok_and(|length| length <= limit),
+        None => true, // Chunked bodies are checked as they are read.
+    }
+}
+
+fn read_limited_post_body<R: embedded_svc::io::Read>(
+    request: &mut R,
+    content_length: Option<&str>,
+) -> anyhow::Result<Vec<u8>> {
+    if !content_length_within_limit(content_length, MAX_POST_BODY_SIZE) {
+        anyhow::bail!("request body exceeds {} byte limit", MAX_POST_BODY_SIZE);
+    }
+    let mut body = Vec::with_capacity(MAX_POST_BODY_SIZE.min(256));
+    let mut buf = [0u8; 256];
+    loop {
+        match request.read(&mut buf) {
+            Ok(0) => return Ok(body),
+            Ok(n)
+                if body
+                    .len()
+                    .checked_add(n)
+                    .map_or(true, |size| size > MAX_POST_BODY_SIZE) =>
+            {
+                anyhow::bail!("request body exceeds {} byte limit", MAX_POST_BODY_SIZE)
+            }
+            Ok(n) => body.extend_from_slice(&buf[..n]),
+            Err(_) => anyhow::bail!("failed reading request body"),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Known boards
@@ -164,6 +230,15 @@ input:focus { border-color: #2563eb; outline: none; }
 <h1>ThistleOS Recovery</h1>
 <h2 id="subtitle">v0.1.0 — Recovery Mode</h2>
 
+<div class="card" id="card-pairing">
+  <h3><span class="step-num" id="pairing-num">0</span> Pair this browser</h3>
+  <p class="info-text">Enter the pairing token shown on the device's serial console. It is valid only until this recovery boot ends.</p>
+  <label>Pairing Token</label>
+  <input type="password" id="pairing-token" placeholder="Token shown on device" autocomplete="off" autocapitalize="off">
+  <button class="btn" onclick="savePairingToken()">Pair Browser</button>
+  <div id="pairing-status" class="status-box"></div>
+</div>
+
 <!-- Step 1: WiFi -->
 <div class="card" id="card-wifi">
   <h3><span class="step-num" id="step1-num">1</span> Connect to WiFi</h3>
@@ -222,6 +297,28 @@ var wifiConnected = false;
 var boardSelected = null;
 var pollTimer = null;
 var bundlePollTimer = null;
+var pairingToken = sessionStorage.getItem('thistleRecoveryPairingToken') || '';
+
+function authHeaders(headers) {
+  headers = headers || {};
+  headers['X-Thistle-Recovery-Token'] = pairingToken;
+  return headers;
+}
+
+function pairingReady() {
+  if (pairingToken) { return true; }
+  showStatus(document.getElementById('pairing-status'), 'Enter the token shown on the device first.', 'error');
+  return false;
+}
+
+function savePairingToken() {
+  var token = document.getElementById('pairing-token').value.trim();
+  if (!token) { return; }
+  pairingToken = token;
+  sessionStorage.setItem('thistleRecoveryPairingToken', token);
+  document.getElementById('pairing-num').classList.add('done');
+  showStatus(document.getElementById('pairing-status'), 'Browser paired for this recovery boot.', '');
+}
 
 // ---------------------------------------------------------------------------
 // Initialise board list and optional components from /api/boards
@@ -297,11 +394,11 @@ function initBoards() {
       if (d.detected) {
         document.getElementById('board-btn').disabled = false;
         document.getElementById('plan-btn').disabled = false;
-        fetch('/api/board/select', {
+        if (pairingToken) { fetch('/api/board/select', {
           method: 'POST',
-          headers: {'Content-Type':'application/json'},
+          headers: authHeaders({'Content-Type':'application/json'}),
           body: JSON.stringify({board: d.detected})
-        });
+        }); }
       }
     })
     .catch(function() {
@@ -359,6 +456,7 @@ function checkInitialStatus() {
 // ---------------------------------------------------------------------------
 function connectWifi(e) {
   e.preventDefault();
+  if (!pairingReady()) { return; }
   var ssid = document.getElementById('ssid').value.trim();
   var pass = document.getElementById('password').value;
   if (!ssid) { return; }
@@ -370,7 +468,7 @@ function connectWifi(e) {
 
   fetch('/api/wifi/connect', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: authHeaders({'Content-Type': 'application/json'}),
     body: JSON.stringify({ssid: ssid, password: pass})
   })
   .then(function(r) { return r.json(); })
@@ -448,6 +546,7 @@ function pickBoard(id) {
 
 function selectBoard() {
   if (!boardSelected) { return; }
+  if (!pairingReady()) { return; }
   var st  = document.getElementById('board-status');
   var btn = document.getElementById('board-btn');
   btn.disabled = true;
@@ -455,7 +554,7 @@ function selectBoard() {
 
   fetch('/api/board/select', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: authHeaders({'Content-Type': 'application/json'}),
     body: JSON.stringify({board: boardSelected})
   })
   .then(function(r) { return r.json(); })
@@ -476,11 +575,12 @@ function selectBoard() {
 
 function planInstall() {
   if (!boardSelected) { return; }
+  if (!pairingReady()) { return; }
   var st = document.getElementById('board-status');
   showStatus(st, 'Checking install plan...', 'info');
   fetch('/api/board/select', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: authHeaders({'Content-Type':'application/json'}),
     body: JSON.stringify({board: boardSelected})
   })
     .then(function() { return fetch('/api/bundle/plan'); })
@@ -509,6 +609,7 @@ function setBoardDone(name) {
 // Step 3: Install
 // ---------------------------------------------------------------------------
 function startInstall() {
+  if (!pairingReady()) { return; }
   var st   = document.getElementById('install-status');
   var btn  = document.getElementById('install-btn');
   var prog = document.getElementById('install-progress');
@@ -519,7 +620,7 @@ function startInstall() {
   bar.style.width = '5%';
   showStatus(st, 'Starting download...', 'info');
 
-  fetch('/api/bundle/download', {method: 'POST'})
+  fetch('/api/bundle/download', {method: 'POST', headers: authHeaders()})
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.ok) {
@@ -576,7 +677,7 @@ function setInstallDone(items) {
     showStatus(st, 'Installed ' + items + ' item(s). Rebooting in ' + countdown + suffix + '...', '');
     if (countdown <= 0) {
       showStatus(st, 'Rebooting now...', '');
-      fetch('/api/reboot', {method: 'POST'}).catch(function() {});
+      fetch('/api/reboot', {method: 'POST', headers: authHeaders()}).catch(function() {});
       return;
     }
     countdown--;
@@ -593,8 +694,8 @@ function viewStatus() {
 }
 
 function confirmReboot() {
-  if (confirm('Reboot the device now?')) {
-    fetch('/api/reboot', {method: 'POST'}).catch(function() {});
+  if (pairingReady() && confirm('Reboot the device now?')) {
+    fetch('/api/reboot', {method: 'POST', headers: authHeaders()}).catch(function() {});
   }
 }
 
@@ -787,14 +888,22 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/wifi/connect",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
-            let mut body = Vec::new();
-            let mut buf = [0u8; 256];
-            loop {
-                match req.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => body.extend_from_slice(&buf[..n]),
-                }
+            if !request_is_authorized(req.header("X-Thistle-Recovery-Token")) {
+                let mut resp =
+                    req.into_response(401, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"pairing required\"}")?;
+                return Ok(());
             }
+            let content_length = req.header("Content-Length").map(str::to_owned);
+            let body = match read_limited_post_body(&mut req, content_length.as_deref()) {
+                Ok(body) => body,
+                Err(_) => {
+                    let mut resp =
+                        req.into_response(413, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"request body too large\"}")?;
+                    return Ok(());
+                }
+            };
 
             let body_str = String::from_utf8_lossy(&body);
             let ssid = crate::recovery_ota::json_extract_string(&body_str, "ssid");
@@ -827,14 +936,22 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/board/select",
         esp_idf_svc::http::Method::Post,
         |mut req| -> anyhow::Result<()> {
-            let mut body = Vec::new();
-            let mut buf = [0u8; 128];
-            loop {
-                match req.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => body.extend_from_slice(&buf[..n]),
-                }
+            if !request_is_authorized(req.header("X-Thistle-Recovery-Token")) {
+                let mut resp =
+                    req.into_response(401, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"pairing required\"}")?;
+                return Ok(());
             }
+            let content_length = req.header("Content-Length").map(str::to_owned);
+            let body = match read_limited_post_body(&mut req, content_length.as_deref()) {
+                Ok(body) => body,
+                Err(_) => {
+                    let mut resp =
+                        req.into_response(413, None, &[("Content-Type", "application/json")])?;
+                    resp.write(b"{\"ok\":false,\"error\":\"request body too large\"}")?;
+                    return Ok(());
+                }
+            };
 
             let body_str = String::from_utf8_lossy(&body);
             let board = crate::recovery_ota::json_extract_string(&body_str, "board");
@@ -919,6 +1036,12 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/bundle/download",
         esp_idf_svc::http::Method::Post,
         |req| -> anyhow::Result<()> {
+            if !request_is_authorized(req.header("X-Thistle-Recovery-Token")) {
+                let mut resp =
+                    req.into_response(401, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"pairing required\"}")?;
+                return Ok(());
+            }
             let (has_board, already_downloading) = {
                 let st = STATE.lock().unwrap();
                 (st.board_name.is_some(), st.bundle_status == "downloading")
@@ -994,6 +1117,12 @@ pub fn register_handlers(server: &mut EspHttpServer) -> anyhow::Result<()> {
         "/api/reboot",
         esp_idf_svc::http::Method::Post,
         |req| -> anyhow::Result<()> {
+            if !request_is_authorized(req.header("X-Thistle-Recovery-Token")) {
+                let mut resp =
+                    req.into_response(401, None, &[("Content-Type", "application/json")])?;
+                resp.write(b"{\"ok\":false,\"error\":\"pairing required\"}")?;
+                return Ok(());
+            }
             let mut resp = req.into_response(200, None, &[("Content-Type", "application/json")])?;
             resp.write(b"{\"ok\":true}")?;
             info!("Reboot requested via web UI");
@@ -1025,4 +1154,35 @@ fn board_is_selectable(
     wifi_connected
         && !catalog_url.is_empty()
         && crate::recovery_ota::catalog_contains_board(catalog_url, chip, board_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{content_length_within_limit, tokens_match, MAX_POST_BODY_SIZE};
+
+    #[test]
+    fn pairing_token_requires_an_exact_value() {
+        assert!(tokens_match("a1b2c3", Some("a1b2c3")));
+        assert!(!tokens_match("a1b2c3", Some("a1b2c4")));
+        assert!(!tokens_match("a1b2c3", Some("a1b2c3x")));
+        assert!(!tokens_match("a1b2c3", None));
+    }
+
+    #[test]
+    fn empty_or_uninitialized_token_never_authorizes() {
+        assert!(!tokens_match("", Some("anything")));
+        assert!(!tokens_match("", Some("")));
+    }
+
+    #[test]
+    fn post_content_length_has_a_strict_limit() {
+        assert!(content_length_within_limit(
+            Some(&MAX_POST_BODY_SIZE.to_string()),
+            MAX_POST_BODY_SIZE
+        ));
+        assert!(!content_length_within_limit(
+            Some(&(MAX_POST_BODY_SIZE + 1).to_string()),
+            MAX_POST_BODY_SIZE
+        ));
+    }
 }

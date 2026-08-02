@@ -12,34 +12,127 @@ use crate::version;
 /// matches the values used in `catalog_example.json` and `detect_chip()` in
 /// the recovery crate.
 ///
-/// For Xtensa targets the specific chip variant (esp32 / esp32s2 / esp32s3)
-/// is selected via Cargo features because Xtensa has no sub-target distinction
-/// at the `target_arch` level.  RISC-V chips are differentiated similarly.
+/// Firmware builds select the chip through exactly one Cargo feature. The
+/// component CMake maps ESP-IDF's `IDF_TARGET` to that feature; there is no
+/// fallback chip because loading an image for the wrong board is unsafe.
 ///
 /// On the simulator (aarch64 / x86_64 host) the slug is `"host"` so that
 /// manifests without an `arch` field (universal) load normally in tests.
+#[cfg(all(
+    target_os = "espidf",
+    not(any(
+        all(
+            feature = "esp32",
+            not(any(
+                feature = "esp32s2",
+                feature = "esp32s3",
+                feature = "esp32c3",
+                feature = "esp32c6",
+                feature = "esp32h2"
+            ))
+        ),
+        all(
+            feature = "esp32s2",
+            not(any(
+                feature = "esp32",
+                feature = "esp32s3",
+                feature = "esp32c3",
+                feature = "esp32c6",
+                feature = "esp32h2"
+            ))
+        ),
+        all(
+            feature = "esp32s3",
+            not(any(
+                feature = "esp32",
+                feature = "esp32s2",
+                feature = "esp32c3",
+                feature = "esp32c6",
+                feature = "esp32h2"
+            ))
+        ),
+        all(
+            feature = "esp32c3",
+            not(any(
+                feature = "esp32",
+                feature = "esp32s2",
+                feature = "esp32s3",
+                feature = "esp32c6",
+                feature = "esp32h2"
+            ))
+        ),
+        all(
+            feature = "esp32c6",
+            not(any(
+                feature = "esp32",
+                feature = "esp32s2",
+                feature = "esp32s3",
+                feature = "esp32c3",
+                feature = "esp32h2"
+            ))
+        ),
+        all(
+            feature = "esp32h2",
+            not(any(
+                feature = "esp32",
+                feature = "esp32s2",
+                feature = "esp32s3",
+                feature = "esp32c3",
+                feature = "esp32c6"
+            ))
+        ),
+    ))
+))]
+compile_error!(
+    "ESP-IDF builds must select exactly one chip feature (for example --features esp32s3)"
+);
+
+fn chip_slug_from_features(
+    esp32: bool,
+    esp32s2: bool,
+    esp32s3: bool,
+    esp32c3: bool,
+    esp32c6: bool,
+    esp32h2: bool,
+) -> Option<&'static str> {
+    let selected = [esp32, esp32s2, esp32s3, esp32c3, esp32c6, esp32h2]
+        .iter()
+        .filter(|selected| **selected)
+        .count();
+    if selected != 1 {
+        return None;
+    }
+    if esp32 {
+        Some("esp32")
+    } else if esp32s2 {
+        Some("esp32s2")
+    } else if esp32s3 {
+        Some("esp32s3")
+    } else if esp32c3 {
+        Some("esp32c3")
+    } else if esp32c6 {
+        Some("esp32c6")
+    } else {
+        Some("esp32h2")
+    }
+}
+
 pub fn current_arch() -> &'static str {
-    #[cfg(target_arch = "xtensa")]
+    #[cfg(target_os = "espidf")]
     {
-        #[cfg(feature = "esp32")]
-        return "esp32";
-        #[cfg(feature = "esp32s2")]
-        return "esp32s2";
-        // Default for xtensa builds — the production target is ESP32-S3.
-        "esp32s3"
+        chip_slug_from_features(
+            cfg!(feature = "esp32"),
+            cfg!(feature = "esp32s2"),
+            cfg!(feature = "esp32s3"),
+            cfg!(feature = "esp32c3"),
+            cfg!(feature = "esp32c6"),
+            cfg!(feature = "esp32h2"),
+        )
+        .expect("ESP-IDF builds must select exactly one chip feature")
     }
-    #[cfg(target_arch = "riscv32")]
+    #[cfg(not(target_os = "espidf"))]
     {
-        #[cfg(feature = "esp32c6")]
-        return "esp32c6";
-        #[cfg(feature = "esp32h2")]
-        return "esp32h2";
-        // Default for riscv32 builds.
-        "esp32c3"
-    }
-    #[cfg(not(any(target_arch = "xtensa", target_arch = "riscv32")))]
-    {
-        "host" // simulator / unit tests on aarch64 or x86_64
+        "host"
     }
 }
 
@@ -174,11 +267,7 @@ impl Manifest {
             "driver" => ManifestType::Driver,
             "firmware" => ManifestType::Firmware,
             "wm" => ManifestType::Wm,
-            other => {
-                return Err(ManifestError::ParseError(format!(
-                    "unknown type: {other}"
-                )))
-            }
+            other => return Err(ManifestError::ParseError(format!("unknown type: {other}"))),
         };
 
         // Identity
@@ -403,8 +492,8 @@ pub fn json_get_detection(json: &str) -> Option<ManifestDetection> {
         return None;
     }
 
-    let address    = json_get_hex_or_int(inner, "address");
-    let chip_id_reg   = json_get_hex_or_int(inner, "chip_id_reg");
+    let address = json_get_hex_or_int(inner, "address");
+    let chip_id_reg = json_get_hex_or_int(inner, "chip_id_reg");
     let chip_id_value = json_get_hex_or_int(inner, "chip_id_value");
 
     Some(ManifestDetection {
@@ -618,9 +707,15 @@ mod tests {
     fn test_empty_manifest() {
         let json = r#"{}"#;
         let result = Manifest::from_json(json);
-        assert!(result.is_err(), "empty manifest must fail with missing 'type'");
+        assert!(
+            result.is_err(),
+            "empty manifest must fail with missing 'type'"
+        );
         if let Err(ManifestError::ParseError(msg)) = result {
-            assert!(msg.contains("type"), "error should mention missing type field");
+            assert!(
+                msg.contains("type"),
+                "error should mention missing type field"
+            );
         }
     }
 
@@ -698,9 +793,18 @@ mod tests {
             compatible_boards: vec![],
             ..Default::default()
         };
-        assert!(m.is_board_compatible("tdeck-pro"), "empty compatible_boards means universal");
-        assert!(m.is_board_compatible("tdeck"), "empty compatible_boards means universal");
-        assert!(m.is_board_compatible("unknown-board"), "empty compatible_boards means universal");
+        assert!(
+            m.is_board_compatible("tdeck-pro"),
+            "empty compatible_boards means universal"
+        );
+        assert!(
+            m.is_board_compatible("tdeck"),
+            "empty compatible_boards means universal"
+        );
+        assert!(
+            m.is_board_compatible("unknown-board"),
+            "empty compatible_boards means universal"
+        );
     }
 
     #[test]
@@ -734,7 +838,10 @@ mod tests {
     fn test_compatible_boards_absent_is_empty() {
         let json = r#"{"type": "app", "id": "x"}"#;
         let m = Manifest::from_json(json).unwrap();
-        assert!(m.compatible_boards.is_empty(), "absent field means universal (empty vec)");
+        assert!(
+            m.compatible_boards.is_empty(),
+            "absent field means universal (empty vec)"
+        );
     }
 
     #[test]
@@ -844,6 +951,67 @@ mod tests {
     }
 
     #[test]
+    fn test_chip_slug_selection_requires_exactly_one_board_target() {
+        assert_eq!(
+            chip_slug_from_features(true, false, false, false, false, false),
+            Some("esp32")
+        );
+        assert_eq!(
+            chip_slug_from_features(false, false, true, false, false, false),
+            Some("esp32s3")
+        );
+        assert_eq!(
+            chip_slug_from_features(false, false, false, true, false, false),
+            Some("esp32c3")
+        );
+        assert_eq!(
+            chip_slug_from_features(false, false, false, false, false, false),
+            None
+        );
+        assert_eq!(
+            chip_slug_from_features(true, false, true, false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn test_chip_specific_manifest_compatibility_rejects_cross_board_artifacts() {
+        for (target, wrong) in [
+            ("esp32", "esp32s3"),
+            ("esp32s3", "esp32c3"),
+            ("esp32c3", "esp32"),
+        ] {
+            let manifest = Manifest {
+                manifest_type: ManifestType::App,
+                id: "chip-specific".into(),
+                arch: target.into(),
+                ..Default::default()
+            };
+            assert!(manifest.is_compatible(target));
+            assert!(!manifest.is_compatible(wrong));
+        }
+    }
+
+    #[test]
+    fn test_firmware_cmake_passes_the_idf_target_chip_feature_to_cargo() {
+        let cmake = include_str!("../CMakeLists.txt");
+        assert!(cmake.contains("idf_build_get_property(IDF_TARGET IDF_TARGET)"));
+        assert!(cmake.contains("--features ${RUST_CHIP_FEATURE}"));
+    }
+
+    #[test]
+    fn test_loaders_use_the_canonical_manifest_architecture_slug() {
+        for loader in [
+            include_str!("elf_loader.rs"),
+            include_str!("driver_loader.rs"),
+        ] {
+            assert!(loader.contains("use crate::manifest::current_arch;"));
+            assert!(loader.contains("current_arch()"));
+            assert!(!loader.contains("xtensa-esp32s3"));
+        }
+    }
+
+    #[test]
     fn test_is_compatible_with_current_arch() {
         // A manifest with no arch constraint must always be compatible.
         let universal = Manifest {
@@ -853,7 +1021,10 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(universal.is_compatible(current_arch()), "universal manifest must be compatible");
+        assert!(
+            universal.is_compatible(current_arch()),
+            "universal manifest must be compatible"
+        );
 
         // A manifest targeting the current arch must be compatible.
         let same_arch = Manifest {
@@ -863,10 +1034,17 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(same_arch.is_compatible(current_arch()), "same-arch manifest must be compatible");
+        assert!(
+            same_arch.is_compatible(current_arch()),
+            "same-arch manifest must be compatible"
+        );
 
         // A manifest targeting a different arch must not be compatible.
-        let other_arch = if current_arch() == "esp32s3" { "esp32c3" } else { "esp32s3" };
+        let other_arch = if current_arch() == "esp32s3" {
+            "esp32c3"
+        } else {
+            "esp32s3"
+        };
         let cross = Manifest {
             manifest_type: ManifestType::App,
             id: "x".into(),
@@ -874,7 +1052,10 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(!cross.is_compatible(current_arch()), "cross-arch manifest must not be compatible");
+        assert!(
+            !cross.is_compatible(current_arch()),
+            "cross-arch manifest must not be compatible"
+        );
     }
 
     #[test]

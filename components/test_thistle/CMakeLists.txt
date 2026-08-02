@@ -15,7 +15,11 @@ idf_component_register(
         "test_net_manager.c"
         "test_driver_loader.c"
         "test_appstore_client.c"
+        "test_a7682e_sms_validation.c"
+        "test_board_bus_registration.c"
+        "test_appstore_http_shim.c"
     INCLUDE_DIRS "."
+        "../drv_modem_a7682e/include"
     REQUIRES unity thistle_hal kernel ui esp_timer freertos
     WHOLE_ARCHIVE
 )

@@ -9,8 +9,11 @@
 // (libcurl-backed) in simulator builds. SHA-256 uses the sha2 crate.
 
 use std::ffi::CStr;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::raw::{c_char, c_int, c_void};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
@@ -20,6 +23,7 @@ use std::sync::Mutex;
 const ESP_OK: i32 = 0x000;
 const ESP_ERR_NO_MEM: i32 = 0x101;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
+const ESP_ERR_INVALID_SIZE: i32 = 0x104;
 const ESP_ERR_NOT_FOUND: i32 = 0x105;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 const ESP_ERR_INVALID_CRC: i32 = 0x109;
@@ -29,6 +33,14 @@ const DEFAULT_CATALOG_URL: &str = "https://wan0net.github.io/thistle-apps/catalo
 const MAX_CATALOG_JSON: usize = 32 * 1024; // 32 KB
 const DOWNLOAD_BUF_SIZE: usize = 4096;
 const APPSTORE_URL_MAX: usize = 256;
+const MAX_APP_DOWNLOAD: u64 = 8 * 1024 * 1024;
+const MAX_FIRMWARE_DOWNLOAD: u64 = 16 * 1024 * 1024;
+const MAX_DRIVER_DOWNLOAD: u64 = 4 * 1024 * 1024;
+const MAX_WM_DOWNLOAD: u64 = 8 * 1024 * 1024;
+const MAX_SIGNATURE_DOWNLOAD: u64 = 64;
+const MAX_GENERIC_DOWNLOAD: u64 = 16 * 1024 * 1024;
+
+static TEMP_FILE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
 static TAG: &[u8] = b"appstore_client\0";
 
@@ -45,70 +57,43 @@ const ESP_LOG_WARN:  i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
-// esp_http_client FFI — same API on device (esp_http_client.h) and
-// simulator (sim_http.c shim).
+// Stable app-store HTTP shim FFI. ESP-IDF structs remain entirely C-owned.
 // ---------------------------------------------------------------------------
 
-extern "C" {
-    fn esp_http_client_init(config: *const EspHttpClientConfig) -> *mut c_void;
-    fn esp_http_client_perform(client: *mut c_void) -> i32;
-    fn esp_http_client_get_status_code(client: *mut c_void) -> c_int;
-    fn esp_http_client_cleanup(client: *mut c_void) -> i32;
-    fn esp_http_client_open(client: *mut c_void, write_len: i32) -> i32;
-    fn esp_http_client_fetch_headers(client: *mut c_void) -> c_int;
-    fn esp_http_client_read(client: *mut c_void, buf: *mut c_char, len: c_int) -> c_int;
-    fn esp_http_client_close(client: *mut c_void) -> i32;
-}
-
-// esp_http_client_config_t — only the fields we use; must be repr(C) padded to match.
-// We use a flexible approach: declare only the fields we set and pad to 128 bytes.
 #[repr(C)]
-struct EspHttpClientConfig {
-    url: *const c_char,
-    event_handler: Option<unsafe extern "C" fn(*mut EspHttpClientEvent) -> i32>,
-    user_data: *mut c_void,
-    timeout_ms: i32,
-    _pad: [u8; 84], // Pad to match ESP-IDF struct size (~128 bytes)
+struct ThistleAppstoreHttpClient {
+    _private: [u8; 0],
 }
 
-impl EspHttpClientConfig {
-    fn new(url: *const c_char, timeout_ms: i32) -> Self {
-        EspHttpClientConfig {
-            url,
-            event_handler: None,
-            user_data: std::ptr::null_mut(),
-            timeout_ms,
-            _pad: [0u8; 84],
-        }
-    }
+type HttpDataCb = unsafe extern "C" fn(
+    data: *const u8,
+    data_len: usize,
+    user_data: *mut c_void,
+) -> i32;
 
-    fn with_handler(
+#[cfg(not(test))]
+extern "C" {
+    fn thistle_appstore_http_init(
         url: *const c_char,
         timeout_ms: i32,
-        handler: unsafe extern "C" fn(*mut EspHttpClientEvent) -> i32,
+        data_cb: Option<HttpDataCb>,
         user_data: *mut c_void,
-    ) -> Self {
-        EspHttpClientConfig {
-            url,
-            event_handler: Some(handler),
-            user_data,
-            timeout_ms,
-            _pad: [0u8; 84],
-        }
-    }
+    ) -> *mut ThistleAppstoreHttpClient;
+    fn thistle_appstore_http_perform(client: *mut ThistleAppstoreHttpClient) -> i32;
+    fn thistle_appstore_http_status(client: *mut ThistleAppstoreHttpClient) -> i32;
+    fn thistle_appstore_http_open(
+        client: *mut ThistleAppstoreHttpClient,
+        write_len: i32,
+    ) -> i32;
+    fn thistle_appstore_http_fetch_headers(client: *mut ThistleAppstoreHttpClient) -> i64;
+    fn thistle_appstore_http_read(
+        client: *mut ThistleAppstoreHttpClient,
+        buf: *mut u8,
+        len: i32,
+    ) -> i32;
+    fn thistle_appstore_http_close(client: *mut ThistleAppstoreHttpClient) -> i32;
+    fn thistle_appstore_http_cleanup(client: *mut ThistleAppstoreHttpClient);
 }
-
-// esp_http_client_event_t — minimal layout
-#[repr(C)]
-struct EspHttpClientEvent {
-    event_id: i32,      // HTTP_EVENT_ON_DATA = 5
-    data: *const u8,
-    data_len: i32,
-    user_data: *mut c_void,
-    // … more fields follow in the C struct, but we only read the above
-}
-
-const HTTP_EVENT_ON_DATA: i32 = 5;
 
 // ---------------------------------------------------------------------------
 // Signing FFI
@@ -510,21 +495,37 @@ impl HttpBuf {
     }
 }
 
-// http_buf_event_handler calls esp_log_write — excluded from test builds.
+fn http_buf_append(buf: &mut HttpBuf, chunk: &[u8]) -> bool {
+    if buf.data.len() + chunk.len() < buf.capacity {
+        buf.data.extend_from_slice(chunk);
+        true
+    } else {
+        buf.overflow = true;
+        false
+    }
+}
+
+// HTTP data callback calls esp_log_write — excluded from test builds.
 #[cfg(not(test))]
-unsafe extern "C" fn http_buf_event_handler(evt: *mut EspHttpClientEvent) -> i32 {
-    let resp = (*evt).user_data as *mut HttpBuf;
+unsafe extern "C" fn http_buf_data_handler(
+    data: *const u8,
+    data_len: usize,
+    user_data: *mut c_void,
+) -> i32 {
+    let resp = user_data as *mut HttpBuf;
     if resp.is_null() { return ESP_OK; }
     let buf = &mut *resp;
 
-    if (*evt).event_id == HTTP_EVENT_ON_DATA {
-        let data = std::slice::from_raw_parts((*evt).data, (*evt).data_len as usize);
-        if buf.data.len() + data.len() < buf.capacity {
-            buf.data.extend_from_slice(data);
-        } else {
-            buf.overflow = true;
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"HTTP buffer overflow - truncated\0".as_ptr());
-        }
+    if data.is_null() && data_len != 0 {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if data_len == 0 {
+        return ESP_OK;
+    }
+    let chunk = std::slice::from_raw_parts(data, data_len);
+    if !http_buf_append(buf, chunk) {
+        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"HTTP buffer overflow - truncated\0".as_ptr());
+        return ESP_ERR_INVALID_SIZE;
     }
 
     ESP_OK
@@ -541,7 +542,7 @@ unsafe extern "C" fn http_buf_event_handler(evt: *mut EspHttpClientEvent) -> i32
 /// `out_count` must be a valid pointer.
 ///
 /// The full HTTP implementation is excluded from test builds (it calls
-/// esp_http_client_* which are not available on aarch64-apple-darwin).
+/// The C HTTP shim is not linked into aarch64-apple-darwin unit tests.
 /// The test-mode body only implements the guard clauses so the NULL-pointer
 /// tests can still run.
 #[no_mangle]
@@ -573,23 +574,21 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
     let mut resp_buf = Box::new(HttpBuf::new(MAX_CATALOG_JSON + 1));
 
     let url_cstr = std::ffi::CString::new(url_str).unwrap_or_default();
-    let config = EspHttpClientConfig::with_handler(
+    let client = thistle_appstore_http_init(
         url_cstr.as_ptr(),
         15000,
-        http_buf_event_handler,
+        Some(http_buf_data_handler),
         &mut *resp_buf as *mut HttpBuf as *mut c_void,
     );
-
-    let client = esp_http_client_init(&config);
     if client.is_null() {
         return ESP_FAIL;
     }
 
-    let err    = esp_http_client_perform(client);
-    let status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
+    let err    = thistle_appstore_http_perform(client);
+    let status = thistle_appstore_http_status(client);
+    thistle_appstore_http_cleanup(client);
 
-    if err != ESP_OK || status != 200 {
+    if err != ESP_OK || !(200..300).contains(&status) || resp_buf.overflow {
         esp_log_write(
             ESP_LOG_ERROR,
             TAG.as_ptr(),
@@ -644,7 +643,7 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         if let Some(v) = json_str_extract(obj, "min_os_version") { copy_str_to_buf(&v, &mut entry.min_os_version); }
 
         if let Some(sz) = json_int_extract(obj, "size_bytes") {
-            if sz > 0 { entry.size_bytes = sz as u32; }
+            if sz > 0 && sz <= u32::MAX as i64 { entry.size_bytes = sz as u32; }
         }
 
         if let Some(t) = json_str_extract(obj, "type") {
@@ -740,6 +739,382 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
 // File download with SHA-256 verification
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamValidationError {
+    HttpStatus,
+    MissingLength,
+    InvalidLength,
+    SizeMismatch,
+    Oversized,
+    Read,
+    CounterOverflow,
+}
+
+impl StreamValidationError {
+    fn esp_error(self) -> i32 {
+        match self {
+            Self::InvalidLength | Self::SizeMismatch | Self::Oversized | Self::CounterOverflow => {
+                ESP_ERR_INVALID_SIZE
+            }
+            Self::HttpStatus | Self::MissingLength | Self::Read => ESP_FAIL,
+        }
+    }
+}
+
+struct StreamValidator {
+    content_length: u64,
+    expected_size: Option<u64>,
+    max_size: u64,
+    received: u64,
+}
+
+impl StreamValidator {
+    fn new(
+        status: i32,
+        content_length: i64,
+        expected_size: Option<u64>,
+        max_size: u64,
+    ) -> Result<Self, StreamValidationError> {
+        if !(200..300).contains(&status) {
+            return Err(StreamValidationError::HttpStatus);
+        }
+        if content_length < 0 {
+            return Err(StreamValidationError::MissingLength);
+        }
+        let content_length = u64::try_from(content_length)
+            .map_err(|_| StreamValidationError::InvalidLength)?;
+        if content_length > max_size {
+            return Err(StreamValidationError::Oversized);
+        }
+        if let Some(expected) = expected_size {
+            if content_length != expected {
+                return Err(StreamValidationError::SizeMismatch);
+            }
+        }
+        Ok(Self { content_length, expected_size, max_size, received: 0 })
+    }
+
+    fn observe_read(&mut self, read_len: i32) -> Result<bool, StreamValidationError> {
+        if read_len < 0 {
+            return Err(StreamValidationError::Read);
+        }
+        if read_len == 0 {
+            if self.received != self.content_length
+                || self.expected_size.is_some_and(|expected| self.received != expected)
+            {
+                return Err(StreamValidationError::SizeMismatch);
+            }
+            return Ok(false);
+        }
+
+        let received = self.received
+            .checked_add(read_len as u64)
+            .ok_or(StreamValidationError::CounterOverflow)?;
+        if received > self.max_size {
+            return Err(StreamValidationError::Oversized);
+        }
+        if received > self.content_length
+            || self.expected_size.is_some_and(|expected| received > expected)
+        {
+            return Err(StreamValidationError::SizeMismatch);
+        }
+        self.received = received;
+        Ok(true)
+    }
+}
+
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn fixed_cstr(value: &[u8]) -> Option<&str> {
+    let end = value.iter().position(|byte| *byte == 0)?;
+    std::str::from_utf8(&value[..end]).ok()
+}
+
+fn max_download_for_type(entry_type: u32) -> u64 {
+    match entry_type {
+        CATALOG_TYPE_FIRMWARE => MAX_FIRMWARE_DOWNLOAD,
+        CATALOG_TYPE_DRIVER => MAX_DRIVER_DOWNLOAD,
+        CATALOG_TYPE_WM => MAX_WM_DOWNLOAD,
+        _ => MAX_APP_DOWNLOAD,
+    }
+}
+
+/// A sibling temporary file which is removed unless it has been committed.
+/// Keeping the temporary file in the destination directory guarantees that the
+/// final rename stays on one filesystem.
+struct StagedFile {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl StagedFile {
+    fn create_for(destination: &Path) -> std::io::Result<Self> {
+        let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+        let name = destination.file_name().and_then(|n| n.to_str()).unwrap_or("artifact");
+
+        for _ in 0..128 {
+            let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!(".{}.thistle-tmp-{}", name, sequence));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => return Ok(Self { path, file: Some(file) }),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "unable to allocate a unique app-store temporary file",
+        ))
+    }
+
+    fn create_exact(path: PathBuf) -> std::io::Result<Self> {
+        let file = OpenOptions::new().write(true).create_new(true).open(&path)?;
+        Ok(Self { path, file: Some(file) })
+    }
+
+    fn writer(&mut self) -> &mut File {
+        self.file.as_mut().expect("staged file is already closed")
+    }
+
+    fn sync_and_close(&mut self) -> std::io::Result<()> {
+        if let Some(mut file) = self.file.take() {
+            file.flush()?;
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn unused_backup_path(destination: &Path) -> PathBuf {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let name = destination.file_name().and_then(|n| n.to_str()).unwrap_or("artifact");
+    loop {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(".{}.thistle-backup-{}", name, sequence));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+}
+
+fn atomic_replace_with<F>(
+    staged: &StagedFile,
+    destination: &Path,
+    mut rename: F,
+) -> std::io::Result<()>
+where
+    F: FnMut(&Path, &Path) -> std::io::Result<()>,
+{
+    if !destination.exists() {
+        return rename(&staged.path, destination);
+    }
+
+    // FatFs cannot rename over an existing path. Move the old artifact aside,
+    // then restore it if committing the fully verified staging file fails.
+    let backup = unused_backup_path(destination);
+    rename(destination, &backup)?;
+    if let Err(commit_error) = rename(&staged.path, destination) {
+        let _ = std::fs::rename(&backup, destination);
+        return Err(commit_error);
+    }
+    let _ = std::fs::remove_file(backup);
+    Ok(())
+}
+
+fn atomic_replace(staged: &StagedFile, destination: &Path) -> std::io::Result<()> {
+    atomic_replace_with(staged, destination, |from, to| std::fs::rename(from, to))
+}
+
+/// Replace a payload and its adjacent signature as one recoverable operation.
+/// Existing files are moved aside first and restored if any commit rename fails.
+fn atomic_replace_pair_with<F>(
+    staged_payload: &StagedFile,
+    payload_destination: &Path,
+    staged_signature: &StagedFile,
+    signature_destination: &Path,
+    mut rename: F,
+) -> std::io::Result<()>
+where
+    F: FnMut(&Path, &Path) -> std::io::Result<()>,
+{
+    let payload_backup = unused_backup_path(payload_destination);
+    let signature_backup = unused_backup_path(signature_destination);
+    let had_payload = payload_destination.exists();
+    let had_signature = signature_destination.exists();
+    let mut payload_backed_up = false;
+    let mut signature_backed_up = false;
+    let mut payload_installed = false;
+    let mut signature_installed = false;
+
+    let result = (|| {
+        if had_payload {
+            rename(payload_destination, &payload_backup)?;
+            payload_backed_up = true;
+        }
+        if had_signature {
+            rename(signature_destination, &signature_backup)?;
+            signature_backed_up = true;
+        }
+        rename(&staged_signature.path, signature_destination)?;
+        signature_installed = true;
+        rename(&staged_payload.path, payload_destination)?;
+        payload_installed = true;
+        Ok(())
+    })();
+
+    if let Err(commit_error) = result {
+        if payload_installed {
+            let _ = std::fs::remove_file(payload_destination);
+        }
+        if signature_installed {
+            let _ = std::fs::remove_file(signature_destination);
+        }
+        if signature_backed_up {
+            let _ = std::fs::rename(&signature_backup, signature_destination);
+        }
+        if payload_backed_up {
+            let _ = std::fs::rename(&payload_backup, payload_destination);
+        }
+        return Err(commit_error);
+    }
+
+    if had_payload {
+        let _ = std::fs::remove_file(payload_backup);
+    }
+    if had_signature {
+        let _ = std::fs::remove_file(signature_backup);
+    }
+    Ok(())
+}
+
+fn atomic_replace_pair(
+    staged_payload: &StagedFile,
+    payload_destination: &Path,
+    staged_signature: &StagedFile,
+    signature_destination: &Path,
+) -> std::io::Result<()> {
+    atomic_replace_pair_with(
+        staged_payload,
+        payload_destination,
+        staged_signature,
+        signature_destination,
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+#[cfg(not(test))]
+struct HttpDownloadSession {
+    client: *mut ThistleAppstoreHttpClient,
+    opened: bool,
+}
+
+#[cfg(not(test))]
+impl Drop for HttpDownloadSession {
+    fn drop(&mut self) {
+        unsafe {
+            if self.opened {
+                let _ = thistle_appstore_http_close(self.client);
+            }
+            thistle_appstore_http_cleanup(self.client);
+        }
+    }
+}
+
+#[cfg(not(test))]
+unsafe fn download_into_staged(
+    url: *const c_char,
+    expected_sha256_hex: *const c_char,
+    expected_size: Option<u64>,
+    max_size: u64,
+    progress_cb: Option<DownloadProgressCb>,
+    user_data: *mut c_void,
+    staged: &mut StagedFile,
+) -> i32 {
+    let expected_hash = if expected_sha256_hex.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(expected_sha256_hex).to_str() {
+            Ok("") => None,
+            Ok(value) if valid_sha256_hex(value) => Some(value),
+            Ok(_) => return ESP_ERR_INVALID_ARG,
+            Err(_) => return ESP_ERR_INVALID_ARG,
+        }
+    };
+
+    let client = thistle_appstore_http_init(url, 30000, None, std::ptr::null_mut());
+    if client.is_null() {
+        return ESP_FAIL;
+    }
+    let mut session = HttpDownloadSession { client, opened: false };
+
+    let err = thistle_appstore_http_open(client, 0);
+    if err != ESP_OK {
+        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"HTTP open failed: %d\0".as_ptr(), err);
+        return err;
+    }
+    session.opened = true;
+
+    let content_length = thistle_appstore_http_fetch_headers(client);
+    let status = thistle_appstore_http_status(client);
+    let mut validator = match StreamValidator::new(status, content_length, expected_size, max_size) {
+        Ok(validator) => validator,
+        Err(error) => return error.esp_error(),
+    };
+    let total = match u32::try_from(validator.content_length) {
+        Ok(total) => total,
+        Err(_) => return ESP_ERR_INVALID_SIZE,
+    };
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; DOWNLOAD_BUF_SIZE];
+
+    loop {
+        let read_len = thistle_appstore_http_read(client, buf.as_mut_ptr(), DOWNLOAD_BUF_SIZE as c_int);
+        match validator.observe_read(read_len) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(error) => return error.esp_error(),
+        }
+
+        let chunk = &buf[..read_len as usize];
+        hasher.update(chunk);
+        if staged.writer().write_all(chunk).is_err() {
+            return ESP_FAIL;
+        }
+        if let Some(cb) = progress_cb {
+            let downloaded = match u32::try_from(validator.received) {
+                Ok(downloaded) => downloaded,
+                Err(_) => return ESP_ERR_INVALID_SIZE,
+            };
+            cb(downloaded, total, user_data);
+        }
+    }
+
+    if let Some(expected) = expected_hash {
+        let hash = hasher.finalize();
+        let computed: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        if computed != expected {
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"SHA-256 mismatch!\0".as_ptr());
+            return ESP_ERR_INVALID_CRC;
+        }
+        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"SHA-256 verified OK\0".as_ptr());
+    }
+
+    if staged.sync_and_close().is_err() {
+        return ESP_FAIL;
+    }
+    ESP_OK
+}
+
 /// Download a file from `url` to `dest_path`, optionally verifying SHA-256.
 ///
 /// # Safety
@@ -747,7 +1122,7 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
 /// `expected_sha256_hex` may be NULL (skips hash check).
 /// `progress_cb` may be NULL.
 ///
-/// Excluded from test builds (calls esp_http_client_* not available on host).
+/// Excluded from test builds because the C HTTP shim is not linked on host.
 #[no_mangle]
 #[cfg(not(test))]
 pub unsafe extern "C" fn appstore_download_file(
@@ -761,10 +1136,9 @@ pub unsafe extern "C" fn appstore_download_file(
         return ESP_ERR_INVALID_ARG;
     }
 
-    let url_str = match CStr::from_ptr(url).to_str() {
-        Ok(s) => s,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
+    if CStr::from_ptr(url).to_str().is_err() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     let dest_str = match CStr::from_ptr(dest_path).to_str() {
         Ok(s) => s,
@@ -779,94 +1153,36 @@ pub unsafe extern "C" fn appstore_download_file(
         dest_path,
     );
 
-    let mut file = match std::fs::File::create(dest_str) {
-        Ok(f) => f,
+    let destination = Path::new(dest_str);
+    let mut staged = match StagedFile::create_for(destination) {
+        Ok(staged) => staged,
         Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot create dest file\0".as_ptr());
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot create temporary file\0".as_ptr());
             return ESP_ERR_NOT_FOUND;
         }
     };
 
-    let mut hasher = Sha256::new();
+    let result = download_into_staged(
+        url,
+        expected_sha256_hex,
+        None,
+        MAX_GENERIC_DOWNLOAD,
+        progress_cb,
+        user_data,
+        &mut staged,
+    );
+    if result != ESP_OK {
+        return result;
+    }
 
-    let url_cstr = match std::ffi::CString::new(url_str) {
-        Ok(c) => c,
-        Err(_) => return ESP_ERR_INVALID_ARG,
-    };
-
-    let config = EspHttpClientConfig::new(url_cstr.as_ptr(), 30000);
-    let client = esp_http_client_init(&config);
-    if client.is_null() {
+    if atomic_replace(&staged, destination).is_err() {
         return ESP_FAIL;
     }
-
-    let err = esp_http_client_open(client, 0);
-    if err != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"HTTP open failed: %d\0".as_ptr(), err);
-        esp_http_client_cleanup(client);
-        return err;
-    }
-
-    let content_length = esp_http_client_fetch_headers(client);
-    let total: u32 = if content_length > 0 { content_length as u32 } else { 0 };
-    let mut downloaded: u32 = 0;
-
-    let mut buf = vec![0u8; DOWNLOAD_BUF_SIZE];
-
-    loop {
-        let read_len = esp_http_client_read(client, buf.as_mut_ptr() as *mut c_char, DOWNLOAD_BUF_SIZE as c_int);
-        if read_len <= 0 { break; }
-
-        let chunk = &buf[..read_len as usize];
-        hasher.update(chunk);
-
-        if file.write_all(chunk).is_err() {
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            return ESP_FAIL;
-        }
-
-        downloaded += read_len as u32;
-
-        if let Some(cb) = progress_cb {
-            cb(downloaded, total, user_data);
-        }
-    }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    drop(file);
-
-    // Verify SHA-256 if expected hash was provided
-    if !expected_sha256_hex.is_null() {
-        let expected_str = match CStr::from_ptr(expected_sha256_hex).to_str() {
-            Ok(s) => s,
-            Err(_) => return ESP_ERR_INVALID_ARG,
-        };
-
-        if !expected_str.is_empty() {
-            let hash = hasher.finalize();
-            let computed: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-
-            if computed != expected_str {
-                esp_log_write(
-                    ESP_LOG_ERROR,
-                    TAG.as_ptr(),
-                    b"SHA-256 mismatch!\0".as_ptr(),
-                );
-                let _ = std::fs::remove_file(dest_str);
-                return ESP_ERR_INVALID_CRC;
-            }
-
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"SHA-256 verified OK\0".as_ptr());
-        }
-    }
-
     esp_log_write(
         ESP_LOG_INFO,
         TAG.as_ptr(),
         b"Downloaded %d bytes to %s\0".as_ptr(),
-        downloaded as i32,
+        std::fs::metadata(destination).map(|m| m.len() as i32).unwrap_or(0),
         dest_path,
     );
 
@@ -916,6 +1232,15 @@ pub unsafe extern "C" fn appstore_install_entry(
         return ESP_ERR_INVALID_ARG;
     }
 
+    let expected_hash = match fixed_cstr(&e.sha256_hex) {
+        Some(hash) if valid_sha256_hex(hash) => hash,
+        _ => return ESP_ERR_INVALID_ARG,
+    };
+    let max_download = max_download_for_type(e.entry_type);
+    if e.size_bytes == 0 || e.size_bytes as u64 > max_download {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     // Determine destination directory and extension
     let (dir, ext) = match e.entry_type {
         CATALOG_TYPE_FIRMWARE => ("/sdcard/update",   ".bin"),
@@ -944,10 +1269,26 @@ pub unsafe extern "C" fn appstore_install_entry(
     };
 
     let url_ptr  = e.url.as_ptr() as *const c_char;
-    let sha_ptr  = if e.sha256_hex[0] != 0 { e.sha256_hex.as_ptr() as *const c_char } else { std::ptr::null() };
+    let sha_cstr = match std::ffi::CString::new(expected_hash) {
+        Ok(hash) => hash,
+        Err(_) => return ESP_ERR_INVALID_ARG,
+    };
 
-    // Download the payload
-    let ret = appstore_download_file(url_ptr, dest_cstr.as_ptr(), sha_ptr, progress_cb, user_data);
+    // Keep the payload staged until every applicable validation has completed.
+    let destination = Path::new(&dest_path);
+    let mut staged_payload = match StagedFile::create_for(destination) {
+        Ok(staged) => staged,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+    let ret = download_into_staged(
+        url_ptr,
+        sha_cstr.as_ptr(),
+        Some(e.size_bytes as u64),
+        max_download,
+        progress_cb,
+        user_data,
+        &mut staged_payload,
+    );
     if ret != ESP_OK {
         esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Payload download failed: %d\0".as_ptr(), ret);
         return ret;
@@ -956,28 +1297,49 @@ pub unsafe extern "C" fn appstore_install_entry(
     // Download and verify signature if sig_url is present
     if e.sig_url[0] != 0 {
         let sig_path = format!("{}.sig", dest_path);
-        let sig_cstr = match std::ffi::CString::new(sig_path.as_str()) {
-            Ok(c) => c,
-            Err(_) => return ESP_FAIL,
+        let staged_sig_path = PathBuf::from(format!("{}.sig", staged_payload.path.display()));
+        let mut staged_signature = match StagedFile::create_exact(staged_sig_path) {
+            Ok(staged) => staged,
+            Err(_) => return ESP_ERR_NOT_FOUND,
         };
 
         let sig_url_ptr = e.sig_url.as_ptr() as *const c_char;
-        let sig_dl = appstore_download_file(sig_url_ptr, sig_cstr.as_ptr(), std::ptr::null(), None, std::ptr::null_mut());
+        let sig_dl = download_into_staged(
+            sig_url_ptr,
+            std::ptr::null(),
+            Some(MAX_SIGNATURE_DOWNLOAD),
+            MAX_SIGNATURE_DOWNLOAD,
+            None,
+            std::ptr::null_mut(),
+            &mut staged_signature,
+        );
 
         if sig_dl != ESP_OK {
             esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature download failed - aborting install\0".as_ptr());
-            let _ = std::fs::remove_file(&dest_path);
-            return ESP_FAIL;
+            return sig_dl;
         }
 
-        let sig_ret = signing_verify_file(dest_cstr.as_ptr());
+        let staged_cstr = match std::ffi::CString::new(staged_payload.path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return ESP_FAIL,
+        };
+        let sig_ret = signing_verify_file(staged_cstr.as_ptr());
         if sig_ret != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature verification failed - deleting\0".as_ptr());
-            let _ = std::fs::remove_file(&dest_path);
-            let _ = std::fs::remove_file(format!("{}.sig", dest_path));
+            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Signature verification failed\0".as_ptr());
             return ESP_ERR_INVALID_CRC;
         }
         esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Signature verified OK\0".as_ptr());
+
+        if atomic_replace_pair(
+            &staged_payload,
+            destination,
+            &staged_signature,
+            Path::new(&sig_path),
+        ).is_err() {
+            return ESP_FAIL;
+        }
+    } else if atomic_replace(&staged_payload, destination).is_err() {
+        return ESP_FAIL;
     }
 
     let name_str = CStr::from_ptr(e.name.as_ptr() as *const c_char)
@@ -1120,7 +1482,7 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
         if let Some(v) = json_str_extract(obj, "updated")     { copy_str_to_buf(&v, &mut entry.updated_date); }
 
         if let Some(sz) = json_int_extract(obj, "size_bytes") {
-            if sz > 0 { entry.size_bytes = sz as u32; }
+            if sz > 0 && sz <= u32::MAX as i64 { entry.size_bytes = sz as u32; }
         }
         if let Some(f) = json_float_extract(obj, "rating") {
             entry.rating_stars = (f * 100.0 + 0.5) as u16;
@@ -1359,22 +1721,23 @@ pub unsafe extern "C" fn appstore_submit_rating(
         Err(_) => return ESP_FAIL,
     };
 
-    let config = EspHttpClientConfig::new(endpoint_cstr.as_ptr(), 10000);
-    let client = esp_http_client_init(&config);
+    let client = thistle_appstore_http_init(
+        endpoint_cstr.as_ptr(), 10000, None, std::ptr::null_mut());
     if client.is_null() {
         return ESP_FAIL;
     }
 
-    let open_rc = esp_http_client_open(client, body.len() as i32);
+    let open_rc = thistle_appstore_http_open(client, body.len() as i32);
     if open_rc != ESP_OK {
-        esp_http_client_cleanup(client);
+        thistle_appstore_http_cleanup(client);
         return ESP_FAIL;
     }
 
     // Write the POST body
-    let written = esp_http_client_read(client, body.as_ptr() as *mut c_char, body.len() as c_int);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    let written = thistle_appstore_http_read(
+        client, body.as_ptr() as *mut u8, body.len() as c_int);
+    thistle_appstore_http_close(client);
+    thistle_appstore_http_cleanup(client);
 
     if written < 0 {
         return ESP_FAIL;
@@ -1433,21 +1796,22 @@ pub unsafe extern "C" fn appstore_report_download(
         Err(_) => return ESP_FAIL,
     };
 
-    let config = EspHttpClientConfig::new(endpoint_cstr.as_ptr(), 10000);
-    let client = esp_http_client_init(&config);
+    let client = thistle_appstore_http_init(
+        endpoint_cstr.as_ptr(), 10000, None, std::ptr::null_mut());
     if client.is_null() {
         return ESP_FAIL;
     }
 
-    let open_rc = esp_http_client_open(client, body.len() as i32);
+    let open_rc = thistle_appstore_http_open(client, body.len() as i32);
     if open_rc != ESP_OK {
-        esp_http_client_cleanup(client);
+        thistle_appstore_http_cleanup(client);
         return ESP_FAIL;
     }
 
-    let written = esp_http_client_read(client, body.as_ptr() as *mut c_char, body.len() as c_int);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    let written = thistle_appstore_http_read(
+        client, body.as_ptr() as *mut u8, body.len() as c_int);
+    thistle_appstore_http_close(client);
+    thistle_appstore_http_cleanup(client);
 
     if written < 0 {
         return ESP_FAIL;
@@ -1471,7 +1835,7 @@ pub unsafe extern "C" fn appstore_report_download(
 // Tests
 //
 // appstore_fetch_catalog(), appstore_download_file(), and
-// appstore_install_entry() all call esp_http_client_init (or esp_log_write)
+// appstore_install_entry() all call the device HTTP shim (or esp_log_write)
 // and are not safe on aarch64-apple-darwin. Test builds use guard-only stubs.
 //
 // The following are pure Rust and tested here:
@@ -1485,6 +1849,271 @@ pub unsafe extern "C" fn appstore_report_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
+
+    fn transaction_test_dir(label: &str) -> PathBuf {
+        let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "thistle-appstore-{}-{}-{}",
+            label,
+            std::process::id(),
+            sequence,
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn assert_no_transaction_debris(dir: &Path) {
+        let names: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".thistle-tmp-") || name.contains(".thistle-backup-"))
+            .collect();
+        assert!(names.is_empty(), "transaction debris remains: {:?}", names);
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_non_2xx_status() {
+        assert_eq!(
+            StreamValidator::new(404, 4, Some(4), 8).err(),
+            Some(StreamValidationError::HttpStatus),
+        );
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_negative_read() {
+        let mut validator = StreamValidator::new(200, 4, Some(4), 8).unwrap();
+        assert_eq!(validator.observe_read(-1), Err(StreamValidationError::Read));
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_midstream_disconnect() {
+        let mut validator = StreamValidator::new(200, 8, Some(8), 16).unwrap();
+        assert_eq!(validator.observe_read(4), Ok(true));
+        assert_eq!(validator.observe_read(0), Err(StreamValidationError::SizeMismatch));
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_wrong_or_absent_length() {
+        assert_eq!(
+            StreamValidator::new(200, 7, Some(8), 16).err(),
+            Some(StreamValidationError::SizeMismatch),
+        );
+        assert_eq!(
+            StreamValidator::new(200, -1, Some(8), 16).err(),
+            Some(StreamValidationError::MissingLength),
+        );
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_oversized_and_chunked_limit_crossing() {
+        assert_eq!(
+            StreamValidator::new(200, 17, None, 16).err(),
+            Some(StreamValidationError::Oversized),
+        );
+        let mut chunked = StreamValidator {
+            content_length: u64::MAX,
+            expected_size: None,
+            max_size: 16,
+            received: 12,
+        };
+        assert_eq!(chunked.observe_read(5), Err(StreamValidationError::Oversized));
+    }
+
+    #[test]
+    fn test_install_hash_fixture_rejects_missing_and_malformed_hashes() {
+        assert!(!valid_sha256_hex(""));
+        assert!(!valid_sha256_hex(&"a".repeat(63)));
+        assert!(!valid_sha256_hex(&format!("{}g", "a".repeat(63))));
+        assert!(valid_sha256_hex(&"A5".repeat(32)));
+    }
+
+    #[test]
+    fn test_stream_fixture_rejects_counter_overflow() {
+        let mut validator = StreamValidator {
+            content_length: u64::MAX,
+            expected_size: None,
+            max_size: u64::MAX,
+            received: u64::MAX,
+        };
+        assert_eq!(
+            validator.observe_read(1),
+            Err(StreamValidationError::CounterOverflow),
+        );
+    }
+
+    #[test]
+    fn test_stream_fixture_accepts_exact_complete_response() {
+        let mut validator = StreamValidator::new(206, 8, Some(8), 16).unwrap();
+        assert_eq!(validator.observe_read(3), Ok(true));
+        assert_eq!(validator.observe_read(5), Ok(true));
+        assert_eq!(validator.observe_read(0), Ok(false));
+    }
+
+    #[test]
+    fn test_precommit_failures_preserve_installed_artifact_and_clean_temp() {
+        for stage in [
+            "client_init",
+            "open",
+            "http_status",
+            "content_length",
+            "read",
+            "write",
+            "declared_size",
+            "oversized",
+            "counter_overflow",
+            "hash",
+            "signature",
+        ] {
+            let dir = transaction_test_dir(stage);
+            let destination = dir.join("demo.app.elf");
+            std::fs::write(&destination, b"installed-v1").unwrap();
+
+            {
+                let mut staged = StagedFile::create_for(&destination).unwrap();
+                staged.writer().write_all(b"incomplete-v2").unwrap();
+                if matches!(stage, "hash" | "signature") {
+                    staged.sync_and_close().unwrap();
+                }
+                // Each injected failure returns before commit; Drop owns cleanup.
+            }
+
+            assert_eq!(std::fs::read(&destination).unwrap(), b"installed-v1", "stage: {}", stage);
+            assert_no_transaction_debris(&dir);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_atomic_replace_successfully_swaps_complete_file() {
+        let dir = transaction_test_dir("single-success");
+        let destination = dir.join("demo.app.elf");
+        std::fs::write(&destination, b"installed-v1").unwrap();
+        {
+            let mut staged = StagedFile::create_for(&destination).unwrap();
+            staged.writer().write_all(b"verified-v2").unwrap();
+            staged.sync_and_close().unwrap();
+            atomic_replace(&staged, &destination).unwrap();
+        }
+        assert_eq!(std::fs::read(&destination).unwrap(), b"verified-v2");
+        assert_no_transaction_debris(&dir);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_single_rename_failures_restore_installed_artifact() {
+        for fail_at in 1..=2 {
+            let dir = transaction_test_dir(&format!("single-rename-{}", fail_at));
+            let destination = dir.join("demo.app.elf");
+            std::fs::write(&destination, b"installed-v1").unwrap();
+            {
+                let mut staged = StagedFile::create_for(&destination).unwrap();
+                staged.writer().write_all(b"verified-v2").unwrap();
+                staged.sync_and_close().unwrap();
+                let mut call = 0;
+                let result = atomic_replace_with(&staged, &destination, |from, to| {
+                    call += 1;
+                    if call == fail_at {
+                        Err(io::Error::new(io::ErrorKind::Other, "injected rename failure"))
+                    } else {
+                        std::fs::rename(from, to)
+                    }
+                });
+                assert!(result.is_err());
+            }
+            assert_eq!(std::fs::read(&destination).unwrap(), b"installed-v1");
+            assert_no_transaction_debris(&dir);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_pair_rename_failures_restore_old_payload_and_signature() {
+        for fail_at in 1..=4 {
+            let dir = transaction_test_dir(&format!("pair-rename-{}", fail_at));
+            let destination = dir.join("demo.app.elf");
+            let signature_destination = dir.join("demo.app.elf.sig");
+            std::fs::write(&destination, b"installed-v1").unwrap();
+            std::fs::write(&signature_destination, b"signature-v1").unwrap();
+
+            {
+                let mut payload = StagedFile::create_for(&destination).unwrap();
+                payload.writer().write_all(b"verified-v2").unwrap();
+                payload.sync_and_close().unwrap();
+                let mut signature = StagedFile::create_exact(PathBuf::from(format!(
+                    "{}.sig",
+                    payload.path.display(),
+                )))
+                .unwrap();
+                signature.writer().write_all(b"signature-v2").unwrap();
+                signature.sync_and_close().unwrap();
+
+                let mut call = 0;
+                let result = atomic_replace_pair_with(
+                    &payload,
+                    &destination,
+                    &signature,
+                    &signature_destination,
+                    |from, to| {
+                        call += 1;
+                        if call == fail_at {
+                            Err(io::Error::new(io::ErrorKind::Other, "injected rename failure"))
+                        } else {
+                            std::fs::rename(from, to)
+                        }
+                    },
+                );
+                assert!(result.is_err());
+            }
+
+            assert_eq!(std::fs::read(&destination).unwrap(), b"installed-v1", "rename {}", fail_at);
+            assert_eq!(std::fs::read(&signature_destination).unwrap(), b"signature-v1", "rename {}", fail_at);
+            assert_no_transaction_debris(&dir);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_atomic_pair_replacement_commits_payload_and_signature() {
+        let dir = transaction_test_dir("pair-success");
+        let destination = dir.join("demo.app.elf");
+        let signature_destination = dir.join("demo.app.elf.sig");
+        std::fs::write(&destination, b"installed-v1").unwrap();
+        std::fs::write(&signature_destination, b"signature-v1").unwrap();
+
+        {
+            let mut payload = StagedFile::create_for(&destination).unwrap();
+            payload.writer().write_all(b"verified-v2").unwrap();
+            payload.sync_and_close().unwrap();
+            let mut signature = StagedFile::create_exact(PathBuf::from(format!(
+                "{}.sig",
+                payload.path.display(),
+            )))
+            .unwrap();
+            signature.writer().write_all(b"signature-v2").unwrap();
+            signature.sync_and_close().unwrap();
+            atomic_replace_pair(&payload, &destination, &signature, &signature_destination).unwrap();
+        }
+
+        assert_eq!(std::fs::read(&destination).unwrap(), b"verified-v2");
+        assert_eq!(std::fs::read(&signature_destination).unwrap(), b"signature-v2");
+        assert_no_transaction_debris(&dir);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_http_response_fixture_data_and_overflow_flow() {
+        let mut response = HttpBuf::new(8);
+
+        assert!(http_buf_append(&mut response, b"abc"));
+        assert!(http_buf_append(&mut response, b"def"));
+        assert_eq!(response.data, b"abcdef");
+        assert!(!response.overflow);
+
+        assert!(!http_buf_append(&mut response, b"gh"));
+        assert_eq!(response.data, b"abcdef");
+        assert!(response.overflow);
+    }
     use std::ffi::CStr;
 
     // -----------------------------------------------------------------------

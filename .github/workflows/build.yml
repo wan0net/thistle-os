@@ -12,10 +12,15 @@ permissions:
 
 jobs:
   firmware-build:
-    name: Build Firmware (ESP-IDF)
+    name: Build Firmware (${{ matrix.arch }})
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep this in sync with the architectures advertised by board profiles.
+        arch: [esp32, esp32s3, esp32c3]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,7 +67,7 @@ jobs:
             build
             managed_components
             components/kernel_rs/target
-          key: espidf-v5.5-rust-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'components/kernel_rs/src/**', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
+          key: espidf-v5.5-rust-${{ matrix.arch }}-${{ hashFiles('components/**/*.c', 'components/**/*.h', 'components/kernel_rs/src/**', 'main/**', 'sdkconfig.defaults', 'partitions.csv') }}
           restore-keys: |
             espidf-v5.5-rust-
 
@@ -71,7 +76,9 @@ jobs:
         run: |
           . $IDF_PATH/export.sh
           export PATH="$HOME/.cargo/bin:$PATH"
-          idf.py set-target esp32s3
+          # kernel_rs maps this IDF target to its canonical Rust target and
+          # chip feature (Xtensa for ESP32/S3, RISC-V for ESP32-C3).
+          idf.py set-target "${{ matrix.arch }}"
           idf.py build
 
       - name: Check firmware size
@@ -81,8 +88,19 @@ jobs:
             --partition-table partitions.csv \
             --firmware build/thistle_os.bin
 
+      - name: Detect signing key availability
+        id: signing-key
+        env:
+          SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Sign firmware
-        if: env.THISTLE_SIGNING_KEY != ''
+        if: steps.signing-key.outputs.available == 'true'
         env:
           THISTLE_SIGNING_KEY: ${{ secrets.THISTLE_SIGNING_KEY }}
         shell: bash
@@ -104,14 +122,43 @@ jobs:
           print(f'Signed: {len(data)} bytes, sig: {sig.hex()[:32]}...')
           "
 
+      - name: Package architecture-specific firmware
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "release-firmware/$TARGET_ARCH"
+          cp build/thistle_os.bin "release-firmware/$TARGET_ARCH/thistle_os.bin"
+          for extension in sig pub; do
+            if [ -f "build/thistle_os.bin.$extension" ]; then
+              cp "build/thistle_os.bin.$extension" "release-firmware/$TARGET_ARCH/thistle_os.bin.$extension"
+            fi
+          done
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
-          name: thistle-os-firmware
-          path: |
-            build/thistle_os.bin
-            build/thistle_os.bin.sig
-            build/thistle_os.bin.pub
+          name: thistle-os-firmware-${{ matrix.arch }}
+          path: release-firmware/${{ matrix.arch }}/
+
+  validate-firmware-coverage:
+    name: Validate advertised firmware coverage
+    needs: firmware-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: thistle-os-firmware-*
+          path: firmware-artifacts/
+          merge-multiple: false
+
+      - name: Require firmware for every advertised board architecture
+        run: |
+          python3 tools/validate_arch_coverage.py \
+            --board-dir sdcard_layout/config/boards \
+            --firmware-dir firmware-artifacts
 
   rust-tests:
     name: Rust Kernel Tests
