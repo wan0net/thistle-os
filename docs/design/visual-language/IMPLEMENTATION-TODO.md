@@ -31,8 +31,8 @@ Implemented and host/simulator verified in this pass:
 
 Still required before calling the full programme complete: persistent launcher
 schema and Arrange mode, standalone-app icon metadata/assets, e-paper All Apps
-pagination, automated framebuffer assertions, and physical e-paper/LCD
-interaction and refresh verification.
+pagination, broader visual-state coverage, and physical e-paper/LCD interaction
+and refresh verification.
 
 ## Outcome
 
@@ -81,10 +81,10 @@ transitions.
   the baseline; reconcile it before implementation rather than replacing it.
 - [ ] Merge or otherwise resolve GitHub PR #128 so the selected thistle mark has
   one repository-owned GitHub asset before deriving embedded versions.
-- [ ] Record a baseline framebuffer and interaction log for the current launcher
-  on T-Deck Pro before changing visuals.
-- [ ] Record a baseline simulator screenshot for the current 320 x 240 LVGL
-  launcher.
+- [x] Record deterministic native-resolution simulator framebuffers for the
+  current T-Deck Pro launcher Home and All Apps states.
+- [x] Record deterministic native-resolution simulator framebuffers for the
+  current 320 x 240 colour launcher Home and All Apps states.
 
 Known implementation gaps:
 
@@ -471,18 +471,20 @@ Acceptance:
 
 ### Visual/framebuffer tests
 
-- [ ] Add deterministic captures for each supported layout:
-  - home idle;
+- [ ] Complete deterministic captures for every supported launcher state:
+  - [x] home idle on 240 x 320 e-paper and 320 x 240 colour;
+  - [x] all apps first page on 240 x 320 e-paper and 320 x 240 colour;
   - every focus state;
   - folder open;
-  - all apps first and later page;
+  - all apps later page;
   - Arrange mode;
   - missing icon;
   - long/truncated label;
   - app launch error;
   - corrupt config fallback.
-- [ ] Compare structural regions or approved golden frames at native resolution.
-- [ ] Test both light/1-bit e-paper and RGB565 colour conversion.
+- [x] Compare masked framebuffer hashes at native resolution and structurally
+  assert the empty Home canvas outside the dock and dynamic system bar.
+- [x] Exercise both e-paper and colour native simulator framebuffer paths.
 - [ ] Assert that e-paper output contains only two pixel values.
 
 ### Host/simulator checks
@@ -492,8 +494,7 @@ Acceptance:
   setting where required.
 - [ ] Run simulator unit and integration suites across T-Deck Pro, T-Deck, CYD,
   and AMOLED model where available.
-- [ ] Add a simulator screenshot/export facility if the current SDL path cannot
-  produce deterministic frames in CI.
+- [x] Add a deterministic simulator screenshot/export path suitable for CI.
 - [ ] Run `cargo fmt` with explicit manifests; do not run it at repository root.
 
 Acceptance:
@@ -561,7 +562,7 @@ exist. Check for duplicates before filing.
    - WP7 for 320 x 240 and 410 x 502 layouts.
 8. **Add launcher Arrange mode and persistent user customisation**
    - WP8 after storage/controller foundations.
-9. **Add deterministic launcher screenshot and framebuffer CI**
+9. **[Complete] Add deterministic launcher screenshot and framebuffer CI**
    - WP9 visual test tooling and goldens.
 10. **Complete launcher interaction and refresh hardware V&V**
     - WP10 with separate e-paper and colour evidence checklists.

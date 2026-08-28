@@ -267,6 +267,18 @@ jobs:
         working-directory: simulator
         run: bash tests/run_integration_tests.sh
 
+      - name: Run launcher framebuffer regression tests
+        working-directory: simulator
+        run: python3 tests/test_launcher_visuals.py --sim build/thistle_sim
+
+      - name: Upload launcher framebuffer failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-framebuffers
+          path: simulator/build/launcher-visuals/*.ppm
+          if-no-files-found: ignore
+
   rust-kernel-tests:
     name: Rust Kernel Tests
     runs-on: ubuntu-latest
