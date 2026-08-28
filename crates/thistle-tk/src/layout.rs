@@ -80,20 +80,33 @@ fn layout_node(tree: &mut UiTree, id: WidgetId, available: Rect) {
     }
 
     // 2. If this is a container, lay out its children.
-    let children: alloc::vec::Vec<WidgetId> = tree.children(id).to_vec();
-    if children.is_empty() {
+    let children: alloc::vec::Vec<WidgetId> = tree
+        .children(id)
+        .iter()
+        .copied()
+        .filter(|child| {
+            tree.get(*child)
+                .map(|widget| widget.common().visible && widget.common().absolute_pos.is_none())
+                .unwrap_or(false)
+        })
+        .collect();
+    let overlays: alloc::vec::Vec<WidgetId> = tree
+        .children(id)
+        .iter()
+        .copied()
+        .filter(|child| {
+            tree.get(*child)
+                .map(|widget| widget.common().visible && widget.common().absolute_pos.is_some())
+                .unwrap_or(false)
+        })
+        .collect();
+    if children.is_empty() && overlays.is_empty() {
         return;
     }
 
     // Read container-specific layout props.
     let (direction, gap, align, cross_align, padding) = match tree.get(id).unwrap() {
-        Widget::Container(c) => (
-            c.direction,
-            c.gap,
-            c.align,
-            c.cross_align,
-            c.common.padding,
-        ),
+        Widget::Container(c) => (c.direction, c.gap, c.align, c.cross_align, c.common.padding),
         _ => {
             // Non-containers don't layout children — but if someone added
             // children anyway, just stack them at (0,0).
@@ -103,7 +116,31 @@ fn layout_node(tree: &mut UiTree, id: WidgetId, available: Rect) {
 
     let content = padded_rect(available.x, available.y, resolved_w, resolved_h, padding);
 
-    layout_children(tree, &children, content, direction, gap, align, cross_align);
+    if !children.is_empty() {
+        layout_children(tree, &children, content, direction, gap, align, cross_align);
+    }
+
+    // Explicitly positioned children render after normal-flow siblings, which
+    // makes them suitable for modal sheets and other overlays. Their stored
+    // position remains a parent-relative hint rather than being overwritten
+    // by the computed absolute screen coordinate.
+    for child in overlays {
+        let (offset, width_hint, height_hint) = {
+            let common = tree.get(child).unwrap().common();
+            (
+                common.absolute_pos.unwrap_or_default(),
+                common.width_hint,
+                common.height_hint,
+            )
+        };
+        let overlay_rect = Rect {
+            x: content.x + offset.x,
+            y: content.y + offset.y,
+            w: resolve_hint(width_hint, content.w),
+            h: resolve_hint(height_hint, content.h),
+        };
+        layout_node(tree, child, overlay_rect);
+    }
 }
 
 fn layout_children(
@@ -330,5 +367,77 @@ mod tests {
         assert_eq!(a.size.h, 20);
         assert_eq!(b.pos.y, 24); // 20 + 4 gap
         assert_eq!(b.size.h, 30);
+    }
+
+    #[test]
+    fn hidden_children_do_not_consume_layout_space() {
+        let mut tree = UiTree::new(Widget::Container(ContainerWidget {
+            direction: Direction::Column,
+            gap: 4,
+            ..Default::default()
+        }));
+
+        let hidden = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
+        let visible = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
+
+        tree.get_mut(hidden).unwrap().common_mut().height_hint = SizeHint::Flex(1.0);
+        tree.get_mut(hidden).unwrap().common_mut().visible = false;
+        tree.get_mut(visible).unwrap().common_mut().height_hint = SizeHint::Flex(1.0);
+
+        layout(
+            &mut tree,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 240,
+                h: 320,
+            },
+        );
+
+        let visible = tree.get(visible).unwrap().common();
+        assert_eq!(visible.pos.y, 0);
+        assert_eq!(visible.size.h, 320);
+    }
+
+    #[test]
+    fn absolutely_positioned_child_overlays_without_consuming_flow_space() {
+        let mut tree = UiTree::new(Widget::Container(ContainerWidget {
+            direction: Direction::Column,
+            ..Default::default()
+        }));
+        let content = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
+        let overlay = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
+
+        tree.get_mut(content).unwrap().common_mut().height_hint = SizeHint::Flex(1.0);
+        let overlay_common = tree.get_mut(overlay).unwrap().common_mut();
+        overlay_common.absolute_pos = Some(Pos { x: 12, y: 80 });
+        overlay_common.width_hint = SizeHint::Fixed(216);
+        overlay_common.height_hint = SizeHint::Fixed(184);
+
+        layout(
+            &mut tree,
+            Rect {
+                x: 0,
+                y: 24,
+                w: 240,
+                h: 296,
+            },
+        );
+
+        let content = tree.get(content).unwrap().common();
+        assert_eq!(content.pos, Pos { x: 0, y: 24 });
+        assert_eq!(content.size.h, 296);
+
+        let overlay = tree.get(overlay).unwrap().common();
+        assert_eq!(overlay.pos, Pos { x: 12, y: 104 });
+        assert_eq!(overlay.size, Size { w: 216, h: 184 });
     }
 }

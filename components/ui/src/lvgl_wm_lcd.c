@@ -11,6 +11,8 @@
 #include "thistle/display_server.h"
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
+#include "ui/theme.h"
+#include "hal/sdcard_path.h"
 #include "esp_log.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -62,6 +64,14 @@ static esp_err_t lvgl_lcd_wm_init(void)
         return ret;
     }
 
+    /* Colour displays intentionally use the richer Night Instrument palette;
+     * the e-paper WM keeps the strict monochrome default. A missing SD theme
+     * is non-fatal so Recovery and first boot remain usable. */
+    ret = theme_load(THISTLE_SDCARD "/themes/night-instrument.json");
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Night Instrument theme unavailable; using fallback");
+    }
+
     /* Show splash screen on LCD — cheap refresh, no ghosting */
     ui_manager_show_splash(2000);
 
@@ -71,7 +81,12 @@ static esp_err_t lvgl_lcd_wm_init(void)
 
 static void lvgl_lcd_wm_deinit(void) {}
 static void lvgl_lcd_wm_render(void) {}
-static void lvgl_lcd_wm_on_theme_changed(const char *p) { (void)p; }
+static void lvgl_lcd_wm_on_theme_changed(const char *p)
+{
+    if (p != NULL && theme_load(p) != ESP_OK) {
+        ESP_LOGW(TAG, "Could not load requested theme: %s", p);
+    }
+}
 static void lvgl_lcd_wm_on_app_launched(const char *id, surface_id_t s) { (void)id; (void)s; }
 static void lvgl_lcd_wm_on_app_stopped(const char *id) { (void)id; }
 static void lvgl_lcd_wm_on_app_switched(const char *id) { (void)id; }

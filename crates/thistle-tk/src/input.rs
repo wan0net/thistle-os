@@ -21,13 +21,28 @@ static LAST_TOUCH_Y: AtomicI32 = AtomicI32::new(-1);
 /// An input event from the hardware layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputEvent {
-    TouchDown { x: i32, y: i32 },
-    TouchUp { x: i32, y: i32 },
-    TouchMove { x: i32, y: i32 },
-    KeyDown { code: u32 },
-    KeyUp { code: u32 },
+    TouchDown {
+        x: i32,
+        y: i32,
+    },
+    TouchUp {
+        x: i32,
+        y: i32,
+    },
+    TouchMove {
+        x: i32,
+        y: i32,
+    },
+    KeyDown {
+        code: u32,
+    },
+    KeyUp {
+        code: u32,
+    },
     /// Synthetic character input (from a keyboard driver or IME).
-    CharInput { ch: char },
+    CharInput {
+        ch: char,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -38,12 +53,18 @@ pub enum InputEvent {
 pub const KEY_BACKSPACE: u32 = 0x08;
 /// Enter / return.
 pub const KEY_ENTER: u32 = 0x0D;
+/// Escape / system back.
+pub const KEY_ESCAPE: u32 = 0x1B;
 /// Tab.
 pub const KEY_TAB: u32 = 0x09;
 /// Left arrow.
 pub const KEY_LEFT: u32 = 0x25;
+/// Up arrow.
+pub const KEY_UP: u32 = 0x26;
 /// Right arrow.
 pub const KEY_RIGHT: u32 = 0x27;
+/// Down arrow.
+pub const KEY_DOWN: u32 = 0x28;
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -278,10 +299,65 @@ fn dispatch_key(tree: &mut UiTree, code: u32) -> bool {
 
     match code {
         KEY_BACKSPACE => handle_backspace(tree, focused),
-        KEY_LEFT => handle_cursor_move(tree, focused, -1),
-        KEY_RIGHT => handle_cursor_move(tree, focused, 1),
+        KEY_LEFT => move_or_edit(tree, focused, -1, 0),
+        KEY_UP => move_focus_spatial(tree, focused, 0, -1),
+        KEY_RIGHT => move_or_edit(tree, focused, 1, 0),
+        KEY_DOWN => move_focus_spatial(tree, focused, 0, 1),
         KEY_ENTER => handle_enter(tree, focused),
         _ => false,
+    }
+}
+
+fn move_or_edit(tree: &mut UiTree, focused: WidgetId, dx: i32, dy: i32) -> bool {
+    if matches!(tree.get(focused), Some(Widget::TextInput(_))) {
+        handle_cursor_move(tree, focused, dx)
+    } else {
+        move_focus_spatial(tree, focused, dx, dy)
+    }
+}
+
+/// Move to the nearest focusable widget in the requested geometric direction.
+/// This gives phone-grid launchers natural arrow-key navigation while keeping
+/// Tab's tree-order behaviour for forms.
+fn move_focus_spatial(tree: &mut UiTree, focused: WidgetId, dx: i32, dy: i32) -> bool {
+    let Some(current) = tree.get(focused).map(|w| w.common().clone()) else {
+        return false;
+    };
+    let cx = current.pos.x + current.size.w as i32 / 2;
+    let cy = current.pos.y + current.size.h as i32 / 2;
+    let mut best: Option<(i64, WidgetId)> = None;
+
+    for candidate in collect_focusable(tree) {
+        if candidate == focused {
+            continue;
+        }
+        let Some(c) = tree.get(candidate).map(|w| w.common()) else {
+            continue;
+        };
+        let tx = c.pos.x + c.size.w as i32 / 2;
+        let ty = c.pos.y + c.size.h as i32 / 2;
+        let vx = tx - cx;
+        let vy = ty - cy;
+        if (dx < 0 && vx >= 0) || (dx > 0 && vx <= 0) || (dy < 0 && vy >= 0) || (dy > 0 && vy <= 0)
+        {
+            continue;
+        }
+        let primary = if dx != 0 { vx.abs() } else { vy.abs() } as i64;
+        let secondary = if dx != 0 { vy.abs() } else { vx.abs() } as i64;
+        let score = primary * 1024 + secondary * secondary;
+        if best
+            .map(|(best_score, _)| score < best_score)
+            .unwrap_or(true)
+        {
+            best = Some((score, candidate));
+        }
+    }
+
+    if let Some((_, next)) = best {
+        tree.set_focus(Some(next));
+        true
+    } else {
+        false
     }
 }
 
@@ -493,10 +569,7 @@ fn close_open_dropdowns_if_outside(tree: &mut UiTree, x: i32, y: i32) {
             };
             let c = &dd.common;
             let total_h = c.size.h as i32 + (c.size.h as i32 * dd.options.len() as i32);
-            x >= c.pos.x
-                && x < c.pos.x + c.size.w as i32
-                && y >= c.pos.y
-                && y < c.pos.y + total_h
+            x >= c.pos.x && x < c.pos.x + c.size.w as i32 && y >= c.pos.y && y < c.pos.y + total_h
         };
         if !inside {
             if let Some(Widget::Dropdown(dd)) = tree.get_mut(id) {
@@ -542,13 +615,11 @@ fn handle_dropdown_tap(tree: &mut UiTree, id: WidgetId, _x: i32, y: i32) {
                 };
                 dd.selected = option_idx as u8;
                 dd.open = false;
-                dd.options
-                    .get(option_idx)
-                    .map(|s| {
-                        let mut buf = heapless::String::<32>::new();
-                        let _ = buf.push_str(s.as_str());
-                        buf
-                    })
+                dd.options.get(option_idx).map(|s| {
+                    let mut buf = heapless::String::<32>::new();
+                    let _ = buf.push_str(s.as_str());
+                    buf
+                })
             };
             tree.mark_dirty(id);
             if let Some(cb) = on_change {
@@ -674,10 +745,7 @@ mod tests {
         }
 
         let input_id = tree
-            .add_child(
-                tree.root(),
-                Widget::TextInput(TextInputWidget::default()),
-            )
+            .add_child(tree.root(), Widget::TextInput(TextInputWidget::default()))
             .unwrap();
         {
             let w = tree.get_mut(input_id).unwrap();
@@ -701,11 +769,62 @@ mod tests {
         }
 
         // Backspace.
-        dispatch_input(&mut tree, &InputEvent::KeyDown { code: KEY_BACKSPACE });
+        dispatch_input(
+            &mut tree,
+            &InputEvent::KeyDown {
+                code: KEY_BACKSPACE,
+            },
+        );
 
         if let Some(Widget::TextInput(input)) = tree.get(input_id) {
             assert_eq!(input.text.as_str(), "H");
             assert_eq!(input.cursor_pos, 1);
         }
+    }
+
+    #[test]
+    fn arrows_follow_spatial_button_grid_and_ignore_hidden_views() {
+        let mut tree = UiTree::new(Widget::Container(ContainerWidget::default()));
+        tree.get_mut(tree.root()).unwrap().common_mut().size = Size { w: 200, h: 200 };
+
+        let positions = [(10, 10), (110, 10), (10, 90), (110, 90)];
+        let mut buttons = alloc::vec::Vec::new();
+        for (x, y) in positions {
+            let id = tree
+                .add_child(tree.root(), Widget::Button(ButtonWidget::default()))
+                .unwrap();
+            let common = tree.get_mut(id).unwrap().common_mut();
+            common.pos = Pos { x, y };
+            common.size = Size { w: 70, h: 50 };
+            buttons.push(id);
+        }
+
+        let hidden_view = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
+        tree.get_mut(hidden_view).unwrap().common_mut().visible = false;
+        let hidden_button = tree
+            .add_child(hidden_view, Widget::Button(ButtonWidget::default()))
+            .unwrap();
+        let common = tree.get_mut(hidden_button).unwrap().common_mut();
+        common.pos = Pos { x: 85, y: 10 };
+        common.size = Size { w: 20, h: 20 };
+
+        tree.set_focus(Some(buttons[0]));
+        assert!(dispatch_input(
+            &mut tree,
+            &InputEvent::KeyDown { code: KEY_RIGHT }
+        ));
+        assert_eq!(tree.focus(), Some(buttons[1]));
+        assert!(dispatch_input(
+            &mut tree,
+            &InputEvent::KeyDown { code: KEY_DOWN }
+        ));
+        assert_eq!(tree.focus(), Some(buttons[3]));
+        assert!(dispatch_input(
+            &mut tree,
+            &InputEvent::KeyDown { code: KEY_LEFT }
+        ));
+        assert_eq!(tree.focus(), Some(buttons[2]));
     }
 }

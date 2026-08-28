@@ -17,6 +17,7 @@ static uint16_t     *s_fb       = NULL;  /* RGB565 framebuffer (LVGL output) */
 static uint32_t     *s_fb32     = NULL;  /* RGBA8888 for SDL texture (Emscripten) */
 static bool          s_initialized = false;
 static int           s_scale       = 2;
+static bool          s_epaper     = false;
 
 /* Scale factor: small displays get a bigger scale so the window is usable */
 static int calc_scale(int w, int h)
@@ -30,6 +31,11 @@ void sim_display_set_resolution(int width, int height)
 {
     s_width  = width;
     s_height = height;
+}
+
+void sim_display_set_epaper(bool enabled)
+{
+    s_epaper = enabled;
 }
 
 void sim_display_set_title(const char *device_name)
@@ -64,7 +70,8 @@ static esp_err_t sim_display_init(const void *config)
     if (sim_is_headless()) {
         /* Headless: framebuffer only, no SDL window */
         s_initialized = true;
-        printf("Simulator display initialized (%dx%d, headless, RGB565)\n", s_width, s_height);
+        printf("Simulator display initialized (%dx%d, headless, %s)\n",
+               s_width, s_height, s_epaper ? "1-bit" : "RGB565");
         return ESP_OK;
     }
 
@@ -168,14 +175,26 @@ static esp_err_t sim_display_flush(const hal_area_t *area, const uint8_t *data)
 {
     if (!s_initialized || !area || !data) return ESP_FAIL;
 
-    /* LVGL sends RGB565 pixels (2 bytes per pixel) */
-    const uint16_t *pixels = (const uint16_t *)data;
     uint16_t w = area->x2 - area->x1 + 1;
 
-    for (uint16_t y = area->y1; y <= area->y2 && y < (uint16_t)s_height; y++) {
-        for (uint16_t x = area->x1; x <= area->x2 && x < (uint16_t)s_width; x++) {
-            size_t src_idx = (size_t)(y - area->y1) * w + (x - area->x1);
-            s_fb[(size_t)y * (size_t)s_width + x] = pixels[src_idx];
+    if (s_epaper) {
+        for (uint16_t y = area->y1; y <= area->y2 && y < (uint16_t)s_height; y++) {
+            for (uint16_t x = area->x1; x <= area->x2 && x < (uint16_t)s_width; x++) {
+                size_t bit = (size_t)(y - area->y1) * w + (x - area->x1);
+                /* thistle-tk stores Off/white as a set bit and On/black as
+                 * a cleared bit, matching the physical packed framebuffer. */
+                bool black = (data[bit / 8] & (uint8_t)(0x80u >> (bit % 8))) == 0;
+                s_fb[(size_t)y * (size_t)s_width + x] = black ? 0x0000 : 0xFFFF;
+            }
+        }
+    } else {
+        /* LVGL sends RGB565 pixels (2 bytes per pixel). */
+        const uint16_t *pixels = (const uint16_t *)data;
+        for (uint16_t y = area->y1; y <= area->y2 && y < (uint16_t)s_height; y++) {
+            for (uint16_t x = area->x1; x <= area->x2 && x < (uint16_t)s_width; x++) {
+                size_t src_idx = (size_t)(y - area->y1) * w + (x - area->x1);
+                s_fb[(size_t)y * (size_t)s_width + x] = pixels[src_idx];
+            }
         }
     }
 
@@ -212,10 +231,45 @@ static uint16_t sim_display_get_height(void) { return (uint16_t)s_height; }
 static esp_err_t sim_display_brightness(uint8_t pct) { (void)pct; return ESP_OK; }
 static esp_err_t sim_display_sleep(bool enter) { (void)enter; return ESP_OK; }
 static esp_err_t sim_display_refresh_mode(hal_display_refresh_mode_t mode) { (void)mode; return ESP_OK; }
+static esp_err_t sim_display_refresh(void) { return ESP_OK; }
 
 int sim_display_get_scale(void)
 {
     return s_scale;
+}
+
+bool sim_display_save_ppm(const char *path)
+{
+    if (!s_initialized || !s_fb || !path || path[0] == '\0') return false;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "sim_display: cannot write screenshot %s\n", path);
+        return false;
+    }
+
+    if (fprintf(f, "P6\n%d %d\n255\n", s_width, s_height) < 0) {
+        fclose(f);
+        return false;
+    }
+    for (int y = 0; y < s_height; y++) {
+        for (int x = 0; x < s_width; x++) {
+            uint16_t pixel = s_fb[(size_t)y * (size_t)s_width + (size_t)x];
+            uint8_t rgb[3] = {
+                (uint8_t)(((pixel >> 11) & 0x1F) * 255 / 31),
+                (uint8_t)(((pixel >> 5) & 0x3F) * 255 / 63),
+                (uint8_t)((pixel & 0x1F) * 255 / 31),
+            };
+            if (fwrite(rgb, sizeof(rgb), 1, f) != 1) {
+                fclose(f);
+                return false;
+            }
+        }
+    }
+
+    bool ok = fclose(f) == 0;
+    if (ok) printf("Simulator screenshot: %s (%dx%d)\n", path, s_width, s_height);
+    return ok;
 }
 
 /* Mutable driver struct so width/height can be patched at init time */
@@ -238,5 +292,7 @@ const hal_display_driver_t *sim_display_get(void)
     /* Patch width/height from runtime config before returning */
     sim_display_driver.width  = (uint16_t)s_width;
     sim_display_driver.height = (uint16_t)s_height;
+    sim_display_driver.type = s_epaper ? HAL_DISPLAY_TYPE_EPAPER : HAL_DISPLAY_TYPE_LCD;
+    sim_display_driver.refresh = s_epaper ? sim_display_refresh : NULL;
     return &sim_display_driver;
 }

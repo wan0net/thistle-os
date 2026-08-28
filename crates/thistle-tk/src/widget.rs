@@ -63,6 +63,9 @@ pub struct CommonProps {
     pub id: WidgetId,
     /// Computed position — written by the layout engine.
     pub pos: Pos,
+    /// Explicit offset inside the parent. When present, this widget is
+    /// positioned as an overlay and does not consume flex layout space.
+    pub absolute_pos: Option<Pos>,
     /// Computed size — written by the layout engine.
     pub size: Size,
     /// Size hints consumed by the layout engine.
@@ -91,6 +94,7 @@ impl Default for CommonProps {
         Self {
             id: 0,
             pos: Pos::default(),
+            absolute_pos: None,
             size: Size::default(),
             width_hint: SizeHint::Auto,
             height_hint: SizeHint::Auto,
@@ -129,6 +133,29 @@ pub type OnPress = fn(WidgetId);
 
 /// Text-change callback: receives widget id and the new text.
 pub type OnChange = fn(WidgetId, &str);
+
+/// Small semantic glyphs rendered by the active toolkit.
+///
+/// These are deliberately named by meaning rather than by an app package. A
+/// launcher can map several compatible app IDs to one glyph while keeping the
+/// drawing native to monochrome and colour renderers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconKind {
+    Apps,
+    Folder,
+    Message,
+    Map,
+    Radio,
+    Note,
+    File,
+    Settings,
+    Terminal,
+    Assistant,
+    Store,
+    Reader,
+    Close,
+    Unknown,
+}
 
 // ---------------------------------------------------------------------------
 // Widget variants
@@ -193,6 +220,9 @@ pub struct ButtonWidget {
     pub bg_color: Color,
     pub text_color: Color,
     pub border_radius: u16,
+    /// Optional semantic icon. When present, the renderer uses a compact
+    /// phone-launcher tile layout with the glyph above the label.
+    pub icon: Option<IconKind>,
 }
 
 impl Default for ButtonWidget {
@@ -204,6 +234,7 @@ impl Default for ButtonWidget {
             bg_color: Color::Primary,
             text_color: Color::Background,
             border_radius: 4,
+            icon: None,
         }
     }
 }
@@ -294,7 +325,10 @@ pub struct ListItemWidget {
 impl Default for ListItemWidget {
     fn default() -> Self {
         Self {
-            common: CommonProps { height_hint: SizeHint::Fixed(40), ..CommonProps::default() },
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(40),
+                ..CommonProps::default()
+            },
             title: HString::new(),
             subtitle: HString::new(),
             badge: HString::new(),
@@ -325,7 +359,10 @@ pub struct ProgressBarWidget {
 impl Default for ProgressBarWidget {
     fn default() -> Self {
         Self {
-            common: CommonProps { height_hint: SizeHint::Fixed(8), ..CommonProps::default() },
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(8),
+                ..CommonProps::default()
+            },
             value: 0,
             max_value: 100,
             bar_color: Color::Primary,
@@ -351,7 +388,10 @@ pub struct DividerWidget {
 impl Default for DividerWidget {
     fn default() -> Self {
         Self {
-            common: CommonProps { height_hint: SizeHint::Fixed(1), ..CommonProps::default() },
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(1),
+                ..CommonProps::default()
+            },
             color: Color::Surface,
             thickness: 1,
             direction: Direction::Row, // horizontal
@@ -387,7 +427,10 @@ pub struct StatusBarWidget {
 impl Default for StatusBarWidget {
     fn default() -> Self {
         Self {
-            common: CommonProps { height_hint: SizeHint::Fixed(16), ..CommonProps::default() },
+            common: CommonProps {
+                height_hint: SizeHint::Fixed(16),
+                ..CommonProps::default()
+            },
             left_text: HString::new(),
             center_text: HString::new(),
             right_text: HString::new(),

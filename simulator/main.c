@@ -26,6 +26,7 @@ void sim_lvgl_unlock(void) { pthread_mutex_unlock(&s_lvgl_mutex); }
 #include "ui/manager.h"
 #include "ui/lvgl_wm.h"
 #include "sim_input.h"
+#include "sim_display.h"
 #include "sim_vfs.h"
 #include "sim_assert.h"
 #include "sim_scenario.h"
@@ -66,8 +67,18 @@ static bool s_headless = false;
 static int  s_timeout_ms = 0;
 static const char *s_assert_file = NULL;
 static const char *s_scenario_file = NULL;
+static const char *s_screenshot_file = NULL;
+static int s_tap_x = -1;
+static int s_tap_y = -1;
 
 bool sim_is_headless(void) { return s_headless; }
+
+static void sim_tk_input_cb(const hal_input_event_t *event, void *user_data)
+{
+    (void)user_data;
+    const display_server_wm_t *wm = thistle_tk_wm_get();
+    if (wm && wm->on_input) wm->on_input(event);
+}
 
 /* Defined in board_simulator.c */
 extern void sim_board_set_device(const char *device);
@@ -95,6 +106,20 @@ int main(int argc, char **argv)
             s_scenario_file = argv[++i];
         } else if (strncmp(argv[i], "--scenario=", 11) == 0) {
             s_scenario_file = argv[i] + 11;
+        } else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
+            s_screenshot_file = argv[++i];
+        } else if (strncmp(argv[i], "--screenshot=", 13) == 0) {
+            s_screenshot_file = argv[i] + 13;
+        } else if (strcmp(argv[i], "--tap") == 0 && i + 1 < argc) {
+            if (sscanf(argv[++i], "%d,%d", &s_tap_x, &s_tap_y) != 2) {
+                fprintf(stderr, "Invalid --tap value; expected X,Y\n");
+                return 2;
+            }
+        } else if (strncmp(argv[i], "--tap=", 6) == 0) {
+            if (sscanf(argv[i] + 6, "%d,%d", &s_tap_x, &s_tap_y) != 2) {
+                fprintf(stderr, "Invalid --tap value; expected X,Y\n");
+                return 2;
+            }
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: %s [OPTIONS]\n", argv[0]);
             printf("Options:\n");
@@ -103,6 +128,8 @@ int main(int argc, char **argv)
             printf("  --timeout MS        Exit after MS milliseconds (headless mode)\n");
             printf("  --assert FILE       Evaluate assertions from FILE on exit\n");
             printf("  --scenario FILE     Replay input scenario from FILE (future)\n");
+            printf("  --screenshot FILE   Save native-resolution framebuffer as PPM on exit\n");
+            printf("  --tap X,Y           Inject one native-coordinate tap after startup\n");
             printf("  -h, --help          Show this help\n");
             printf("Devices: tdeck-pro, tdeck, tdeck-plus, tdisplay, heltec-v3,\n");
             printf("         cardputer, t3-s3, rak3312\n");
@@ -137,10 +164,20 @@ int main(int argc, char **argv)
       printf("%s\n", _msg); sim_assert_check_line(_msg); }
     fflush(stdout);
 
-    err = display_server_register_wm(lvgl_lcd_wm_get());
+    extern bool sim_board_is_epaper(void);
+    bool use_tk_wm = sim_board_is_epaper();
+    err = display_server_register_wm(use_tk_wm ? thistle_tk_wm_get()
+                                               : lvgl_lcd_wm_get());
     { char _msg[64]; snprintf(_msg, sizeof(_msg), "display_server_register_wm: %d", err);
       printf("%s\n", _msg); sim_assert_check_line(_msg); }
     fflush(stdout);
+
+    if (use_tk_wm) {
+        const hal_input_driver_t *input = sim_input_get();
+        if (input && input->register_callback) {
+            input->register_callback(sim_tk_input_cb, NULL);
+        }
+    }
 
     /* Register built-in apps (always available) */
     launcher_app_register();
@@ -183,7 +220,8 @@ int main(int argc, char **argv)
         navigator_app_register();
     }
 #endif
-    app_manager_launch("com.thistle.launcher");
+    app_manager_launch(use_tk_wm ? "com.thistle.tk_launcher"
+                                 : "com.thistle.launcher");
     printf("Launcher launched\n");
     sim_assert_check_line("Launcher launched");
     fflush(stdout);
@@ -195,6 +233,7 @@ int main(int argc, char **argv)
     /* Main loop — drive LVGL tick + timer handler + SDL event pump */
     uint32_t last_tick = 0;
     uint32_t start_ms = 0;
+    int tap_phase = 0;
     while (1) {
         /* Update LVGL tick */
         struct timeval tv;
@@ -211,14 +250,34 @@ int main(int argc, char **argv)
         /* Pump SDL events → HAL input events */
         sim_input_poll_sdl();
 
-        /* Run LVGL timer handler (renders, processes animations) */
-        pthread_mutex_lock(&s_lvgl_mutex);
-        lv_timer_handler();
-        pthread_mutex_unlock(&s_lvgl_mutex);
+        if (use_tk_wm) {
+            display_server_tick();
+        } else {
+            /* Run LVGL timer handler (renders, processes animations) */
+            pthread_mutex_lock(&s_lvgl_mutex);
+            lv_timer_handler();
+            pthread_mutex_unlock(&s_lvgl_mutex);
+        }
+
+        uint32_t tap_down_ms = use_tk_wm ? 250u : 2250u;
+        uint32_t tap_up_ms = tap_down_ms + 100u;
+        if (tap_phase == 0 && s_tap_x >= 0 && s_tap_y >= 0 &&
+            (now_ms - start_ms) > tap_down_ms &&
+            sim_input_inject_touch((uint16_t)s_tap_x, (uint16_t)s_tap_y, true)) {
+            tap_phase = 1;
+        } else if (tap_phase == 1 && (now_ms - start_ms) > tap_up_ms &&
+                   sim_input_inject_touch((uint16_t)s_tap_x,
+                                          (uint16_t)s_tap_y, false)) {
+            tap_phase = 2;
+        }
 
         /* Headless timeout */
         if (s_headless && s_timeout_ms > 0 && (now_ms - start_ms) > (uint32_t)s_timeout_ms) {
             printf("Simulator timeout reached (%d ms)\n", s_timeout_ms);
+            if (s_screenshot_file && !sim_display_save_ppm(s_screenshot_file)) {
+                fprintf(stderr, "Failed to save simulator screenshot\n");
+                exit(1);
+            }
             int rc = s_assert_file ? sim_assert_evaluate() : 0;
             exit(rc);
         }

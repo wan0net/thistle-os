@@ -42,7 +42,7 @@ use thistle_tk::widget::{
 // Framebuffer wrapper implementing embedded-graphics DrawTarget
 // ---------------------------------------------------------------------------
 
-use embedded_graphics::pixelcolor::{BinaryColor, PixelColor, Rgb565, IntoStorage};
+use embedded_graphics::pixelcolor::{BinaryColor, IntoStorage, PixelColor, Rgb565};
 use embedded_graphics::prelude::*;
 
 /// A simple framebuffer that implements `DrawTarget`.
@@ -324,8 +324,13 @@ pub extern "C" fn tk_wm_init() -> i32 {
 
     #[cfg(target_os = "espidf")]
     unsafe {
-        esp_log_write(3, b"tk_wm\0".as_ptr(),
-            b"I (?) tk_wm: init %dx%d\0".as_ptr(), width, height);
+        esp_log_write(
+            3,
+            b"tk_wm\0".as_ptr(),
+            b"I (?) tk_wm: init %dx%d\0".as_ptr(),
+            width,
+            height,
+        );
     }
 
     let has_refresh = tk_wm_hal_has_refresh_rs();
@@ -344,7 +349,10 @@ pub extern "C" fn tk_wm_init() -> i32 {
 
     // Create root container filling the viewport
     let mut root = ContainerWidget::default();
-    root.common.size = Size { w: width, h: height };
+    root.common.size = Size {
+        w: width,
+        h: height,
+    };
     root.direction = Direction::Column;
     root.bg_color = Some(Color::Background);
     let mut tree = UiTree::new(Widget::Container(root));
@@ -428,7 +436,9 @@ pub extern "C" fn tk_wm_deinit() {
 pub extern "C" fn tk_wm_do_refresh() {
     if REFRESH_NEEDED.load(Ordering::Relaxed) {
         REFRESH_NEEDED.store(false, Ordering::Relaxed);
-        unsafe { tk_wm_hal_refresh_rs(); }
+        unsafe {
+            tk_wm_hal_refresh_rs();
+        }
     }
 }
 
@@ -596,10 +606,15 @@ pub unsafe extern "C" fn tk_wm_widget_create_text_input(
 
 #[no_mangle]
 pub unsafe extern "C" fn tk_wm_widget_create_list_item(
-    parent: u32, title: *const c_char, subtitle: *const c_char,
+    parent: u32,
+    title: *const c_char,
+    subtitle: *const c_char,
 ) -> u32 {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return 0,
+    };
     let mut li = ListItemWidget::default();
     if !title.is_null() {
         if let Ok(s) = std::ffi::CStr::from_ptr(title).to_str() {
@@ -611,8 +626,14 @@ pub unsafe extern "C" fn tk_wm_widget_create_list_item(
             let _ = li.subtitle.push_str(s);
         }
     }
-    match state.tree.add_child(parent as WidgetId, Widget::ListItem(li)) {
-        Some(id) => { state.dirty = true; id as u32 }
+    match state
+        .tree
+        .add_child(parent as WidgetId, Widget::ListItem(li))
+    {
+        Some(id) => {
+            state.dirty = true;
+            id as u32
+        }
         None => 0,
     }
 }
@@ -620,11 +641,20 @@ pub unsafe extern "C" fn tk_wm_widget_create_list_item(
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_create_progress_bar(parent: u32, value: i32) -> u32 {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return 0,
+    };
     let mut pb = ProgressBarWidget::default();
     pb.value = (value as u8).min(100);
-    match state.tree.add_child(parent as WidgetId, Widget::ProgressBar(pb)) {
-        Some(id) => { state.dirty = true; id as u32 }
+    match state
+        .tree
+        .add_child(parent as WidgetId, Widget::ProgressBar(pb))
+    {
+        Some(id) => {
+            state.dirty = true;
+            id as u32
+        }
         None => 0,
     }
 }
@@ -632,9 +662,18 @@ pub extern "C" fn tk_wm_widget_create_progress_bar(parent: u32, value: i32) -> u
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_create_divider(parent: u32) -> u32 {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
-    match state.tree.add_child(parent as WidgetId, Widget::Divider(DividerWidget::default())) {
-        Some(id) => { state.dirty = true; id as u32 }
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return 0,
+    };
+    match state.tree.add_child(
+        parent as WidgetId,
+        Widget::Divider(DividerWidget::default()),
+    ) {
+        Some(id) => {
+            state.dirty = true;
+            id as u32
+        }
         None => 0,
     }
 }
@@ -642,33 +681,57 @@ pub extern "C" fn tk_wm_widget_create_divider(parent: u32) -> u32 {
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_create_spacer(parent: u32) -> u32 {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return 0,
+    };
     let mut sp = SpacerWidget::default();
     sp.common.height_hint = SizeHint::Flex(1.0);
     match state.tree.add_child(parent as WidgetId, Widget::Spacer(sp)) {
-        Some(id) => { state.dirty = true; id as u32 }
+        Some(id) => {
+            state.dirty = true;
+            id as u32
+        }
         None => 0,
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tk_wm_widget_create_status_bar(
-    parent: u32, left: *const c_char, center: *const c_char, right: *const c_char,
+    parent: u32,
+    left: *const c_char,
+    center: *const c_char,
+    right: *const c_char,
 ) -> u32 {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return 0 };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return 0,
+    };
     let mut sb = StatusBarWidget::default();
     if !left.is_null() {
-        if let Ok(s) = std::ffi::CStr::from_ptr(left).to_str() { let _ = sb.left_text.push_str(s); }
+        if let Ok(s) = std::ffi::CStr::from_ptr(left).to_str() {
+            let _ = sb.left_text.push_str(s);
+        }
     }
     if !center.is_null() {
-        if let Ok(s) = std::ffi::CStr::from_ptr(center).to_str() { let _ = sb.center_text.push_str(s); }
+        if let Ok(s) = std::ffi::CStr::from_ptr(center).to_str() {
+            let _ = sb.center_text.push_str(s);
+        }
     }
     if !right.is_null() {
-        if let Ok(s) = std::ffi::CStr::from_ptr(right).to_str() { let _ = sb.right_text.push_str(s); }
+        if let Ok(s) = std::ffi::CStr::from_ptr(right).to_str() {
+            let _ = sb.right_text.push_str(s);
+        }
     }
-    match state.tree.add_child(parent as WidgetId, Widget::StatusBar(sb)) {
-        Some(id) => { state.dirty = true; id as u32 }
+    match state
+        .tree
+        .add_child(parent as WidgetId, Widget::StatusBar(sb))
+    {
+        Some(id) => {
+            state.dirty = true;
+            id as u32
+        }
         None => 0,
     }
 }
@@ -677,7 +740,10 @@ pub unsafe extern "C" fn tk_wm_widget_create_status_bar(
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_set_progress(widget: u32, value: i32) {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
     if let Some(Widget::ProgressBar(pb)) = state.tree.get_mut(widget as WidgetId) {
         pb.value = (value as u8).min(100);
         pb.common.dirty = true;
@@ -689,7 +755,10 @@ pub extern "C" fn tk_wm_widget_set_progress(widget: u32, value: i32) {
 #[no_mangle]
 pub unsafe extern "C" fn tk_wm_widget_set_badge(widget: u32, badge: *const c_char) {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
     if let Some(Widget::ListItem(li)) = state.tree.get_mut(widget as WidgetId) {
         li.badge.clear();
         if !badge.is_null() {
@@ -706,7 +775,10 @@ pub unsafe extern "C" fn tk_wm_widget_set_badge(widget: u32, badge: *const c_cha
 #[no_mangle]
 pub extern "C" fn tk_wm_widget_set_selected(widget: u32, selected: bool) {
     let mut lock = TK_WM.lock().unwrap();
-    let state = match lock.as_mut() { Some(s) => s, None => return };
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
     if let Some(Widget::ListItem(li)) = state.tree.get_mut(widget as WidgetId) {
         li.selected = selected;
         li.common.dirty = true;
@@ -807,8 +879,7 @@ pub extern "C" fn tk_wm_widget_set_pos(widget: u32, x: i32, y: i32) {
     let id = widget as WidgetId;
     if let Some(wgt) = state.tree.get_mut(id) {
         let c = wgt.common_mut();
-        c.pos.x = x;
-        c.pos.y = y;
+        c.absolute_pos = Some(thistle_tk::widget::Pos { x, y });
         mark_dirty(state, id);
     }
 }
@@ -837,6 +908,9 @@ pub extern "C" fn tk_wm_widget_set_bg_color(widget: u32, color: u32) {
     let id = widget as WidgetId;
     let tk_color = color_from_u32(color);
     if let Some(wgt) = state.tree.get_mut(id) {
+        // CommonProps is the renderer's canonical background source and is
+        // required for container corner radii to clip their fills correctly.
+        wgt.common_mut().bg_color = Some(tk_color);
         match wgt {
             Widget::Container(c) => c.bg_color = Some(tk_color),
             Widget::Button(b) => b.bg_color = tk_color,
@@ -989,8 +1063,17 @@ pub extern "C" fn tk_wm_widget_set_padding(widget: u32, t: i32, r: i32, b: i32, 
 }
 
 #[no_mangle]
-pub extern "C" fn tk_wm_widget_set_border_width(_widget: u32, _w: i32) {
-    // Border width not yet a separate property in thistle-tk
+pub extern "C" fn tk_wm_widget_set_border_width(widget: u32, w: i32) {
+    let mut lock = TK_WM.lock().unwrap();
+    let state = match lock.as_mut() {
+        Some(s) => s,
+        None => return,
+    };
+    let id = widget as WidgetId;
+    if let Some(wgt) = state.tree.get_mut(id) {
+        wgt.common_mut().border_width = w.max(0) as u16;
+        mark_dirty(state, id);
+    }
 }
 
 #[no_mangle]
@@ -1001,8 +1084,12 @@ pub extern "C" fn tk_wm_widget_set_radius(widget: u32, r: i32) {
         None => return,
     };
     let id = widget as WidgetId;
-    if let Some(Widget::Button(b)) = state.tree.get_mut(id) {
-        b.border_radius = r.max(0) as u16;
+    if let Some(wgt) = state.tree.get_mut(id) {
+        let radius = r.max(0) as u16;
+        wgt.common_mut().border_radius = radius;
+        if let Widget::Button(button) = wgt {
+            button.border_radius = radius;
+        }
         mark_dirty(state, id);
     }
 }
@@ -1017,6 +1104,59 @@ pub fn set_button_on_press(widget_id: u32, on_press: thistle_tk::widget::OnPress
         if let Some(Widget::Button(b)) = state.tree.get_mut(widget_id as WidgetId) {
             b.on_press = Some(on_press);
         }
+    }
+}
+
+/// Attach a semantic icon to a built-in launcher button.
+pub fn set_button_icon(widget_id: u32, icon: thistle_tk::widget::IconKind) {
+    let mut lock = TK_WM.lock().unwrap();
+    if let Some(state) = lock.as_mut() {
+        if let Some(Widget::Button(button)) = state.tree.get_mut(widget_id as WidgetId) {
+            button.icon = Some(icon);
+            mark_dirty(state, widget_id as WidgetId);
+        }
+    }
+}
+
+/// Focus the first interactive widget inside a visible launcher view.
+/// View changes otherwise leave focus attached to a hidden tile, allowing
+/// Enter to activate an item the user can no longer see.
+pub fn focus_first_descendant(root_id: u32) {
+    use thistle_tk::widget::Widget;
+
+    let mut lock = TK_WM.lock().unwrap();
+    let Some(state) = lock.as_mut() else {
+        return;
+    };
+    let mut found = None;
+    state.tree.walk(root_id as WidgetId, &mut |id, widget| {
+        if found.is_some() {
+            return false;
+        }
+        if !widget.common().visible {
+            return false;
+        }
+        if matches!(widget, Widget::Button(button) if button.icon == Some(thistle_tk::widget::IconKind::Close)) {
+            return true;
+        }
+        if matches!(
+            widget,
+            Widget::TextInput(_)
+                | Widget::Button(_)
+                | Widget::Switch(_)
+                | Widget::Checkbox(_)
+                | Widget::Slider(_)
+                | Widget::Dropdown(_)
+        ) {
+            found = Some(id);
+            return false;
+        }
+        true
+    });
+    state.tree.set_focus(found);
+    if let Some(id) = found {
+        state.tree.mark_dirty(id);
+        state.dirty = true;
     }
 }
 
@@ -1164,6 +1304,18 @@ pub unsafe extern "C" fn tk_wm_on_input(event: *const HalInputEvent) -> bool {
         return false;
     }
     let evt = &*event;
+
+    // Escape acts as the launcher's phone-style Back key. Handle this before
+    // locking the widget tree so the deferred view transition can safely
+    // update visibility through the WM API.
+    if evt.event_type == 0
+        && evt.data[0] as u32 == thistle_tk::input::KEY_ESCAPE
+        && crate::tk_launcher::handle_back_key()
+    {
+        crate::tk_launcher::process_pending_launch();
+        return true;
+    }
+
     let mut lock = TK_WM.lock().unwrap();
     let state = match lock.as_mut() {
         Some(s) => s,
@@ -1332,7 +1484,8 @@ pub extern "C" fn tk_wm_micro_prev() {
     if state.layout != LayoutMode::Micro || state.micro_app_count <= 0 {
         return;
     }
-    state.micro_current_app = (state.micro_current_app - 1 + state.micro_app_count) % state.micro_app_count;
+    state.micro_current_app =
+        (state.micro_current_app - 1 + state.micro_app_count) % state.micro_app_count;
     state.dirty = true;
 }
 

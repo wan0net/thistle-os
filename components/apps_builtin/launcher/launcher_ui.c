@@ -19,10 +19,8 @@ static const char *TAG = "launcher_ui";
 static int s_app_w = 240;
 static int s_app_h = 296;
 #define DOCK_H           50
-#define APPS_BTN_H       30
 #define ICON_SIZE        38
 #define CELL_SIZE        70
-#define DRAWER_COLS       4
 
 /* ------------------------------------------------------------------ */
 /* Favorites config                                                     */
@@ -45,28 +43,46 @@ static const char *s_dock_favorites[MAX_DOCK_FAVORITES] = {
 static lv_obj_t *s_root        = NULL;
 static lv_obj_t *s_app_drawer  = NULL;
 static lv_obj_t *s_drawer_grid = NULL;
+static lv_obj_t *s_folder      = NULL;
+static lv_obj_t *s_folder_grid = NULL;
 static bool      s_drawer_visible = false;
+static bool      s_folder_visible = false;
 
 /* ------------------------------------------------------------------ */
-/* App icon letter mapping                                             */
+/* Stable semantic icon mapping.  LVGL's built-in symbols keep the
+ * launcher legible without per-WM bitmap assets.                      */
 /* ------------------------------------------------------------------ */
 
-static const char *app_icon_letter(const char *app_id)
+static const char *app_icon_symbol(const char *app_id)
 {
-    if (strstr(app_id, "settings"))    return "S";
-    if (strstr(app_id, "filemgr"))     return "F";
-    if (strstr(app_id, "reader"))      return "R";
-    if (strstr(app_id, "messenger"))   return "M";
-    if (strstr(app_id, "navigator"))   return "N";
-    if (strstr(app_id, "notes"))       return "No";
-    if (strstr(app_id, "assistant"))   return "AI";
-    if (strstr(app_id, "appstore"))    return "St";
-    if (strstr(app_id, "wifiscanner")) return "Wi";
-    if (strstr(app_id, "flashlight"))  return "FL";
-    if (strstr(app_id, "weather"))     return "Wx";
-    if (strstr(app_id, "terminal"))    return "Tm";
-    if (strstr(app_id, "vault"))       return "Vt";
-    return "?";
+    if (strstr(app_id, "settings"))    return LV_SYMBOL_SETTINGS;
+    if (strstr(app_id, "filemgr"))     return LV_SYMBOL_DIRECTORY;
+    if (strstr(app_id, "reader"))      return LV_SYMBOL_FILE;
+    if (strstr(app_id, "messenger"))   return LV_SYMBOL_ENVELOPE;
+    if (strstr(app_id, "navigator"))   return LV_SYMBOL_GPS;
+    if (strstr(app_id, "notes"))       return LV_SYMBOL_EDIT;
+    if (strstr(app_id, "assistant"))   return LV_SYMBOL_EYE_OPEN;
+    if (strstr(app_id, "appstore"))    return LV_SYMBOL_DOWNLOAD;
+    if (strstr(app_id, "wifiscanner")) return LV_SYMBOL_WIFI;
+    if (strstr(app_id, "flashlight"))  return LV_SYMBOL_POWER;
+    if (strstr(app_id, "weather"))     return LV_SYMBOL_REFRESH;
+    if (strstr(app_id, "terminal"))    return LV_SYMBOL_KEYBOARD;
+    if (strstr(app_id, "vault"))       return LV_SYMBOL_WARNING;
+    if (strstr(app_id, "radio"))       return LV_SYMBOL_AUDIO;
+    return LV_SYMBOL_FILE;
+}
+
+static bool is_launcher(const char *app_id)
+{
+    return strcmp(app_id, "com.thistle.launcher") == 0 ||
+           strcmp(app_id, "com.thistle.tk_launcher") == 0 ||
+           strcmp(app_id, "com.thistle.tk-launcher") == 0;
+}
+
+static bool is_tool_app(const char *app_id)
+{
+    return strstr(app_id, "settings") || strstr(app_id, "terminal") ||
+           strstr(app_id, "wifiscanner") || strstr(app_id, "flashlight");
 }
 
 /* ------------------------------------------------------------------ */
@@ -74,6 +90,8 @@ static const char *app_icon_letter(const char *app_id)
 /* ------------------------------------------------------------------ */
 
 static void close_app_drawer(void);
+static void close_folder(void);
+static void apps_btn_clicked_cb(lv_event_t *e);
 
 static void app_cell_clicked_cb(lv_event_t *e)
 {
@@ -84,8 +102,9 @@ static void app_cell_clicked_cb(lv_event_t *e)
     }
 
     close_app_drawer();
+    close_folder();
 
-    ESP_LOGI(TAG, "Launching app from drawer: %s", app_id);
+    ESP_LOGI(TAG, "Launching app from launcher: %s", app_id);
     esp_err_t ret = app_manager_launch(app_id);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to launch %s: %s", app_id, esp_err_to_name(ret));
@@ -115,17 +134,30 @@ static void drawer_close_btn_cb(lv_event_t *e)
     close_app_drawer();
 }
 
+static void folder_close_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    close_folder();
+}
+
+static void folder_backdrop_clicked_cb(lv_event_t *e)
+{
+    if (lv_event_get_target(e) == s_folder) {
+        close_folder();
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* App grid cell                                                       */
 /* ------------------------------------------------------------------ */
 
-static lv_obj_t *create_app_cell(lv_obj_t *parent, const char *letter,
-                                  const char *name, const char *app_id)
+static lv_obj_t *create_icon_cell(lv_obj_t *parent, const char *symbol,
+                                  const char *name, int width, int height)
 {
     const theme_colors_t *c = theme_get_colors();
 
     lv_obj_t *cell = lv_obj_create(parent);
-    lv_obj_set_size(cell, CELL_SIZE, CELL_SIZE);
+    lv_obj_set_size(cell, width, height);
     lv_obj_set_style_bg_color(cell, c->surface, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(cell, c->text_secondary, LV_PART_MAIN);
@@ -143,9 +175,9 @@ static lv_obj_t *create_app_cell(lv_obj_t *parent, const char *letter,
     lv_obj_set_style_bg_color(cell, c->primary, LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, LV_STATE_PRESSED);
 
-    /* Icon letter */
+    /* Semantic icon */
     lv_obj_t *icon = lv_label_create(cell);
-    lv_label_set_text(icon, letter);
+    lv_label_set_text(icon, symbol);
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_22, LV_PART_MAIN);
     lv_obj_set_style_text_color(icon, c->text, LV_PART_MAIN);
 
@@ -155,14 +187,21 @@ static lv_obj_t *create_app_cell(lv_obj_t *parent, const char *letter,
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl, c->text_secondary, LV_PART_MAIN);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(lbl, CELL_SIZE - 6);
+    lv_obj_set_width(lbl, width - 6);
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
-    /* Click handler — store app_id as user data */
     lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+
+    return cell;
+}
+
+static lv_obj_t *create_app_cell(lv_obj_t *parent, const char *symbol,
+                                  const char *name, const char *app_id,
+                                  int width, int height)
+{
+    lv_obj_t *cell = create_icon_cell(parent, symbol, name, width, height);
     lv_obj_set_user_data(cell, (void *)app_id);
     lv_obj_add_event_cb(cell, app_cell_clicked_cb, LV_EVENT_CLICKED, NULL);
-
     return cell;
 }
 
@@ -197,8 +236,12 @@ static lv_obj_t *create_dock_icon(lv_obj_t *parent, const char *label,
     lv_obj_set_style_text_color(lbl, lv_color_white(), LV_STATE_PRESSED);
     lv_obj_center(lbl);
 
-    lv_obj_set_user_data(btn, (void *)app_id);
-    lv_obj_add_event_cb(btn, dock_icon_clicked_cb, LV_EVENT_CLICKED, NULL);
+    if (app_id) {
+        lv_obj_set_user_data(btn, (void *)app_id);
+        lv_obj_add_event_cb(btn, dock_icon_clicked_cb, LV_EVENT_CLICKED, NULL);
+    } else {
+        lv_obj_add_event_cb(btn, apps_btn_clicked_cb, LV_EVENT_CLICKED, NULL);
+    }
 
     return btn;
 }
@@ -216,8 +259,10 @@ static void populate_app_drawer(void)
         /* Skip the launcher itself */
         if (strcmp(apps[i]->id, "com.thistle.launcher") == 0) continue;
 
-        const char *letter = app_icon_letter(apps[i]->id);
-        create_app_cell(s_drawer_grid, letter, apps[i]->name, apps[i]->id);
+        if (is_launcher(apps[i]->id)) continue;
+
+        create_app_cell(s_drawer_grid, app_icon_symbol(apps[i]->id),
+                        apps[i]->name, apps[i]->id, CELL_SIZE, CELL_SIZE);
     }
 }
 
@@ -313,6 +358,103 @@ static void close_app_drawer(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Tools folder                                                        */
+/* ------------------------------------------------------------------ */
+
+static void open_folder(void)
+{
+    const theme_colors_t *colors = theme_get_colors();
+
+    if (!s_folder) {
+        int panel_w = s_app_w > 250 ? 230 : s_app_w - 24;
+        int panel_h = s_app_h > 250 ? 184 : s_app_h - 28;
+
+        s_folder = lv_obj_create(s_root);
+        lv_obj_set_size(s_folder, s_app_w, s_app_h);
+        lv_obj_set_pos(s_folder, 0, 0);
+        lv_obj_set_style_bg_color(s_folder, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(s_folder, LV_OPA_60, LV_PART_MAIN);
+        lv_obj_set_style_border_width(s_folder, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(s_folder, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(s_folder, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(s_folder, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_folder, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_folder, folder_backdrop_clicked_cb,
+                            LV_EVENT_CLICKED, NULL);
+
+        lv_obj_t *panel = lv_obj_create(s_folder);
+        lv_obj_set_size(panel, panel_w, panel_h);
+        lv_obj_center(panel);
+        lv_obj_set_style_bg_color(panel, colors->surface, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(panel, colors->primary, LV_PART_MAIN);
+        lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
+        lv_obj_set_style_radius(panel, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(panel, 6, LV_PART_MAIN);
+        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *title = lv_label_create(panel);
+        lv_label_set_text(title, "Tools");
+        lv_obj_set_style_text_color(title, colors->text, LV_PART_MAIN);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 4, 2);
+
+        lv_obj_t *close_btn = lv_button_create(panel);
+        lv_obj_set_size(close_btn, 24, 24);
+        lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, 0, -2);
+        lv_obj_set_style_bg_color(close_btn, colors->surface, LV_PART_MAIN);
+        lv_obj_set_style_border_width(close_btn, 0, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(close_btn, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(close_btn, 0, LV_PART_MAIN);
+        lv_obj_add_event_cb(close_btn, folder_close_btn_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *close_label = lv_label_create(close_btn);
+        lv_label_set_text(close_label, LV_SYMBOL_CLOSE);
+        lv_obj_set_style_text_color(close_label, colors->text, LV_PART_MAIN);
+        lv_obj_center(close_label);
+
+        s_folder_grid = lv_obj_create(panel);
+        lv_obj_set_pos(s_folder_grid, 0, 28);
+        lv_obj_set_size(s_folder_grid, panel_w - 12, panel_h - 40);
+        lv_obj_set_style_bg_opa(s_folder_grid, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(s_folder_grid, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(s_folder_grid, 2, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(s_folder_grid, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(s_folder_grid, 4, LV_PART_MAIN);
+        lv_obj_set_flex_flow(s_folder_grid, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_flex_align(s_folder_grid, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
+        const app_manifest_t *apps[20];
+        int count = app_manager_list_apps(apps, 20);
+        int cell_w = (panel_w - 28) / 3;
+        int cell_h = panel_h > 170 ? 66 : 58;
+        for (int i = 0; i < count; i++) {
+            if (!is_tool_app(apps[i]->id)) continue;
+            create_app_cell(s_folder_grid, app_icon_symbol(apps[i]->id),
+                            apps[i]->name, apps[i]->id, cell_w, cell_h);
+        }
+    }
+
+    close_app_drawer();
+    lv_obj_clear_flag(s_folder, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_folder);
+    s_folder_visible = true;
+}
+
+static void close_folder(void)
+{
+    if (s_folder) lv_obj_add_flag(s_folder, LV_OBJ_FLAG_HIDDEN);
+    s_folder_visible = false;
+}
+
+static void folder_btn_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s_folder_visible) close_folder();
+    else open_folder();
+}
+
+/* ------------------------------------------------------------------ */
 /* "Apps" button callback                                              */
 /* ------------------------------------------------------------------ */
 
@@ -322,20 +464,9 @@ static void apps_btn_clicked_cb(lv_event_t *e)
     if (s_drawer_visible) {
         close_app_drawer();
     } else {
+        close_folder();
         open_app_drawer();
     }
-}
-
-/* ------------------------------------------------------------------ */
-/* Clock update timer callback                                         */
-/* ------------------------------------------------------------------ */
-
-static void launcher_clock_update(lv_timer_t *timer)
-{
-    lv_obj_t *clock_label = (lv_obj_t *)lv_timer_get_user_data(timer);
-    char time_buf[8];
-    wifi_manager_get_time_str(time_buf, sizeof(time_buf));
-    lv_label_set_text(clock_label, time_buf);
 }
 
 /* ------------------------------------------------------------------ */
@@ -369,83 +500,10 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
     lv_obj_set_style_radius(s_root, 0, LV_PART_MAIN);
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* ------------------------------------------------------------------
-     * Wallpaper area — sits above the Apps button and dock.
-     * Height: s_app_h minus dock minus apps-button row.
-     * ------------------------------------------------------------------ */
-    int wallpaper_h = s_app_h - APPS_BTN_H - DOCK_H;
-
-    lv_obj_t *wallpaper = lv_obj_create(s_root);
-    lv_obj_set_pos(wallpaper, 0, 0);
-    lv_obj_set_size(wallpaper, s_app_w, wallpaper_h);
-    lv_obj_set_style_bg_color(wallpaper, colors->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(wallpaper, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(wallpaper, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(wallpaper, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(wallpaper, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(wallpaper, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Center column: clock + brand */
-    lv_obj_set_flex_flow(wallpaper, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(wallpaper,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(wallpaper, 6, LV_PART_MAIN);
-
-    /* Large clock */
-    lv_obj_t *lbl_clock = lv_label_create(wallpaper);
-    char time_init[8];
-    wifi_manager_get_time_str(time_init, sizeof(time_init));
-    lv_label_set_text(lbl_clock, time_init);
-    lv_obj_set_style_text_font(lbl_clock, &lv_font_montserrat_22, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_clock, colors->text, LV_PART_MAIN);
-
-    lv_timer_create(launcher_clock_update, 60000, lbl_clock); /* 60s — minimize e-paper refreshes */
-
-    /* Branding subtitle */
-    lv_obj_t *lbl_brand = lv_label_create(wallpaper);
-    lv_label_set_text(lbl_brand, "ThistleOS");
-    lv_obj_set_style_text_font(lbl_brand, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_brand, colors->text_secondary, LV_PART_MAIN);
-
-    /* ------------------------------------------------------------------
-     * "Apps" button — centered strip between wallpaper and dock
-     * ------------------------------------------------------------------ */
-    lv_obj_t *apps_row = lv_obj_create(s_root);
-    lv_obj_set_pos(apps_row, 0, wallpaper_h);
-    lv_obj_set_size(apps_row, s_app_w, APPS_BTN_H);
-    lv_obj_set_style_bg_color(apps_row, colors->bg, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(apps_row, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(apps_row, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(apps_row, 4, LV_PART_MAIN);
-    lv_obj_set_style_radius(apps_row, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(apps_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(apps_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(apps_row,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *apps_btn = lv_button_create(apps_row);
-    lv_obj_set_size(apps_btn, 90, 22);
-    lv_obj_set_style_bg_color(apps_btn, colors->surface, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(apps_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(apps_btn, colors->text_secondary, LV_PART_MAIN);
-    lv_obj_set_style_border_width(apps_btn, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(apps_btn, 4, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(apps_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(apps_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(apps_btn, colors->primary, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(apps_btn, LV_OPA_COVER, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(apps_btn, apps_btn_clicked_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *apps_lbl = lv_label_create(apps_btn);
-    lv_label_set_text(apps_lbl, "Apps ^");
-    lv_obj_set_style_text_font(apps_lbl, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(apps_lbl, colors->text, LV_PART_MAIN);
-    lv_obj_set_style_text_color(apps_lbl, lv_color_white(), LV_STATE_PRESSED);
-    lv_obj_center(apps_lbl);
+    /* Home deliberately has no app grid. The system status bar and persistent
+     * bottom dock are the only chrome; Apps in the dock opens the full grid. */
+    const app_manifest_t *apps[28];
+    int app_count = app_manager_list_apps(apps, 28);
 
     /* ------------------------------------------------------------------
      * Favorites dock — bottom DOCK_H px, 1px top border
@@ -469,18 +527,45 @@ esp_err_t launcher_ui_create(lv_obj_t *parent)
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(dock, 8, LV_PART_MAIN);
 
-    /* Populate dock from favorites list */
+    /* Populate the dock only with installed apps, preserving the stable
+     * preference order. */
+    const char *dock_ids[4] = {NULL, NULL, NULL, NULL};
+    int dock_count = 0;
     for (int i = 0; i < MAX_DOCK_FAVORITES; i++) {
         if (!s_dock_favorites[i]) break;
-        const char *id     = s_dock_favorites[i];
-        const char *letter = app_icon_letter(id);
-        create_dock_icon(dock, letter, id);
+        for (int j = 0; j < app_count && dock_count < 4; j++) {
+            if (strcmp(s_dock_favorites[i], apps[j]->id) == 0) {
+                dock_ids[dock_count++] = apps[j]->id;
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < app_count && dock_count < 4; i++) {
+        if (is_launcher(apps[i]->id) || is_tool_app(apps[i]->id)) continue;
+        bool duplicate = false;
+        for (int j = 0; j < dock_count; j++) {
+            if (strcmp(dock_ids[j], apps[i]->id) == 0) duplicate = true;
+        }
+        if (!duplicate) dock_ids[dock_count++] = apps[i]->id;
+    }
+    int apps_position = dock_count < 2 ? dock_count : 2;
+    for (int i = 0; i < dock_count; i++) {
+        if (i == apps_position) {
+            create_dock_icon(dock, LV_SYMBOL_LIST, NULL);
+        }
+        create_dock_icon(dock, app_icon_symbol(dock_ids[i]), dock_ids[i]);
+    }
+    if (apps_position == dock_count) {
+        create_dock_icon(dock, LV_SYMBOL_LIST, NULL);
     }
 
-    /* Drawer starts hidden; created lazily on first open */
+    /* Overlays start hidden and are created lazily on first open. */
     s_app_drawer    = NULL;
     s_drawer_grid   = NULL;
+    s_folder        = NULL;
+    s_folder_grid   = NULL;
     s_drawer_visible = false;
+    s_folder_visible = false;
 
     return ESP_OK;
 }
@@ -494,9 +579,12 @@ void launcher_ui_show(void)
 
 void launcher_ui_hide(void)
 {
-    /* If the drawer happens to be open, close it cleanly */
+    /* Close transient layers so returning always shows the home screen. */
     if (s_drawer_visible) {
         close_app_drawer();
+    }
+    if (s_folder_visible) {
+        close_folder();
     }
     if (s_root) {
         lv_obj_add_flag(s_root, LV_OBJ_FLAG_HIDDEN);

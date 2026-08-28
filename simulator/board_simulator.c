@@ -40,7 +40,7 @@ typedef struct {
 } sim_device_t;
 
 static const sim_device_t DEVICES[] = {
-    { "tdeck-pro",  "T-Deck Pro (Simulator)",     320, 240, true,  true,  true,  true,  true  },
+    { "tdeck-pro",  "T-Deck Pro (Simulator)",     240, 320, true,  true,  true,  true,  true  },
     { "tdeck",      "T-Deck (Simulator)",          320, 240, true,  true,  true,  true,  false },
     { "tdeck-plus", "T-Deck Plus (Simulator)",     320, 240, true,  true,  true,  true,  false },
     { "tdisplay",   "T-Display-S3 (Simulator)",    320, 170, false, true,  false, false, false },
@@ -66,6 +66,7 @@ esp_err_t board_init(void)
     printf("Simulator: %s (%dx%d)\n", dev->board_name, dev->width, dev->height);
 
     sim_display_set_resolution(dev->width, dev->height);
+    sim_display_set_epaper(dev->is_epaper);
     sim_display_set_title(dev->board_name);
 
     hal_set_board_name(dev->board_name);

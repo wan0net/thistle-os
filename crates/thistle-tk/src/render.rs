@@ -14,19 +14,19 @@
 use embedded_graphics::{
     pixelcolor::{BinaryColor, PixelColor, Rgb565},
     prelude::*,
-    primitives::{Circle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Line},
+    primitives::{Circle, Line, PrimitiveStyleBuilder, Rectangle, RoundedRectangle},
 };
 
 use u8g2_fonts::{
-    FontRenderer,
     fonts,
     types::{FontColor, HorizontalAlignment, VerticalPosition},
+    FontRenderer,
 };
 
 use crate::color::Color;
 use crate::theme::Theme;
 use crate::tree::UiTree;
-use crate::widget::{FontSize, Widget};
+use crate::widget::{FontSize, IconKind, Widget};
 
 // ---------------------------------------------------------------------------
 // ColorMapper trait + built-in mappers
@@ -158,7 +158,9 @@ fn draw_widget_bg_and_border<D, M>(
         // No bg_color but pressed — draw the pressed overlay.
         let (r, g, b) = theme.pressed;
         let pressed_color = mapper.map(Color::Rgb(r, g, b), theme);
-        let style = PrimitiveStyleBuilder::new().fill_color(pressed_color).build();
+        let style = PrimitiveStyleBuilder::new()
+            .fill_color(pressed_color)
+            .build();
         if c.border_radius > 0 {
             let rounded = RoundedRectangle::with_equal_corners(
                 rect,
@@ -385,7 +387,11 @@ fn draw_label<D, M>(
     }
 
     // Proportional word-wrap: measure words incrementally.
-    let max_lines = if label.max_lines == 0 { usize::MAX } else { label.max_lines as usize };
+    let max_lines = if label.max_lines == 0 {
+        usize::MAX
+    } else {
+        label.max_lines as usize
+    };
     let mut line_y = y + line_h as i32;
     let mut lines_drawn = 0usize;
 
@@ -471,13 +477,223 @@ fn draw_button<D, M>(
         let _ = rect.into_styled(fill_style).draw(target);
     }
 
-    // Center the text inside the button.
+    // Button fill is widget-specific and is drawn after the common style,
+    // so redraw its keyline here instead of letting the fill erase it. This
+    // is especially important on 1-bit launchers where the border defines
+    // the card even when surface and page backgrounds are both white.
+    if c.border_width > 0 {
+        let border_style = PrimitiveStyleBuilder::new()
+            .stroke_color(mapper.map(c.border_color, theme))
+            .stroke_width(c.border_width as u32)
+            .build();
+        if button.border_radius > 0 {
+            let rounded = RoundedRectangle::with_equal_corners(
+                rect,
+                embedded_graphics::geometry::Size::new(
+                    button.border_radius as u32,
+                    button.border_radius as u32,
+                ),
+            );
+            let _ = rounded.into_styled(border_style).draw(target);
+        } else {
+            let _ = rect.into_styled(border_style).draw(target);
+        }
+    }
+
+    // Center the text inside the button. Icon buttons use a compact launcher
+    // layout with a native vector glyph above a small label.
     let text_color = mapper.map(button.text_color, theme);
-    let text_w = text_width_u8g2(button.text.as_str(), &FontSize::Normal) as i32;
-    let text_h = font_height(&FontSize::Normal) as i32;
+    let font_size = if button.icon.is_some() {
+        FontSize::Small
+    } else {
+        FontSize::Normal
+    };
+    let text_w = text_width_u8g2(button.text.as_str(), &font_size) as i32;
+    let text_h = font_height(&font_size) as i32;
     let tx = c.pos.x + ((c.size.w as i32 - text_w) / 2).max(0);
-    let ty = (c.pos.y - scroll_y) + ((c.size.h as i32 - text_h) / 2) + text_h; // baseline
-    draw_text_u8g2(button.text.as_str(), tx, ty, &FontSize::Normal, text_color, target);
+    let dy = c.pos.y - scroll_y;
+    let ty = if let Some(icon) = button.icon {
+        let icon_size = c
+            .size
+            .w
+            .min(c.size.h.saturating_sub(text_h as u32 + 4))
+            .min(28);
+        let ix = c.pos.x + (c.size.w as i32 - icon_size as i32) / 2;
+        draw_icon(icon, ix, dy + 4, icon_size, text_color, target);
+        dy + c.size.h as i32 - 3
+    } else {
+        dy + ((c.size.h as i32 - text_h) / 2) + text_h
+    };
+    draw_text_u8g2(button.text.as_str(), tx, ty, &font_size, text_color, target);
+}
+
+/// Draw a semantic icon using embedded-graphics primitives only. Keeping these
+/// glyphs vector-like avoids a bitmap asset table in the immutable kernel and
+/// produces crisp 1-bit output on e-paper.
+fn draw_icon<D, C>(kind: IconKind, x: i32, y: i32, size: u32, color: C, target: &mut D)
+where
+    D: DrawTarget<Color = C>,
+    C: PixelColor,
+{
+    if size < 8 {
+        return;
+    }
+    let s = size as i32;
+    let stroke = if size >= 22 { 2 } else { 1 };
+    let line = PrimitiveStyleBuilder::new()
+        .stroke_color(color)
+        .stroke_width(stroke)
+        .build();
+    let fill = PrimitiveStyleBuilder::new().fill_color(color).build();
+
+    macro_rules! line {
+        ($ax:expr, $ay:expr, $bx:expr, $by:expr) => {{
+            let _ = Line::new(Point::new(x + $ax, y + $ay), Point::new(x + $bx, y + $by))
+                .into_styled(line)
+                .draw(target);
+        }};
+    }
+    macro_rules! rect {
+        ($ox:expr, $oy:expr, $w:expr, $h:expr) => {
+            Rectangle::new(
+                Point::new(x + $ox, y + $oy),
+                embedded_graphics::geometry::Size::new($w, $h),
+            )
+        };
+    }
+
+    match kind {
+        IconKind::Apps => {
+            let cell = (size / 4).max(3);
+            for row in 0..2 {
+                for col in 0..2 {
+                    let ox = 3 + col * (cell as i32 + 4);
+                    let oy = 3 + row * (cell as i32 + 4);
+                    let _ = rect!(ox, oy, cell, cell).into_styled(line).draw(target);
+                }
+            }
+        }
+        IconKind::Folder => {
+            line!(2, 7, s / 2 - 2, 7);
+            line!(s / 2 - 2, 7, s / 2 + 1, 10);
+            line!(s / 2 + 1, 10, s - 2, 10);
+            let _ = rect!(2, 10, size.saturating_sub(4), size.saturating_sub(13))
+                .into_styled(line)
+                .draw(target);
+        }
+        IconKind::Message => {
+            let _ = RoundedRectangle::with_equal_corners(
+                rect!(2, 3, size.saturating_sub(4), size.saturating_sub(9)),
+                embedded_graphics::geometry::Size::new(3, 3),
+            )
+            .into_styled(line)
+            .draw(target);
+            line!(s / 3, s - 6, s / 3 - 2, s - 2);
+            line!(s / 3 - 2, s - 2, s / 2 + 1, s - 6);
+        }
+        IconKind::Map => {
+            line!(2, 6, s / 3, 2);
+            line!(s / 3, 2, 2 * s / 3, 6);
+            line!(2 * s / 3, 6, s - 2, 2);
+            line!(s - 2, 2, s - 2, s - 5);
+            line!(s - 2, s - 5, 2 * s / 3, s - 1);
+            line!(2 * s / 3, s - 1, s / 3, s - 5);
+            line!(s / 3, s - 5, 2, s - 1);
+            line!(2, s - 1, 2, 6);
+            line!(s / 3, 2, s / 3, s - 5);
+            line!(2 * s / 3, 6, 2 * s / 3, s - 1);
+        }
+        IconKind::Radio => {
+            let _ = rect!(3, 8, size.saturating_sub(6), size.saturating_sub(11))
+                .into_styled(line)
+                .draw(target);
+            line!(s / 2, 8, s - 4, 2);
+            let _ = Circle::new(Point::new(x + 7, y + 13), (size / 4).max(4))
+                .into_styled(line)
+                .draw(target);
+            line!(s / 2 + 2, 14, s - 6, 14);
+            line!(s / 2 + 2, 18, s - 8, 18);
+        }
+        IconKind::Note | IconKind::Reader => {
+            let _ = rect!(4, 2, size.saturating_sub(8), size.saturating_sub(4))
+                .into_styled(line)
+                .draw(target);
+            for offset in [8, 13, 18] {
+                if offset < s - 3 {
+                    line!(8, offset, s - 8, offset);
+                }
+            }
+        }
+        IconKind::File => {
+            let _ = rect!(5, 2, size.saturating_sub(10), size.saturating_sub(4))
+                .into_styled(line)
+                .draw(target);
+            line!(s - 10, 2, s - 5, 7);
+            line!(s - 10, 2, s - 10, 7);
+            line!(s - 10, 7, s - 5, 7);
+        }
+        IconKind::Settings => {
+            let _ = Circle::new(Point::new(x + 3, y + 3), size.saturating_sub(6))
+                .into_styled(line)
+                .draw(target);
+            let inner = (size / 4).max(4);
+            let _ = Circle::new(
+                Point::new(x + (s - inner as i32) / 2, y + (s - inner as i32) / 2),
+                inner,
+            )
+            .into_styled(line)
+            .draw(target);
+            line!(s / 2, 0, s / 2, 4);
+            line!(s / 2, s - 4, s / 2, s);
+            line!(0, s / 2, 4, s / 2);
+            line!(s - 4, s / 2, s, s / 2);
+        }
+        IconKind::Terminal => {
+            let _ = rect!(2, 3, size.saturating_sub(4), size.saturating_sub(6))
+                .into_styled(line)
+                .draw(target);
+            line!(6, 9, 10, 13);
+            line!(10, 13, 6, 17);
+            line!(13, 18, s - 6, 18);
+        }
+        IconKind::Assistant => {
+            let _ = Circle::new(Point::new(x + 3, y + 5), size.saturating_sub(6))
+                .into_styled(line)
+                .draw(target);
+            let eye = (size / 10).max(2);
+            let _ = Circle::new(Point::new(x + s / 3, y + s / 2), eye)
+                .into_styled(fill)
+                .draw(target);
+            let _ = Circle::new(Point::new(x + 2 * s / 3 - eye as i32, y + s / 2), eye)
+                .into_styled(fill)
+                .draw(target);
+            line!(s / 2, 1, s / 2, 5);
+        }
+        IconKind::Store => {
+            let _ = rect!(4, 8, size.saturating_sub(8), size.saturating_sub(11))
+                .into_styled(line)
+                .draw(target);
+            line!(7, 8, 9, 3);
+            line!(9, 3, s - 9, 3);
+            line!(s - 9, 3, s - 7, 8);
+            line!(s / 2, 12, s / 2, s - 7);
+            line!(s / 2 - 4, s / 2, s / 2 + 4, s / 2);
+        }
+        IconKind::Close => {
+            line!(4, 4, s - 4, s - 4);
+            line!(s - 4, 4, 4, s - 4);
+        }
+        IconKind::Unknown => {
+            let _ = Circle::new(Point::new(x + 3, y + 3), size.saturating_sub(6))
+                .into_styled(line)
+                .draw(target);
+            line!(s / 2 - 3, s / 3, s / 2 + 2, s / 3);
+            line!(s / 2 + 2, s / 3, s / 2 + 2, s / 2);
+            let _ = Circle::new(Point::new(x + s / 2 - 1, y + 2 * s / 3), 2)
+                .into_styled(fill)
+                .draw(target);
+        }
+    }
 }
 
 fn draw_text_input<D, M>(
@@ -574,11 +790,7 @@ fn draw_image<D, M>(
             let set = (byte >> bit_offset) & 1 != 0;
 
             let color = if set { fg } else { bg };
-            let _ = Pixel(
-                Point::new(ox + col as i32, oy + row as i32),
-                color,
-            )
-            .draw(target);
+            let _ = Pixel(Point::new(ox + col as i32, oy + row as i32), color).draw(target);
         }
     }
 }
@@ -611,13 +823,27 @@ fn draw_list_item<D, M>(
     let title_color = mapper.map(li.title_color, theme);
     let tx = c.pos.x + 4;
     let ty = dy + font_height(&FontSize::Normal) as i32;
-    draw_text_u8g2(li.title.as_str(), tx, ty, &FontSize::Normal, title_color, target);
+    draw_text_u8g2(
+        li.title.as_str(),
+        tx,
+        ty,
+        &FontSize::Normal,
+        title_color,
+        target,
+    );
 
     // Subtitle (below title, Small size)
     if !li.subtitle.is_empty() {
         let sub_color = mapper.map(li.subtitle_color, theme);
         let sub_y = ty + font_height(&FontSize::Small) as i32 + 2;
-        draw_text_u8g2(li.subtitle.as_str(), tx, sub_y, &FontSize::Small, sub_color, target);
+        draw_text_u8g2(
+            li.subtitle.as_str(),
+            tx,
+            sub_y,
+            &FontSize::Small,
+            sub_color,
+            target,
+        );
     }
 
     // Badge (right-aligned, Small size)
@@ -625,7 +851,14 @@ fn draw_list_item<D, M>(
         let badge_color = mapper.map(li.badge_color, theme);
         let badge_w = text_width_u8g2(li.badge.as_str(), &FontSize::Small) as i32;
         let bx = c.pos.x + c.size.w as i32 - badge_w - 6;
-        draw_text_u8g2(li.badge.as_str(), bx, ty, &FontSize::Small, badge_color, target);
+        draw_text_u8g2(
+            li.badge.as_str(),
+            bx,
+            ty,
+            &FontSize::Small,
+            badge_color,
+            target,
+        );
     }
 }
 
@@ -652,7 +885,11 @@ fn draw_progress_bar<D, M>(
     let _ = rect.into_styled(track_style).draw(target);
 
     // Filled portion
-    let max = if pb.max_value == 0 { 100 } else { pb.max_value as u32 };
+    let max = if pb.max_value == 0 {
+        100
+    } else {
+        pb.max_value as u32
+    };
     let fill_w = (c.size.w * pb.value.min(pb.max_value) as u32) / max;
     if fill_w > 0 {
         let bar_color = mapper.map(pb.bar_color, theme);
@@ -678,7 +915,10 @@ fn draw_divider<D, M>(
     let c = &d.common;
     let dy = c.pos.y - scroll_y;
     let color = mapper.map(d.color, theme);
-    let style = PrimitiveStyleBuilder::new().stroke_color(color).stroke_width(d.thickness as u32).build();
+    let style = PrimitiveStyleBuilder::new()
+        .stroke_color(color)
+        .stroke_width(d.thickness as u32)
+        .build();
     let start = Point::new(c.pos.x, dy);
     let end = if matches!(d.direction, crate::layout::Direction::Row) {
         Point::new(c.pos.x + c.size.w as i32, dy)
@@ -716,21 +956,42 @@ fn draw_status_bar<D, M>(
 
     // Left text
     if !sb.left_text.is_empty() {
-        draw_text_u8g2(sb.left_text.as_str(), c.pos.x + 4, ty, &FontSize::Small, text_color, target);
+        draw_text_u8g2(
+            sb.left_text.as_str(),
+            c.pos.x + 4,
+            ty,
+            &FontSize::Small,
+            text_color,
+            target,
+        );
     }
 
     // Center text
     if !sb.center_text.is_empty() {
         let tw = text_width_u8g2(sb.center_text.as_str(), &FontSize::Small) as i32;
         let cx = c.pos.x + (c.size.w as i32 - tw) / 2;
-        draw_text_u8g2(sb.center_text.as_str(), cx, ty, &FontSize::Small, text_color, target);
+        draw_text_u8g2(
+            sb.center_text.as_str(),
+            cx,
+            ty,
+            &FontSize::Small,
+            text_color,
+            target,
+        );
     }
 
     // Right text
     if !sb.right_text.is_empty() {
         let tw = text_width_u8g2(sb.right_text.as_str(), &FontSize::Small) as i32;
         let rx = c.pos.x + c.size.w as i32 - tw - 4;
-        draw_text_u8g2(sb.right_text.as_str(), rx, ty, &FontSize::Small, text_color, target);
+        draw_text_u8g2(
+            sb.right_text.as_str(),
+            rx,
+            ty,
+            &FontSize::Small,
+            text_color,
+            target,
+        );
     }
 }
 
@@ -777,12 +1038,9 @@ fn draw_switch<D, M>(
     };
     let thumb_color = mapper.map(Color::White, theme);
     let thumb_style = PrimitiveStyleBuilder::new().fill_color(thumb_color).build();
-    let _ = Circle::new(
-        Point::new(thumb_x, thumb_y),
-        thumb_diameter,
-    )
-    .into_styled(thumb_style)
-    .draw(target);
+    let _ = Circle::new(Point::new(thumb_x, thumb_y), thumb_diameter)
+        .into_styled(thumb_style)
+        .draw(target);
 }
 
 fn draw_checkbox<D, M>(
@@ -848,7 +1106,14 @@ fn draw_checkbox<D, M>(
         let fh = font_height(&FontSize::Normal) as i32;
         let tx = c.pos.x + box_size as i32 + 6;
         let ty = dy + ((c.size.h as i32 - fh) / 2) + fh;
-        draw_text_u8g2(cb.label.as_str(), tx, ty, &FontSize::Normal, text_color, target);
+        draw_text_u8g2(
+            cb.label.as_str(),
+            tx,
+            ty,
+            &FontSize::Normal,
+            text_color,
+            target,
+        );
     }
 }
 
@@ -879,8 +1144,8 @@ fn draw_scrollbar<D, M>(
     let scroll_range = content_height - container_h;
     let thumb_y = if scroll_range > 0 {
         track_y
-            + ((container.scroll_offset as f32 / scroll_range as f32)
-                * (track_h - thumb_h) as f32) as i32
+            + ((container.scroll_offset as f32 / scroll_range as f32) * (track_h - thumb_h) as f32)
+                as i32
     } else {
         track_y
     };
@@ -949,12 +1214,9 @@ fn draw_slider<D, M>(
     let thumb_y = dy + (h as i32 - thumb_diameter as i32) / 2;
     let thumb_color = mapper.map(sl.thumb_color, theme);
     let thumb_style = PrimitiveStyleBuilder::new().fill_color(thumb_color).build();
-    let _ = Circle::new(
-        Point::new(thumb_x, thumb_y),
-        thumb_diameter,
-    )
-    .into_styled(thumb_style)
-    .draw(target);
+    let _ = Circle::new(Point::new(thumb_x, thumb_y), thumb_diameter)
+        .into_styled(thumb_style)
+        .draw(target);
 }
 
 fn draw_dropdown<D, M>(
@@ -1036,16 +1298,23 @@ fn draw_dropdown<D, M>(
             }
 
             let oty = oy + ((item_h as i32 - fh) / 2) + fh;
-            draw_text_u8g2(option.as_str(), tx, oty, &FontSize::Normal, text_color, target);
+            draw_text_u8g2(
+                option.as_str(),
+                tx,
+                oty,
+                &FontSize::Normal,
+                text_color,
+                target,
+            );
         }
     }
 }
 
 fn font_height(size: &FontSize) -> u32 {
     match size {
-        FontSize::Small => 12,   // helvR10 actual height
-        FontSize::Normal => 16,  // helvR14 actual height
-        FontSize::Large => 21,   // helvR18 actual height
+        FontSize::Small => 12,  // helvR10 actual height
+        FontSize::Normal => 16, // helvR14 actual height
+        FontSize::Large => 21,  // helvR18 actual height
     }
 }
 
@@ -1064,19 +1333,34 @@ fn draw_text_u8g2<D: DrawTarget>(
         FontSize::Small => {
             let font = FontRenderer::new::<fonts::u8g2_font_helvR10_tr>();
             let _ = font.render_aligned(
-                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+                text,
+                pos,
+                VerticalPosition::Baseline,
+                HorizontalAlignment::Left,
+                fc,
+                target,
             );
         }
         FontSize::Normal => {
             let font = FontRenderer::new::<fonts::u8g2_font_helvR14_tr>();
             let _ = font.render_aligned(
-                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+                text,
+                pos,
+                VerticalPosition::Baseline,
+                HorizontalAlignment::Left,
+                fc,
+                target,
             );
         }
         FontSize::Large => {
             let font = FontRenderer::new::<fonts::u8g2_font_helvR18_tr>();
             let _ = font.render_aligned(
-                text, pos, VerticalPosition::Baseline, HorizontalAlignment::Left, fc, target,
+                text,
+                pos,
+                VerticalPosition::Baseline,
+                HorizontalAlignment::Left,
+                fc,
+                target,
             );
         }
     }
@@ -1084,10 +1368,13 @@ fn draw_text_u8g2<D: DrawTarget>(
 
 /// Measure the rendered width of text using u8g2 proportional fonts.
 fn text_width_u8g2(text: &str, size: &FontSize) -> u32 {
-    let fallback = || text.len() as u32 * match size {
-        FontSize::Small => 6,
-        FontSize::Normal => 7,
-        FontSize::Large => 10,
+    let fallback = || {
+        text.len() as u32
+            * match size {
+                FontSize::Small => 6,
+                FontSize::Normal => 7,
+                FontSize::Large => 10,
+            }
     };
     let dims = match size {
         FontSize::Small => {
@@ -1111,16 +1398,13 @@ fn text_width_u8g2(text: &str, size: &FontSize) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::tree::UiTree;
-    use crate::widget::{
-        ContainerWidget, LabelWidget, Pos, Size as WidgetSize, Widget,
-    };
     use super::{render, MonoMapper};
     use crate::theme::Theme;
-    use embedded_graphics::{
-        mock_display::MockDisplay,
-        pixelcolor::BinaryColor,
+    use crate::tree::UiTree;
+    use crate::widget::{
+        ButtonWidget, ContainerWidget, IconKind, LabelWidget, Pos, Size as WidgetSize, Widget,
     };
+    use embedded_graphics::{mock_display::MockDisplay, pixelcolor::BinaryColor};
 
     #[test]
     fn render_empty_tree() {
@@ -1139,11 +1423,13 @@ mod tests {
             let c = root.common_mut();
             c.size = WidgetSize { w: 64, h: 64 };
         }
-        let child = tree.add_child(tree.root(), {
-            let mut l = LabelWidget::default();
-            let _ = l.text.push_str("Hi");
-            Widget::Label(l)
-        }).unwrap();
+        let child = tree
+            .add_child(tree.root(), {
+                let mut l = LabelWidget::default();
+                let _ = l.text.push_str("Hi");
+                Widget::Label(l)
+            })
+            .unwrap();
         {
             let w = tree.get_mut(child).unwrap();
             let c = w.common_mut();
@@ -1155,5 +1441,42 @@ mod tests {
         let mut display = MockDisplay::<BinaryColor>::new();
         display.set_allow_overdraw(true);
         render(&tree, &theme, &MonoMapper, &mut display);
+    }
+
+    #[test]
+    fn render_semantic_icon_button_in_strict_monochrome() {
+        let mut tree = UiTree::new(Widget::Container(ContainerWidget::default()));
+        tree.get_mut(tree.root()).unwrap().common_mut().size = WidgetSize { w: 64, h: 64 };
+        let button = tree
+            .add_child(
+                tree.root(),
+                Widget::Button(ButtonWidget {
+                    icon: Some(IconKind::Apps),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        let common = tree.get_mut(button).unwrap().common_mut();
+        common.pos = Pos { x: 2, y: 2 };
+        common.size = WidgetSize { w: 60, h: 60 };
+        common.border_width = 1;
+
+        let theme = Theme::monochrome();
+        let mut display = MockDisplay::<BinaryColor>::new();
+        display.set_allow_overdraw(true);
+        render(&tree, &theme, &MonoMapper, &mut display);
+
+        assert_eq!(
+            display.get_pixel(embedded_graphics::geometry::Point::new(21, 9)),
+            Some(BinaryColor::Off)
+        );
+        assert_eq!(
+            display.get_pixel(embedded_graphics::geometry::Point::new(19, 8)),
+            Some(BinaryColor::On)
+        );
+        assert_eq!(
+            display.get_pixel(embedded_graphics::geometry::Point::new(2, 2)),
+            Some(BinaryColor::On)
+        );
     }
 }

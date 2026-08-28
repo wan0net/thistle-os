@@ -134,3 +134,17 @@ void sim_input_poll_sdl(void)
 {
     sim_input_poll();
 }
+
+bool sim_input_inject_touch(uint16_t x, uint16_t y, bool pressed)
+{
+    if (!s_initialized || !s_cb) return false;
+
+    hal_input_event_t event = {
+        .type = pressed ? HAL_INPUT_EVENT_TOUCH_DOWN : HAL_INPUT_EVENT_TOUCH_UP,
+        .timestamp = 0,
+    };
+    event.touch.x = x;
+    event.touch.y = y;
+    s_cb(&event, s_cb_data);
+    return true;
+}
