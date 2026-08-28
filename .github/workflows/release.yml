@@ -17,7 +17,7 @@ permissions:
 jobs:
   publish:
     name: Publish GitHub release
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
