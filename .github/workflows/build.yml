@@ -83,7 +83,7 @@ jobs:
           . $IDF_PATH/export.sh
           export PATH="$HOME/.cargo/bin:$PATH"
           idf.py set-target "$TARGET_ARCH"
-          idf.py -j "$THISTLE_CI_JOBS" build
+          idf.py build
 
       - name: Check firmware size
         shell: bash
