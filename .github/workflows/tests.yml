@@ -12,7 +12,7 @@ permissions:
 jobs:
   board-catalog-validation:
     name: Board Catalog Validation
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,7 +33,7 @@ jobs:
 
   unit-tests:
     name: Unit Tests (Host)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -171,7 +171,7 @@ jobs:
 
   simulator-boot:
     name: Simulator Boot Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -221,7 +221,7 @@ jobs:
 
   simulator-integration:
     name: Simulator Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     needs: simulator-boot  # Only run if basic boot passes
     steps:
       - uses: actions/checkout@v6
@@ -269,7 +269,7 @@ jobs:
 
   rust-kernel-tests:
     name: Rust Kernel Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -298,7 +298,7 @@ jobs:
 
   manifest-memory-safety:
     name: Manifest Loader (Valgrind)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:

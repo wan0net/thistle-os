@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   build-packages:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     container: espressif/idf:v5.5
     strategy:
       fail-fast: false
@@ -147,7 +147,7 @@ jobs:
 
   publish-catalog:
     needs: build-packages
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
