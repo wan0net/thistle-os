@@ -10,10 +10,15 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  CARGO_BUILD_JOBS: 2
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  THISTLE_CI_JOBS: 2
+
 jobs:
   firmware-build:
     name: Build Firmware (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     container:
       image: espressif/idf:v5.5
     strategy:
@@ -166,11 +171,16 @@ jobs:
 
   rust-tests:
     name: Rust Kernel Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - name: Cache Rust toolchain
         uses: actions/cache@v6
@@ -214,7 +224,7 @@ jobs:
 
   semgrep:
     name: Semgrep SAST
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     container:
       image: semgrep/semgrep
     steps:
@@ -286,7 +296,7 @@ jobs:
 
   trivy:
     name: Trivy Security Scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -328,11 +338,16 @@ jobs:
 
   recovery-build:
     name: Build Recovery OS (Rust/esp)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libudev-dev pkg-config python3-venv
 
       - name: Cache Rust ESP toolchain
         uses: actions/cache@v6

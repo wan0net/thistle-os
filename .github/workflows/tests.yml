@@ -9,10 +9,15 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_BUILD_JOBS: 2
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  THISTLE_CI_JOBS: 2
+
 jobs:
   board-catalog-validation:
     name: Board Catalog Validation
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,7 +38,7 @@ jobs:
 
   unit-tests:
     name: Unit Tests (Host)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -48,7 +53,7 @@ jobs:
         run: cmake -S simulator -B simulator/build-tests
 
       - name: Build simulator unit tests
-        run: cmake --build simulator/build-tests --target thistle_sim_tests --parallel
+        run: cmake --build simulator/build-tests --target thistle_sim_tests --parallel "$THISTLE_CI_JOBS"
 
       - name: Run simulator unit tests
         run: ./simulator/build-tests/thistle_sim_tests
@@ -171,7 +176,7 @@ jobs:
 
   simulator-boot:
     name: Simulator Boot Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -210,7 +215,7 @@ jobs:
         working-directory: simulator
         run: |
           mkdir -p build && cd build
-          cmake .. && make -j$(nproc)
+          cmake .. && make -j"$THISTLE_CI_JOBS"
 
       - name: Run boot test
         working-directory: simulator
@@ -221,7 +226,7 @@ jobs:
 
   simulator-integration:
     name: Simulator Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     needs: simulator-boot  # Only run if basic boot passes
     steps:
       - uses: actions/checkout@v6
@@ -261,7 +266,7 @@ jobs:
         working-directory: simulator
         run: |
           mkdir -p build && cd build
-          cmake .. && make -j$(nproc)
+          cmake .. && make -j"$THISTLE_CI_JOBS"
 
       - name: Run integration tests
         working-directory: simulator
@@ -281,11 +286,16 @@ jobs:
 
   rust-kernel-tests:
     name: Rust Kernel Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - name: Cache Rust toolchain and build
         uses: actions/cache@v6
@@ -310,20 +320,20 @@ jobs:
 
   manifest-memory-safety:
     name: Manifest Loader (Valgrind)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install Rust and Valgrind
+      - name: Install Rust and native build dependencies
         run: |
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           sudo apt-get update
-          sudo apt-get install -y valgrind
+          sudo apt-get install -y build-essential valgrind
 
       - name: Build manifest parser test binary
         working-directory: components/kernel_rs

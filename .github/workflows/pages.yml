@@ -19,6 +19,11 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  CARGO_BUILD_JOBS: 2
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  THISTLE_CI_JOBS: 2
+
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -26,11 +31,16 @@ concurrency:
 jobs:
   build:
     name: Build Docs + WASM Simulator
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake xz-utils
 
       - name: Cache Rust toolchain
         uses: actions/cache@v6
@@ -68,6 +78,7 @@ jobs:
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
+          export PATH="$HOME/.cargo/bin:$PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup target add wasm32-unknown-emscripten
 
@@ -87,7 +98,7 @@ jobs:
           cd wasm
           mkdir -p build && cd build
           emcmake cmake ..
-          make -j"$(nproc)"
+          make -j"$THISTLE_CI_JOBS"
 
       - name: Assemble Pages site
         run: |
@@ -126,7 +137,7 @@ jobs:
     name: Deploy to GitHub Pages
     if: github.event_name == 'push'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
     environment:
       name: github-pages
     steps:
