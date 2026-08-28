@@ -10,6 +10,11 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  CARGO_BUILD_JOBS: 2
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  THISTLE_CI_JOBS: 2
+
 jobs:
   firmware-build:
     name: Build Firmware (${{ matrix.arch }})
@@ -78,7 +83,7 @@ jobs:
           . $IDF_PATH/export.sh
           export PATH="$HOME/.cargo/bin:$PATH"
           idf.py set-target "$TARGET_ARCH"
-          idf.py build
+          idf.py -j "$THISTLE_CI_JOBS" build
 
       - name: Check firmware size
         shell: bash
@@ -171,6 +176,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
 
       - name: Cache Rust toolchain
         uses: actions/cache@v6
@@ -333,6 +343,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libudev-dev pkg-config
 
       - name: Cache Rust ESP toolchain
         uses: actions/cache@v6

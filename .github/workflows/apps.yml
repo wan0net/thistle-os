@@ -36,6 +36,11 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_BUILD_JOBS: 2
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  THISTLE_CI_JOBS: 2
+
 jobs:
   build-packages:
     runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","linux","x64","wan0-ci","thistle-os"]') }}
@@ -87,7 +92,7 @@ jobs:
               local build_dir="$package_dir/build-$TARGET_ARCH"
               cmake -S "$package_dir" -B "$build_dir" \
                 -DCMAKE_TOOLCHAIN_FILE="$IDF_PATH/tools/cmake/toolchain-${TARGET_ARCH}.cmake"
-              cmake --build "$build_dir" --parallel
+              cmake --build "$build_dir" --parallel "$THISTLE_CI_JOBS"
 
               local elf="$build_dir/$entry"
               if [ ! -f "$elf" ]; then
