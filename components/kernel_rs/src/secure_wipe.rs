@@ -29,7 +29,11 @@ pub struct Xorshift64 {
 impl Xorshift64 {
     pub fn new(seed: u64) -> Self {
         // Avoid zero state (xorshift64 has a fixed point at 0)
-        let state = if seed == 0 { 0x5A5A_5A5A_5A5A_5A5A } else { seed };
+        let state = if seed == 0 {
+            0x5A5A_5A5A_5A5A_5A5A
+        } else {
+            seed
+        };
         Self { state }
     }
 
@@ -49,41 +53,41 @@ impl Xorshift64 {
 // Passes 5-31 use specific 3-byte repeating patterns (Some([a, b, c])).
 
 const GUTMANN_PATTERNS: [Option<[u8; 3]>; 35] = [
-    None,                          // Pass  1: random
-    None,                          // Pass  2: random
-    None,                          // Pass  3: random
-    None,                          // Pass  4: random
-    Some([0x55, 0x55, 0x55]),      // Pass  5
-    Some([0xAA, 0xAA, 0xAA]),      // Pass  6
-    Some([0x92, 0x49, 0x24]),      // Pass  7
-    Some([0x49, 0x24, 0x92]),      // Pass  8
-    Some([0x24, 0x92, 0x49]),      // Pass  9
-    Some([0x00, 0x00, 0x00]),      // Pass 10
-    Some([0x11, 0x11, 0x11]),      // Pass 11
-    Some([0x22, 0x22, 0x22]),      // Pass 12
-    Some([0x33, 0x33, 0x33]),      // Pass 13
-    Some([0x44, 0x44, 0x44]),      // Pass 14
-    Some([0x55, 0x55, 0x55]),      // Pass 15
-    Some([0x66, 0x66, 0x66]),      // Pass 16
-    Some([0x77, 0x77, 0x77]),      // Pass 17
-    Some([0x88, 0x88, 0x88]),      // Pass 18
-    Some([0x99, 0x99, 0x99]),      // Pass 19
-    Some([0xAA, 0xAA, 0xAA]),      // Pass 20
-    Some([0xBB, 0xBB, 0xBB]),      // Pass 21
-    Some([0xCC, 0xCC, 0xCC]),      // Pass 22
-    Some([0xDD, 0xDD, 0xDD]),      // Pass 23
-    Some([0xEE, 0xEE, 0xEE]),      // Pass 24
-    Some([0xFF, 0xFF, 0xFF]),       // Pass 25
-    Some([0x92, 0x49, 0x24]),      // Pass 26
-    Some([0x49, 0x24, 0x92]),      // Pass 27
-    Some([0x24, 0x92, 0x49]),      // Pass 28
-    Some([0x6D, 0xB6, 0xDB]),      // Pass 29
-    Some([0xB6, 0xDB, 0x6D]),      // Pass 30
-    Some([0xDB, 0x6D, 0xB6]),      // Pass 31
-    None,                          // Pass 32: random
-    None,                          // Pass 33: random
-    None,                          // Pass 34: random
-    None,                          // Pass 35: random
+    None,                     // Pass  1: random
+    None,                     // Pass  2: random
+    None,                     // Pass  3: random
+    None,                     // Pass  4: random
+    Some([0x55, 0x55, 0x55]), // Pass  5
+    Some([0xAA, 0xAA, 0xAA]), // Pass  6
+    Some([0x92, 0x49, 0x24]), // Pass  7
+    Some([0x49, 0x24, 0x92]), // Pass  8
+    Some([0x24, 0x92, 0x49]), // Pass  9
+    Some([0x00, 0x00, 0x00]), // Pass 10
+    Some([0x11, 0x11, 0x11]), // Pass 11
+    Some([0x22, 0x22, 0x22]), // Pass 12
+    Some([0x33, 0x33, 0x33]), // Pass 13
+    Some([0x44, 0x44, 0x44]), // Pass 14
+    Some([0x55, 0x55, 0x55]), // Pass 15
+    Some([0x66, 0x66, 0x66]), // Pass 16
+    Some([0x77, 0x77, 0x77]), // Pass 17
+    Some([0x88, 0x88, 0x88]), // Pass 18
+    Some([0x99, 0x99, 0x99]), // Pass 19
+    Some([0xAA, 0xAA, 0xAA]), // Pass 20
+    Some([0xBB, 0xBB, 0xBB]), // Pass 21
+    Some([0xCC, 0xCC, 0xCC]), // Pass 22
+    Some([0xDD, 0xDD, 0xDD]), // Pass 23
+    Some([0xEE, 0xEE, 0xEE]), // Pass 24
+    Some([0xFF, 0xFF, 0xFF]), // Pass 25
+    Some([0x92, 0x49, 0x24]), // Pass 26
+    Some([0x49, 0x24, 0x92]), // Pass 27
+    Some([0x24, 0x92, 0x49]), // Pass 28
+    Some([0x6D, 0xB6, 0xDB]), // Pass 29
+    Some([0xB6, 0xDB, 0x6D]), // Pass 30
+    Some([0xDB, 0x6D, 0xB6]), // Pass 31
+    None,                     // Pass 32: random
+    None,                     // Pass 33: random
+    None,                     // Pass 34: random
+    None,                     // Pass 35: random
 ];
 
 // ── WipePattern ────────────────────────────────────────────────────────────
@@ -254,22 +258,34 @@ impl WipePlan {
 
     /// Targets filtered by a specific priority.
     pub fn targets_by_priority(&self, priority: WipePriority) -> Vec<&WipeTarget> {
-        self.targets.iter().filter(|t| t.priority == priority).collect()
+        self.targets
+            .iter()
+            .filter(|t| t.priority == priority)
+            .collect()
     }
 
     /// Number of targets still pending.
     pub fn pending_count(&self) -> usize {
-        self.targets.iter().filter(|t| t.status == WipeStatus::Pending).count()
+        self.targets
+            .iter()
+            .filter(|t| t.status == WipeStatus::Pending)
+            .count()
     }
 
     /// Number of targets that completed successfully.
     pub fn completed_count(&self) -> usize {
-        self.targets.iter().filter(|t| t.status == WipeStatus::Completed).count()
+        self.targets
+            .iter()
+            .filter(|t| t.status == WipeStatus::Completed)
+            .count()
     }
 
     /// Number of targets that failed.
     pub fn failed_count(&self) -> usize {
-        self.targets.iter().filter(|t| matches!(t.status, WipeStatus::Failed(_))).count()
+        self.targets
+            .iter()
+            .filter(|t| matches!(t.status, WipeStatus::Failed(_)))
+            .count()
     }
 
     /// Total number of targets in the plan.
@@ -300,9 +316,11 @@ impl WipePlan {
             if self.targets.is_empty() {
                 return 100;
             }
-            let done = self.targets.iter().filter(|t| {
-                matches!(t.status, WipeStatus::Completed | WipeStatus::Skipped)
-            }).count();
+            let done = self
+                .targets
+                .iter()
+                .filter(|t| matches!(t.status, WipeStatus::Completed | WipeStatus::Skipped))
+                .count();
             let pct = (done as u64 * 100) / self.targets.len() as u64;
             pct.min(100) as u8
         } else {
@@ -316,7 +334,10 @@ impl WipePlan {
     pub fn is_complete(&self) -> bool {
         !self.targets.is_empty()
             && self.targets.iter().all(|t| {
-                matches!(t.status, WipeStatus::Completed | WipeStatus::Skipped | WipeStatus::Failed(_))
+                matches!(
+                    t.status,
+                    WipeStatus::Completed | WipeStatus::Skipped | WipeStatus::Failed(_)
+                )
             })
     }
 
@@ -363,7 +384,9 @@ impl WipePlan {
     /// Index of the next pending target (by priority order).
     pub fn next_pending(&self) -> Option<usize> {
         // Targets are kept sorted by priority, so first pending is highest priority
-        self.targets.iter().position(|t| t.status == WipeStatus::Pending)
+        self.targets
+            .iter()
+            .position(|t| t.status == WipeStatus::Pending)
     }
 
     /// The overwrite pattern for this plan.
@@ -394,13 +417,11 @@ impl WipePlan {
             WipePattern::Zeros => vec![0x00; block_size],
             WipePattern::Ones => vec![0xFF; block_size],
             WipePattern::Random => self.generate_random_block(block_size),
-            WipePattern::DoD3Pass => {
-                match pass {
-                    0 => vec![0x00; block_size],
-                    1 => vec![0xFF; block_size],
-                    _ => self.generate_random_block(block_size),
-                }
-            }
+            WipePattern::DoD3Pass => match pass {
+                0 => vec![0x00; block_size],
+                1 => vec![0xFF; block_size],
+                _ => self.generate_random_block(block_size),
+            },
             WipePattern::Gutmann => {
                 let pass_idx = pass % 35;
                 match GUTMANN_PATTERNS[pass_idx] {
@@ -423,7 +444,11 @@ impl WipePlan {
             total_targets: self.total_count(),
             completed: self.completed_count(),
             failed: self.failed_count(),
-            skipped: self.targets.iter().filter(|t| t.status == WipeStatus::Skipped).count(),
+            skipped: self
+                .targets
+                .iter()
+                .filter(|t| t.status == WipeStatus::Skipped)
+                .count(),
             pending: self.pending_count(),
             total_bytes: self.total_bytes(),
             completed_bytes: self.completed_bytes(),
@@ -577,7 +602,11 @@ pub unsafe extern "C" fn rs_wipe_plan_is_complete(plan: *const WipePlan) -> i32 
         return 0;
     }
     let plan = &*plan;
-    if plan.is_complete() { 1 } else { 0 }
+    if plan.is_complete() {
+        1
+    } else {
+        0
+    }
 }
 
 /// Generate a block of overwrite data for the given pass number.
@@ -785,7 +814,10 @@ mod tests {
         plan.mark_in_progress(0).unwrap();
         plan.mark_failed(0, "disk error").unwrap();
 
-        assert_eq!(plan.targets()[0].status, WipeStatus::Failed("disk error".to_string()));
+        assert_eq!(
+            plan.targets()[0].status,
+            WipeStatus::Failed("disk error".to_string())
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -994,11 +1026,17 @@ mod tests {
         assert_eq!(block.len(), 256);
 
         // Random block should not be all zeros
-        assert!(!block.iter().all(|&b| b == 0x00), "random block should not be all zeros");
+        assert!(
+            !block.iter().all(|&b| b == 0x00),
+            "random block should not be all zeros"
+        );
 
         // Random block should not be all the same value (statistically near impossible)
         let first = block[0];
-        assert!(!block.iter().all(|&b| b == first), "random block should not be uniform");
+        assert!(
+            !block.iter().all(|&b| b == first),
+            "random block should not be uniform"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1041,8 +1079,11 @@ mod tests {
                     // Check first few bytes match the repeating pattern
                     for i in 0..6 {
                         assert_eq!(
-                            block[i], pattern[i % 3],
-                            "Gutmann pass {} byte {} mismatch", pass, i
+                            block[i],
+                            pattern[i % 3],
+                            "Gutmann pass {} byte {} mismatch",
+                            pass,
+                            i
                         );
                     }
                 }
@@ -1172,7 +1213,11 @@ mod tests {
             // Valid patterns
             for pattern in 0..5 {
                 let plan = rs_wipe_plan_create(pattern);
-                assert!(!plan.is_null(), "pattern {} should create valid plan", pattern);
+                assert!(
+                    !plan.is_null(),
+                    "pattern {} should create valid plan",
+                    pattern
+                );
                 rs_wipe_plan_destroy(plan);
             }
 

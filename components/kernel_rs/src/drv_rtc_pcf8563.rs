@@ -406,12 +406,12 @@ unsafe extern "C" fn pcf8563_get_time(dt: *mut HalDateTime) -> i32 {
     // regs[6] = years (BCD 00-99)
 
     let out = &mut *dt;
-    out.second  = bcd_to_bin(regs[0] & PCF8563_SECONDS_MASK);
-    out.minute  = bcd_to_bin(regs[1] & PCF8563_MINUTES_MASK);
-    out.hour    = bcd_to_bin(regs[2] & PCF8563_HOURS_MASK);
-    out.day     = bcd_to_bin(regs[3] & PCF8563_DAYS_MASK);
+    out.second = bcd_to_bin(regs[0] & PCF8563_SECONDS_MASK);
+    out.minute = bcd_to_bin(regs[1] & PCF8563_MINUTES_MASK);
+    out.hour = bcd_to_bin(regs[2] & PCF8563_HOURS_MASK);
+    out.day = bcd_to_bin(regs[3] & PCF8563_DAYS_MASK);
     out.weekday = regs[4] & PCF8563_WEEKDAYS_MASK;
-    out.month   = bcd_to_bin(regs[5] & PCF8563_MONTHS_MASK);
+    out.month = bcd_to_bin(regs[5] & PCF8563_MONTHS_MASK);
 
     // Years register holds BCD 00-99; the century bit in the months register
     // indicates which century: clear = 1900s, set = 2000s.
@@ -459,8 +459,8 @@ unsafe extern "C" fn pcf8563_set_time(dt: *const HalDateTime) -> i32 {
         // Bit 7 (VL) = 0: clear the voltage-low flag to mark time as valid.
         bin_to_bcd(t.second) & PCF8563_SECONDS_MASK,
         bin_to_bcd(t.minute) & PCF8563_MINUTES_MASK,
-        bin_to_bcd(t.hour)   & PCF8563_HOURS_MASK,
-        bin_to_bcd(t.day)    & PCF8563_DAYS_MASK,
+        bin_to_bcd(t.hour) & PCF8563_HOURS_MASK,
+        bin_to_bcd(t.day) & PCF8563_DAYS_MASK,
         t.weekday & PCF8563_WEEKDAYS_MASK,
         (bin_to_bcd(t.month) & PCF8563_MONTHS_MASK) | century_bit,
         bin_to_bcd(year_2digit),
@@ -562,8 +562,12 @@ mod tests {
         for tens in 0u8..10 {
             for units in 0u8..10 {
                 let bcd = (tens << 4) | units;
-                assert_eq!(bin_to_bcd(bcd_to_bin(bcd)), bcd,
-                    "roundtrip failed for BCD 0x{:02X}", bcd);
+                assert_eq!(
+                    bin_to_bcd(bcd_to_bin(bcd)),
+                    bcd,
+                    "roundtrip failed for BCD 0x{:02X}",
+                    bcd
+                );
             }
         }
     }
@@ -687,8 +691,13 @@ mod tests {
         unsafe {
             reset_state();
             let mut dt = HalDateTime {
-                year: 0, month: 0, day: 0, weekday: 0,
-                hour: 0, minute: 0, second: 0,
+                year: 0,
+                month: 0,
+                day: 0,
+                weekday: 0,
+                hour: 0,
+                minute: 0,
+                second: 0,
             };
             let ret = pcf8563_get_time(&mut dt as *mut HalDateTime);
             assert_eq!(ret, ESP_ERR_INVALID_STATE);
@@ -715,8 +724,13 @@ mod tests {
         unsafe {
             reset_state();
             let dt = HalDateTime {
-                year: 2026, month: 3, day: 22, weekday: 0,
-                hour: 12, minute: 0, second: 0,
+                year: 2026,
+                month: 3,
+                day: 22,
+                weekday: 0,
+                hour: 12,
+                minute: 0,
+                second: 0,
             };
             let ret = pcf8563_set_time(&dt as *const HalDateTime);
             assert_eq!(ret, ESP_ERR_INVALID_STATE);
@@ -736,8 +750,13 @@ mod tests {
             };
             pcf8563_init(&cfg as *const RtcPcf8563Config as *const c_void);
             let mut dt = HalDateTime {
-                year: 0, month: 0, day: 0, weekday: 0,
-                hour: 0, minute: 0, second: 0,
+                year: 0,
+                month: 0,
+                day: 0,
+                weekday: 0,
+                hour: 0,
+                minute: 0,
+                second: 0,
             };
             let ret = pcf8563_get_time(&mut dt as *mut HalDateTime);
             assert_eq!(ret, ESP_OK);

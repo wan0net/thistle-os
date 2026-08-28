@@ -114,7 +114,8 @@ pub type HalInputCb =
 pub struct HalInputDriver {
     pub init: Option<unsafe extern "C" fn(config: *const c_void) -> i32>,
     pub deinit: Option<unsafe extern "C" fn()>,
-    pub register_callback: Option<unsafe extern "C" fn(cb: HalInputCb, user_data: *mut c_void) -> i32>,
+    pub register_callback:
+        Option<unsafe extern "C" fn(cb: HalInputCb, user_data: *mut c_void) -> i32>,
     pub poll: Option<unsafe extern "C" fn() -> i32>,
     pub name: *const c_char,
     pub is_touch: bool,
@@ -125,9 +126,8 @@ unsafe impl Sync for HalInputDriver {}
 
 // ── Radio HAL types (hal/radio.h) ─────────────────────────────────────
 
-pub type HalRadioRxCb = Option<
-    unsafe extern "C" fn(data: *const u8, len: usize, rssi: i32, user_data: *mut c_void),
->;
+pub type HalRadioRxCb =
+    Option<unsafe extern "C" fn(data: *const u8, len: usize, rssi: i32, user_data: *mut c_void)>;
 
 #[repr(C)]
 pub struct HalRadioDriver {
@@ -138,7 +138,8 @@ pub struct HalRadioDriver {
     pub set_bandwidth: Option<unsafe extern "C" fn(bw_hz: u32) -> i32>,
     pub set_spreading_factor: Option<unsafe extern "C" fn(sf: u8) -> i32>,
     pub send: Option<unsafe extern "C" fn(data: *const u8, len: usize) -> i32>,
-    pub start_receive: Option<unsafe extern "C" fn(cb: HalRadioRxCb, user_data: *mut c_void) -> i32>,
+    pub start_receive:
+        Option<unsafe extern "C" fn(cb: HalRadioRxCb, user_data: *mut c_void) -> i32>,
     pub stop_receive: Option<unsafe extern "C" fn() -> i32>,
     pub get_rssi: Option<unsafe extern "C" fn() -> i32>,
     pub sleep: Option<unsafe extern "C" fn(enter: bool) -> i32>,
@@ -163,9 +164,8 @@ pub struct HalGpsPosition {
     pub timestamp: u32,
 }
 
-pub type HalGpsCb = Option<
-    unsafe extern "C" fn(pos: *const HalGpsPosition, user_data: *mut c_void),
->;
+pub type HalGpsCb =
+    Option<unsafe extern "C" fn(pos: *const HalGpsPosition, user_data: *mut c_void)>;
 
 #[repr(C)]
 pub struct HalGpsDriver {
@@ -174,7 +174,8 @@ pub struct HalGpsDriver {
     pub enable: Option<unsafe extern "C" fn() -> i32>,
     pub disable: Option<unsafe extern "C" fn() -> i32>,
     pub get_position: Option<unsafe extern "C" fn(pos: *mut HalGpsPosition) -> i32>,
-    pub register_callback: Option<unsafe extern "C" fn(cb: HalGpsCb, user_data: *mut c_void) -> i32>,
+    pub register_callback:
+        Option<unsafe extern "C" fn(cb: HalGpsCb, user_data: *mut c_void) -> i32>,
     pub sleep: Option<unsafe extern "C" fn(enter: bool) -> i32>,
     pub name: *const c_char,
 }
@@ -256,16 +257,15 @@ pub struct HalImuData {
     pub mag_z: f32,
 }
 
-pub type HalImuCb = Option<
-    unsafe extern "C" fn(data: *const HalImuData, user_data: *mut c_void),
->;
+pub type HalImuCb = Option<unsafe extern "C" fn(data: *const HalImuData, user_data: *mut c_void)>;
 
 #[repr(C)]
 pub struct HalImuDriver {
     pub init: Option<unsafe extern "C" fn(config: *const c_void) -> i32>,
     pub deinit: Option<unsafe extern "C" fn()>,
     pub get_data: Option<unsafe extern "C" fn(data: *mut HalImuData) -> i32>,
-    pub register_callback: Option<unsafe extern "C" fn(cb: HalImuCb, user_data: *mut c_void) -> i32>,
+    pub register_callback:
+        Option<unsafe extern "C" fn(cb: HalImuCb, user_data: *mut c_void) -> i32>,
     pub set_sample_rate: Option<unsafe extern "C" fn(hz: u16) -> i32>,
     pub sleep: Option<unsafe extern "C" fn(enter: bool) -> i32>,
     pub name: *const c_char,
@@ -332,8 +332,22 @@ pub struct HalCryptoDriver {
         ) -> i32,
     >,
     pub random: Option<unsafe extern "C" fn(buf: *mut u8, len: usize) -> i32>,
-    pub aes128_ecb_encrypt: Option<unsafe extern "C" fn(key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8) -> i32>,
-    pub aes128_ecb_decrypt: Option<unsafe extern "C" fn(key: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8) -> i32>,
+    pub aes128_ecb_encrypt: Option<
+        unsafe extern "C" fn(
+            key: *const u8,
+            plaintext: *const u8,
+            len: usize,
+            ciphertext_out: *mut u8,
+        ) -> i32,
+    >,
+    pub aes128_ecb_decrypt: Option<
+        unsafe extern "C" fn(
+            key: *const u8,
+            ciphertext: *const u8,
+            len: usize,
+            plaintext_out: *mut u8,
+        ) -> i32,
+    >,
     pub name: *const c_char,
 }
 
@@ -645,7 +659,11 @@ pub unsafe extern "C" fn hal_input_register(
     reg.input_configs[idx] = config;
     reg.input_count += 1;
     let name = driver_name((*driver).name);
-    hal_logi!(b"input driver registered: %s (slot %d)\0", name.as_ptr(), idx as i32);
+    hal_logi!(
+        b"input driver registered: %s (slot %d)\0",
+        name.as_ptr(),
+        idx as i32
+    );
     ESP_OK
 }
 
@@ -774,7 +792,11 @@ pub unsafe extern "C" fn hal_storage_register(
     reg.storage_configs[idx] = config;
     reg.storage_count += 1;
     let name = driver_name((*driver).name);
-    hal_logi!(b"storage driver registered: %s (slot %d)\0", name.as_ptr(), idx as i32);
+    hal_logi!(
+        b"storage driver registered: %s (slot %d)\0",
+        name.as_ptr(),
+        idx as i32
+    );
     ESP_OK
 }
 
@@ -1026,19 +1048,29 @@ pub extern "C" fn hal_registry_stop_all() -> i32 {
     }
 
     if !reg.imu.is_null() {
-        if let Some(f) = unsafe { (*reg.imu).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.imu).deinit } {
+            unsafe { f() };
+        }
     }
     if !reg.power.is_null() {
-        if let Some(f) = unsafe { (*reg.power).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.power).deinit } {
+            unsafe { f() };
+        }
     }
     if !reg.audio.is_null() {
-        if let Some(f) = unsafe { (*reg.audio).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.audio).deinit } {
+            unsafe { f() };
+        }
     }
     if !reg.gps.is_null() {
-        if let Some(f) = unsafe { (*reg.gps).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.gps).deinit } {
+            unsafe { f() };
+        }
     }
     if !reg.radio.is_null() {
-        if let Some(f) = unsafe { (*reg.radio).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.radio).deinit } {
+            unsafe { f() };
+        }
     }
 
     // Inputs — reverse order
@@ -1052,7 +1084,9 @@ pub extern "C" fn hal_registry_stop_all() -> i32 {
     }
 
     if !reg.display.is_null() {
-        if let Some(f) = unsafe { (*reg.display).deinit } { unsafe { f() }; }
+        if let Some(f) = unsafe { (*reg.display).deinit } {
+            unsafe { f() };
+        }
     }
 
     ESP_OK
@@ -1086,19 +1120,49 @@ mod tests {
     fn test_null_registration_returns_invalid_arg() {
         reset_registry();
         unsafe {
-            assert_eq!(hal_display_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_input_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_radio_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_gps_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_audio_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_power_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_imu_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_storage_register(std::ptr::null(), std::ptr::null()), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                hal_display_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_input_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_radio_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_gps_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_audio_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_power_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_imu_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_storage_register(std::ptr::null(), std::ptr::null()),
+                ESP_ERR_INVALID_ARG
+            );
             assert_eq!(hal_crypto_register(std::ptr::null()), ESP_ERR_INVALID_ARG);
             assert_eq!(hal_rtc_register(std::ptr::null()), ESP_ERR_INVALID_ARG);
             assert_eq!(hal_set_board_name(std::ptr::null()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_bus_register_spi(0, std::ptr::null_mut()), ESP_ERR_INVALID_ARG);
-            assert_eq!(hal_bus_register_i2c(0, std::ptr::null_mut()), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                hal_bus_register_spi(0, std::ptr::null_mut()),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                hal_bus_register_i2c(0, std::ptr::null_mut()),
+                ESP_ERR_INVALID_ARG
+            );
         }
     }
 
@@ -1293,7 +1357,11 @@ mod tests {
         let stored = unsafe { &*reg.display };
         assert_eq!(stored.width, 960, "width must be preserved");
         assert_eq!(stored.height, 540, "height must be preserved");
-        assert_eq!(stored.display_type, HalDisplayType::Epaper, "display_type must be preserved");
+        assert_eq!(
+            stored.display_type,
+            HalDisplayType::Epaper,
+            "display_type must be preserved"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1310,9 +1378,15 @@ mod tests {
         assert_eq!(rc, ESP_OK, "hal_set_board_name must return ESP_OK");
 
         let reg = registry();
-        assert!(!reg.board_name.is_null(), "board_name must not be null after set");
+        assert!(
+            !reg.board_name.is_null(),
+            "board_name must not be null after set"
+        );
         let stored = unsafe { std::ffi::CStr::from_ptr(reg.board_name).to_str().unwrap() };
-        assert_eq!(stored, "ThistleBoard v1", "board name must match what was set");
+        assert_eq!(
+            stored, "ThistleBoard v1",
+            "board name must match what was set"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1465,7 +1539,10 @@ mod tests {
         );
 
         let reg = registry();
-        assert_eq!(reg.input_count, 2, "input_count must be 2 after two registrations");
+        assert_eq!(
+            reg.input_count, 2,
+            "input_count must be 2 after two registrations"
+        );
         assert!(!reg.inputs[0].is_null(), "inputs[0] must be set");
         assert!(!reg.inputs[1].is_null(), "inputs[1] must be set");
     }

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thistleos.dev/schemas/thistle-app-package-v1.schema.json",
+  "title": "ThistleOS application package manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x-[a-z0-9][a-z0-9.-]*$": true
+  },
+  "required": [
+    "schema",
+    "type",
+    "id",
+    "name",
+    "version",
+    "release_sequence",
+    "author",
+    "description",
+    "min_os",
+    "arch",
+    "entry",
+    "signature",
+    "permissions",
+    "background",
+    "min_memory_kb",
+    "files"
+  ],
+  "properties": {
+    "schema": { "const": "thistle.app.package/v1" },
+    "type": { "const": "app" },
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "version": { "$ref": "#/$defs/version" },
+    "release_sequence": { "type": "integer", "minimum": 1 },
+    "author": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "min_os": { "$ref": "#/$defs/version" },
+    "arch": {
+      "enum": ["esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "host"]
+    },
+    "compatible_boards": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 63,
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "entry": { "$ref": "#/$defs/path" },
+    "signature": { "$ref": "#/$defs/path" },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)*$"
+      }
+    },
+    "background": { "type": "boolean" },
+    "min_memory_kb": { "type": "integer", "minimum": 0, "maximum": 8192 },
+    "icon": { "$ref": "#/$defs/path" },
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 60,
+      "items": { "$ref": "#/$defs/file" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "maxLength": 31,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+      }
+    }
+  }
+}

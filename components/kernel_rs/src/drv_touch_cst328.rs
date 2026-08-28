@@ -11,8 +11,10 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hal_registry::{HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData,
-                          HalInputEventType, HalInputTouchData};
+use crate::hal_registry::{
+    HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData, HalInputEventType,
+    HalInputTouchData,
+};
 
 // ── ESP error codes ─────────────────────────────────────────────────────────
 
@@ -35,17 +37,17 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 // the top and tops out around 3370 — usable Y span is ~2820 raw units.
 // Per-axis offset/span scaling keeps the corners reachable.
 const CST328_X_OFFSET: i32 = 0;
-const CST328_X_SPAN:   i32 = 3600;
+const CST328_X_SPAN: i32 = 3600;
 const CST328_Y_OFFSET: i32 = 550;
-const CST328_Y_SPAN:   i32 = 2820;
+const CST328_Y_SPAN: i32 = 2820;
 
 const CST328_REG_TOUCH_INFO: u16 = 0xD000; // Number of touch points (1 byte)
-const CST328_REG_TOUCH_PT1: u16 = 0xD001;  // Touch point 1 data (7 bytes)
+const CST328_REG_TOUCH_PT1: u16 = 0xD001; // Touch point 1 data (7 bytes)
 const CST328_REG_MODULE_VER: u16 = 0xD100; // Module version (2 bytes)
-const CST328_REG_COMMAND: u16 = 0xD109;    // Write 0xAB = normal mode
+const CST328_REG_COMMAND: u16 = 0xD109; // Write 0xAB = normal mode
 
 const CST328_CMD_NORMAL_MODE: u8 = 0xAB;
-const CST328_PT_LEN: usize = 7;            // Raw bytes per touch point
+const CST328_PT_LEN: usize = 7; // Raw bytes per touch point
 
 // GPIO_NUM_NC: -1 means "not connected"
 const GPIO_NUM_NC: i32 = -1;
@@ -128,13 +130,33 @@ extern "C" {
 
 #[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
 extern "C" {
-    fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_add_device(
+        bus: *mut c_void,
+        cfg: *const I2cDeviceConfig,
+        handle: *mut *mut c_void,
+    ) -> i32;
     fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
-    fn i2c_master_transmit_receive(handle: *mut c_void, write_data: *const u8, write_size: usize, read_data: *mut u8, read_size: usize, timeout_ms: i32) -> i32;
-    fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_transmit_receive(
+        handle: *mut c_void,
+        write_data: *const u8,
+        write_size: usize,
+        read_data: *mut u8,
+        read_size: usize,
+        timeout_ms: i32,
+    ) -> i32;
+    fn i2c_master_transmit(
+        handle: *mut c_void,
+        data: *const u8,
+        len: usize,
+        timeout_ms: i32,
+    ) -> i32;
     fn gpio_config(cfg: *const GpioConfig) -> i32;
     fn gpio_set_level(pin: i32, level: u32) -> i32;
-    fn gpio_isr_handler_add(pin: i32, handler: unsafe extern "C" fn(*mut c_void), arg: *mut c_void) -> i32;
+    fn gpio_isr_handler_add(
+        pin: i32,
+        handler: unsafe extern "C" fn(*mut c_void),
+        arg: *mut c_void,
+    ) -> i32;
     fn gpio_isr_handler_remove(pin: i32) -> i32;
     fn gpio_install_isr_service(flags: i32) -> i32;
     fn esp_timer_get_time() -> i64;
@@ -254,7 +276,7 @@ pub struct TouchCst328Config {
 // ── Driver state ─────────────────────────────────────────────────────────────
 
 struct TouchState {
-    dev: *mut c_void,            // i2c_master_dev_handle_t
+    dev: *mut c_void, // i2c_master_dev_handle_t
     cfg: TouchCst328Config,
     cb: HalInputCb,
     cb_data: *mut c_void,
@@ -302,11 +324,7 @@ static mut S_TOUCH: TouchState = TouchState::new();
 /// # Safety
 /// Must be called with a valid I2C device handle in `S_TOUCH.dev`.
 unsafe fn cst328_write_reg(reg_addr: u16, val: u8) -> i32 {
-    let buf = [
-        (reg_addr >> 8) as u8,
-        (reg_addr & 0xFF) as u8,
-        val,
-    ];
+    let buf = [(reg_addr >> 8) as u8, (reg_addr & 0xFF) as u8, val];
     i2c_master_transmit(S_TOUCH.dev, buf.as_ptr(), buf.len(), 50)
 }
 
@@ -317,14 +335,7 @@ unsafe fn cst328_write_reg(reg_addr: u16, val: u8) -> i32 {
 /// `S_TOUCH.dev` must be a valid I2C device handle.
 unsafe fn cst328_read_regs(reg_addr: u16, buf: *mut u8, len: usize) -> i32 {
     let addr = [(reg_addr >> 8) as u8, (reg_addr & 0xFF) as u8];
-    i2c_master_transmit_receive(
-        S_TOUCH.dev,
-        addr.as_ptr(),
-        addr.len(),
-        buf,
-        len,
-        50,
-    )
+    i2c_master_transmit_receive(S_TOUCH.dev, addr.as_ptr(), addr.len(), buf, len, 50)
 }
 
 // ── ISR ──────────────────────────────────────────────────────────────────────
@@ -371,12 +382,12 @@ unsafe extern "C" fn cst328_init(config: *const c_void) -> i32 {
 
     // Copy config
     let src = &*(config as *const TouchCst328Config);
-    S_TOUCH.cfg.i2c_bus  = src.i2c_bus;
+    S_TOUCH.cfg.i2c_bus = src.i2c_bus;
     S_TOUCH.cfg.i2c_addr = src.i2c_addr;
-    S_TOUCH.cfg.pin_int  = src.pin_int;
-    S_TOUCH.cfg.pin_rst  = src.pin_rst;
-    S_TOUCH.cfg.max_x    = src.max_x;
-    S_TOUCH.cfg.max_y    = src.max_y;
+    S_TOUCH.cfg.pin_int = src.pin_int;
+    S_TOUCH.cfg.pin_rst = src.pin_rst;
+    S_TOUCH.cfg.max_x = src.max_x;
+    S_TOUCH.cfg.max_y = src.max_y;
 
     S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
     S_TOUCH.touching = false;
@@ -443,7 +454,12 @@ unsafe extern "C" fn cst328_init(config: *const c_void) -> i32 {
             return ret;
         }
 
-        gpio_install_isr_service(0); // idempotent
+        let ret = crate::gpio_isr_service::ensure_installed(0);
+        if ret != ESP_OK {
+            i2c_master_bus_rm_device(S_TOUCH.dev);
+            S_TOUCH.dev = std::ptr::null_mut();
+            return ret;
+        }
 
         let ret = gpio_isr_handler_add(
             S_TOUCH.cfg.pin_int,
@@ -536,12 +552,22 @@ unsafe extern "C" fn cst328_poll() -> i32 {
         // Apply per-axis offset and span calibration, then scale into panel
         // pixels. Both axes clamp at panel-1 to absorb the small over-range
         // outside the calibrated active area.
-        let panel_w = if S_TOUCH.cfg.max_x > 0 { S_TOUCH.cfg.max_x as i32 } else { 240 };
-        let panel_h = if S_TOUCH.cfg.max_y > 0 { S_TOUCH.cfg.max_y as i32 } else { 320 };
+        let panel_w = if S_TOUCH.cfg.max_x > 0 {
+            S_TOUCH.cfg.max_x as i32
+        } else {
+            240
+        };
+        let panel_h = if S_TOUCH.cfg.max_y > 0 {
+            S_TOUCH.cfg.max_y as i32
+        } else {
+            320
+        };
         let scaled_x = ((raw_x as i32 - CST328_X_OFFSET).max(0) * panel_w / CST328_X_SPAN)
-            .min(panel_w - 1).max(0);
+            .min(panel_w - 1)
+            .max(0);
         let scaled_y = ((raw_y as i32 - CST328_Y_OFFSET).max(0) * panel_h / CST328_Y_SPAN)
-            .min(panel_h - 1).max(0);
+            .min(panel_h - 1)
+            .max(0);
         let x = scaled_x as u16;
         let y = scaled_y as u16;
 
@@ -758,10 +784,7 @@ mod tests {
             );
 
             static mut CALLED: bool = false;
-            unsafe extern "C" fn dummy_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn dummy_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {
                 CALLED = true;
             }
 

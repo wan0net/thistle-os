@@ -58,10 +58,10 @@ mod esp_ffi {
         /// Mount an SD card over SPI as a FAT VFS.
         pub fn esp_vfs_fat_sdspi_mount(
             mount_point: *const c_char,
-            host: *const c_void,        // const sdmmc_host_t *
-            slot_cfg: *const c_void,    // const sdspi_device_config_t *
-            mount_cfg: *const c_void,   // const esp_vfs_fat_sdmmc_mount_config_t *
-            card: *mut *mut c_void,     // sdmmc_card_t **
+            host: *const c_void,      // const sdmmc_host_t *
+            slot_cfg: *const c_void,  // const sdspi_device_config_t *
+            mount_cfg: *const c_void, // const esp_vfs_fat_sdmmc_mount_config_t *
+            card: *mut *mut c_void,   // sdmmc_card_t **
         ) -> i32;
 
         /// Unmount an SD card previously mounted with esp_vfs_fat_sdspi_mount.

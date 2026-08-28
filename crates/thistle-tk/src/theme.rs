@@ -60,16 +60,16 @@ impl Theme {
     /// Light-on-dark theme for OLED / LCD displays.
     pub const fn dark() -> Self {
         Self {
-            primary: (187, 134, 252),   // soft purple
+            primary: (187, 134, 252), // soft purple
             background: (18, 18, 18),
             surface: (30, 30, 30),
             text: (230, 230, 230),
             text_secondary: (160, 160, 160),
-            accent: (3, 218, 198),      // teal
-            error: (207, 102, 121),     // muted red
-            success: (76, 175, 80),     // green
-            warning: (255, 183, 77),    // amber
-            pressed: (60, 60, 60),      // lighter gray overlay
+            accent: (3, 218, 198),         // teal
+            error: (207, 102, 121),        // muted red
+            success: (76, 175, 80),        // green
+            warning: (255, 183, 77),       // amber
+            pressed: (60, 60, 60),         // lighter gray overlay
             focus_border: (187, 134, 252), // primary color
             font_size_small: 10,
             font_size_normal: 14,
@@ -81,17 +81,17 @@ impl Theme {
     /// thistle-purple accent.
     pub const fn link42() -> Self {
         Self {
-            primary: (37, 99, 235),       // #2563EB
-            background: (17, 17, 16),     // #111110
-            surface: (28, 28, 27),        // #1C1C1B
-            text: (237, 237, 237),        // #EDEDED
+            primary: (37, 99, 235),          // #2563EB
+            background: (17, 17, 16),        // #111110
+            surface: (28, 28, 27),           // #1C1C1B
+            text: (237, 237, 237),           // #EDEDED
             text_secondary: (160, 159, 155), // #A09F9B
-            accent: (157, 78, 221),       // #9D4EDD (thistle purple)
-            error: (239, 68, 68),         // #EF4444
-            success: (34, 197, 94),       // #22C55E
-            warning: (245, 158, 11),      // #F59E0B
-            pressed: (50, 50, 48),        // slightly lighter than surface
-            focus_border: (37, 99, 235),  // primary blue
+            accent: (157, 78, 221),          // #9D4EDD (thistle purple)
+            error: (239, 68, 68),            // #EF4444
+            success: (34, 197, 94),          // #22C55E
+            warning: (245, 158, 11),         // #F59E0B
+            pressed: (50, 50, 48),           // slightly lighter than surface
+            focus_border: (37, 99, 235),     // primary blue
             font_size_small: 10,
             font_size_normal: 14,
             font_size_large: 20,

@@ -4,8 +4,8 @@
 // Records GPS positions into tracks, computes distance/bounds, and exports
 // to GPX 1.1 XML for interoperability with mapping software.
 
-use std::os::raw::c_char;
 use std::ffi::CStr;
+use std::os::raw::c_char;
 
 use crate::hal_registry::HalGpsPosition;
 
@@ -96,10 +96,18 @@ impl GpsTrack {
         for p in &self.points {
             let lat = p.position.latitude;
             let lon = p.position.longitude;
-            if lat < min_lat { min_lat = lat; }
-            if lat > max_lat { max_lat = lat; }
-            if lon < min_lon { min_lon = lon; }
-            if lon > max_lon { max_lon = lon; }
+            if lat < min_lat {
+                min_lat = lat;
+            }
+            if lat > max_lat {
+                max_lat = lat;
+            }
+            if lon < min_lon {
+                min_lon = lon;
+            }
+            if lon > max_lon {
+                max_lon = lon;
+            }
         }
         Some((min_lat, min_lon, max_lat, max_lon))
     }
@@ -173,11 +181,17 @@ impl GpsTrack {
                 "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\">\n",
                 p.position.latitude, p.position.longitude
             ));
-            xml.push_str(&format!("        <ele>{:.1}</ele>\n", p.position.altitude_m));
+            xml.push_str(&format!(
+                "        <ele>{:.1}</ele>\n",
+                p.position.altitude_m
+            ));
             xml.push_str("        <time>");
             xml.push_str(&unix_to_iso8601(p.position.timestamp));
             xml.push_str("</time>\n");
-            xml.push_str(&format!("        <speed>{:.2}</speed>\n", p.position.speed_kmh));
+            xml.push_str(&format!(
+                "        <speed>{:.2}</speed>\n",
+                p.position.speed_kmh
+            ));
             xml.push_str(&format!("        <sat>{}</sat>\n", p.position.satellites));
             xml.push_str("      </trkpt>\n");
         }
@@ -197,8 +211,7 @@ pub fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let a = (d_lat / 2.0).sin().powi(2)
-        + lat1_r.cos() * lat2_r.cos() * (d_lon / 2.0).sin().powi(2);
+    let a = (d_lat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (d_lon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().asin();
     EARTH_RADIUS_KM * c
 }
@@ -228,7 +241,10 @@ fn unix_to_iso8601(ts: u32) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 }; // month [1, 12]
     let y = if m <= 2 { y + 1 } else { y };
 
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, hour, minute, second)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y, m, d, hour, minute, second
+    )
 }
 
 // ── XML escaping ─────────────────────────────────────────────────────
@@ -359,7 +375,13 @@ mod tests {
     }
 
     fn make_pos_full(
-        lat: f64, lon: f64, alt: f32, speed: f32, heading: f32, sats: u8, ts: u32,
+        lat: f64,
+        lon: f64,
+        alt: f32,
+        speed: f32,
+        heading: f32,
+        sats: u8,
+        ts: u32,
     ) -> HalGpsPosition {
         HalGpsPosition {
             latitude: lat,
@@ -588,7 +610,9 @@ mod tests {
     #[test]
     fn test_gpx_valid_structure() {
         let mut t = GpsTrack::new("Test Route");
-        t.add_point(make_pos_full(55.9533, -3.1883, 120.5, 5.2, 90.0, 10, 1705321800));
+        t.add_point(make_pos_full(
+            55.9533, -3.1883, 120.5, 5.2, 90.0, 10, 1705321800,
+        ));
         let gpx = t.to_gpx();
         assert!(gpx.contains("<metadata>"));
         assert!(gpx.contains("</metadata>"));
@@ -624,7 +648,11 @@ mod tests {
         let mut t = GpsTrack::new("Timed");
         t.add_point(make_pos(55.0, -3.0, 0.0, 1705321800));
         let gpx = t.to_gpx();
-        assert!(gpx.contains("<time>2024-01-15T12:30:00Z</time>"), "GPX: {}", gpx);
+        assert!(
+            gpx.contains("<time>2024-01-15T12:30:00Z</time>"),
+            "GPX: {}",
+            gpx
+        );
     }
 
     #[test]
@@ -633,11 +661,19 @@ mod tests {
         t.add_waypoint(make_pos(55.95, -3.19, 200.0, 1000), "Castle");
         t.add_waypoint(make_pos(55.96, -3.20, 150.0, 2000), "Bridge");
         let gpx = t.to_gpx();
-        assert!(gpx.contains("<wpt lat=\"55.9500000\" lon=\"-3.1900000\">"), "GPX: {}", gpx);
+        assert!(
+            gpx.contains("<wpt lat=\"55.9500000\" lon=\"-3.1900000\">"),
+            "GPX: {}",
+            gpx
+        );
         assert!(gpx.contains("<name>Castle</name>"), "GPX: {}", gpx);
         assert!(gpx.contains("<name>Bridge</name>"), "GPX: {}", gpx);
         // Waypoints also appear as trkpt
-        assert!(gpx.contains("<trkpt lat=\"55.9500000\" lon=\"-3.1900000\">"), "GPX: {}", gpx);
+        assert!(
+            gpx.contains("<trkpt lat=\"55.9500000\" lon=\"-3.1900000\">"),
+            "GPX: {}",
+            gpx
+        );
     }
 
     #[test]
@@ -646,7 +682,11 @@ mod tests {
         t.add_waypoint(make_pos(55.0, -3.0, 0.0, 100), "Ben \"Big\" & <Small>");
         let gpx = t.to_gpx();
         assert!(gpx.contains("Trail &amp; &lt;Route&gt;"), "GPX: {}", gpx);
-        assert!(gpx.contains("Ben &quot;Big&quot; &amp; &lt;Small&gt;"), "GPX: {}", gpx);
+        assert!(
+            gpx.contains("Ben &quot;Big&quot; &amp; &lt;Small&gt;"),
+            "GPX: {}",
+            gpx
+        );
     }
 
     #[test]

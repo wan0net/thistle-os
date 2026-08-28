@@ -14,8 +14,10 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hal_registry::{HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData,
-                          HalInputEventType, HalInputKeyData};
+use crate::hal_registry::{
+    HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData, HalInputEventType,
+    HalInputKeyData,
+};
 
 // ── ESP error codes ──────────────────────────────────────────────────────────
 
@@ -172,13 +174,33 @@ mod esp_ffi {
     }
 
     extern "C" {
-        pub fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32;
+        pub fn i2c_master_bus_add_device(
+            bus: *mut c_void,
+            cfg: *const I2cDeviceConfig,
+            handle: *mut *mut c_void,
+        ) -> i32;
         pub fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
-        pub fn i2c_master_transmit_receive(handle: *mut c_void, write_data: *const u8, write_size: usize, read_data: *mut u8, read_size: usize, timeout_ms: i32) -> i32;
-        pub fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+        pub fn i2c_master_transmit_receive(
+            handle: *mut c_void,
+            write_data: *const u8,
+            write_size: usize,
+            read_data: *mut u8,
+            read_size: usize,
+            timeout_ms: i32,
+        ) -> i32;
+        pub fn i2c_master_transmit(
+            handle: *mut c_void,
+            data: *const u8,
+            len: usize,
+            timeout_ms: i32,
+        ) -> i32;
         pub fn gpio_set_direction(pin: u32, mode: u32) -> i32;
         pub fn gpio_set_pull_mode(pin: u32, mode: u32) -> i32;
-        pub fn gpio_isr_handler_add(pin: u32, handler: unsafe extern "C" fn(*mut c_void), arg: *mut c_void) -> i32;
+        pub fn gpio_isr_handler_add(
+            pin: u32,
+            handler: unsafe extern "C" fn(*mut c_void),
+            arg: *mut c_void,
+        ) -> i32;
         pub fn gpio_isr_handler_remove(pin: u32) -> i32;
         pub fn gpio_set_intr_type(pin: u32, intr_type: u32) -> i32;
         pub fn gpio_intr_enable(pin: u32) -> i32;
@@ -211,7 +233,9 @@ mod esp_ffi {
         *handle = 1usize as *mut c_void;
         0
     }
-    pub unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 { 0 }
+    pub unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 {
+        0
+    }
     pub unsafe fn i2c_master_transmit_receive(
         _handle: *mut c_void,
         _write: *const u8,
@@ -229,19 +253,37 @@ mod esp_ffi {
         _data: *const u8,
         _len: usize,
         _timeout: i32,
-    ) -> i32 { 0 }
-    pub unsafe fn gpio_set_direction(_pin: u32, _mode: u32) -> i32 { 0 }
-    pub unsafe fn gpio_set_pull_mode(_pin: u32, _mode: u32) -> i32 { 0 }
+    ) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_set_direction(_pin: u32, _mode: u32) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_set_pull_mode(_pin: u32, _mode: u32) -> i32 {
+        0
+    }
     pub unsafe fn gpio_isr_handler_add(
         _pin: u32,
         _handler: unsafe extern "C" fn(*mut c_void),
         _arg: *mut c_void,
-    ) -> i32 { 0 }
-    pub unsafe fn gpio_isr_handler_remove(_pin: u32) -> i32 { 0 }
-    pub unsafe fn gpio_set_intr_type(_pin: u32, _intr_type: u32) -> i32 { 0 }
-    pub unsafe fn gpio_intr_enable(_pin: u32) -> i32 { 0 }
-    pub unsafe fn gpio_install_isr_service(_flags: i32) -> i32 { 0 }
-    pub unsafe fn esp_timer_get_time() -> i64 { 0 }
+    ) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_isr_handler_remove(_pin: u32) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_set_intr_type(_pin: u32, _intr_type: u32) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_intr_enable(_pin: u32) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_install_isr_service(_flags: i32) -> i32 {
+        0
+    }
+    pub unsafe fn esp_timer_get_time() -> i64 {
+        0
+    }
 }
 
 // ── Driver state ─────────────────────────────────────────────────────────────
@@ -406,8 +448,12 @@ unsafe extern "C" fn tca8418_init(config: *const c_void) -> i32 {
         esp_ffi::gpio_set_intr_type(pin, 2);
         esp_ffi::gpio_intr_enable(pin);
 
-        // gpio_install_isr_service is idempotent; ignore ESP_ERR_INVALID_STATE
-        esp_ffi::gpio_install_isr_service(0);
+        let ret = crate::gpio_isr_service::ensure_installed(0);
+        if ret != ESP_OK {
+            esp_ffi::i2c_master_bus_rm_device(kbd.dev);
+            kbd.dev = std::ptr::null_mut();
+            return ret;
+        }
 
         let ret = esp_ffi::gpio_isr_handler_add(pin, tca8418_isr_handler, std::ptr::null_mut());
         if ret != ESP_OK {
@@ -672,11 +718,7 @@ mod tests {
             };
             tca8418_init(&cfg as *const KbdTca8418Config as *const c_void);
 
-            unsafe extern "C" fn dummy_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
-            }
+            unsafe extern "C" fn dummy_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {}
             let sentinel = 0xDEAD_BEEFusize as *mut c_void;
             let ret = tca8418_register_callback(Some(dummy_cb), sentinel);
             assert_eq!(ret, ESP_OK);
@@ -732,7 +774,9 @@ mod tests {
     fn test_isr_handler_sets_irq_pending() {
         unsafe {
             reset_state();
-            (*(&raw mut S_KBD)).irq_pending.store(false, Ordering::Relaxed);
+            (*(&raw mut S_KBD))
+                .irq_pending
+                .store(false, Ordering::Relaxed);
             tca8418_isr_handler(std::ptr::null_mut());
             assert!((*(&raw const S_KBD)).irq_pending.load(Ordering::Acquire));
         }

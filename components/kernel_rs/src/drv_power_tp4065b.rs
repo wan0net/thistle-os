@@ -43,16 +43,16 @@ struct LipoPoint {
 
 static LIPO_CURVE: [LipoPoint; 11] = [
     LipoPoint { mv: 4200, pct: 100 },
-    LipoPoint { mv: 4060, pct:  90 },
-    LipoPoint { mv: 3980, pct:  80 },
-    LipoPoint { mv: 3920, pct:  70 },
-    LipoPoint { mv: 3870, pct:  60 },
-    LipoPoint { mv: 3820, pct:  50 },
-    LipoPoint { mv: 3750, pct:  40 },
-    LipoPoint { mv: 3700, pct:  30 },
-    LipoPoint { mv: 3620, pct:  20 },
-    LipoPoint { mv: 3500, pct:  10 },
-    LipoPoint { mv: 3000, pct:   0 },
+    LipoPoint { mv: 4060, pct: 90 },
+    LipoPoint { mv: 3980, pct: 80 },
+    LipoPoint { mv: 3920, pct: 70 },
+    LipoPoint { mv: 3870, pct: 60 },
+    LipoPoint { mv: 3820, pct: 50 },
+    LipoPoint { mv: 3750, pct: 40 },
+    LipoPoint { mv: 3700, pct: 30 },
+    LipoPoint { mv: 3620, pct: 20 },
+    LipoPoint { mv: 3500, pct: 10 },
+    LipoPoint { mv: 3000, pct: 0 },
 ];
 
 /// Map a calibrated battery voltage (mV) to a charge percentage using linear
@@ -81,8 +81,7 @@ pub fn voltage_to_percent(mv: u16) -> u8 {
             let mv_above_lower = (mv - lower.mv) as u32;
             // Weighted interpolation, rounded to nearest integer — mirrors the
             // C driver's rounding formula exactly.
-            let pct = lower.pct
-                + ((mv_above_lower * pct_range + mv_range / 2) / mv_range) as u8;
+            let pct = lower.pct + ((mv_above_lower * pct_range + mv_range / 2) / mv_range) as u8;
             return pct;
         }
     }
@@ -135,10 +134,7 @@ extern "C" {
 const STUB_RAW_VALUE: i32 = 2300;
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn adc_oneshot_new_unit(
-    _cfg: *const c_void,
-    handle: *mut *mut c_void,
-) -> i32 {
+unsafe fn adc_oneshot_new_unit(_cfg: *const c_void, handle: *mut *mut c_void) -> i32 {
     *handle = 1usize as *mut c_void; // non-null sentinel
     ESP_OK
 }
@@ -158,21 +154,13 @@ unsafe fn adc_oneshot_config_channel(
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn adc_oneshot_read(
-    _handle: *mut c_void,
-    _channel: i32,
-    raw: *mut i32,
-) -> i32 {
+unsafe fn adc_oneshot_read(_handle: *mut c_void, _channel: i32, raw: *mut i32) -> i32 {
     *raw = STUB_RAW_VALUE;
     ESP_OK
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn adc_cali_raw_to_voltage(
-    _handle: *mut c_void,
-    raw: i32,
-    voltage: *mut i32,
-) -> i32 {
+unsafe fn adc_cali_raw_to_voltage(_handle: *mut c_void, raw: i32, voltage: *mut i32) -> i32 {
     // Approximate the calibration curve: linear, Vref 3300 mV, 12-bit.
     *voltage = (raw as i64 * 3300 / 4095) as i32;
     ESP_OK
@@ -212,7 +200,12 @@ unsafe fn cali_init(unit: i32, channel: i32, atten: i32) -> (*mut c_void, bool) 
     //   atten    : u32
     //   bitwidth : u32
     #[repr(C)]
-    struct CurveFitCfg { unit_id: u32, chan: u32, atten: u32, bitwidth: u32 }
+    struct CurveFitCfg {
+        unit_id: u32,
+        chan: u32,
+        atten: u32,
+        bitwidth: u32,
+    }
 
     extern "C" {
         fn adc_cali_create_scheme_curve_fitting(
@@ -230,14 +223,18 @@ unsafe fn cali_init(unit: i32, channel: i32, atten: i32) -> (*mut c_void, bool) 
     //   atten    : u32
     //   bitwidth : u32
     #[repr(C)]
-    struct LineFitCfg { unit_id: u32, atten: u32, bitwidth: u32 }
+    struct LineFitCfg {
+        unit_id: u32,
+        atten: u32,
+        bitwidth: u32,
+    }
 
     let mut handle: *mut c_void = std::ptr::null_mut();
 
     let curve_cfg = CurveFitCfg {
-        unit_id:  unit as u32,
-        chan:     channel as u32,
-        atten:    atten as u32,
+        unit_id: unit as u32,
+        chan: channel as u32,
+        atten: atten as u32,
         bitwidth: 12, // ADC_BITWIDTH_12
     };
     if adc_cali_create_scheme_curve_fitting(&curve_cfg, &mut handle) == ESP_OK {
@@ -245,8 +242,8 @@ unsafe fn cali_init(unit: i32, channel: i32, atten: i32) -> (*mut c_void, bool) 
     }
 
     let line_cfg = LineFitCfg {
-        unit_id:  unit as u32,
-        atten:    atten as u32,
+        unit_id: unit as u32,
+        atten: atten as u32,
         bitwidth: 12,
     };
     if adc_cali_create_scheme_line_fitting(&line_cfg, &mut handle) == ESP_OK {
@@ -435,8 +432,16 @@ unsafe extern "C" fn tp4065b_init(config: *const c_void) -> i32 {
     // adc_oneshot_unit_init_cfg_t: { unit_id: u32, clk_src: u32, ulp_mode: u32 }
     // unit_id = ADC_UNIT_1 = 0 on ESP32-S3; clk_src = 0 (default); ulp_mode = 0.
     #[repr(C)]
-    struct AdcUnitCfg { unit_id: u32, clk_src: u32, ulp_mode: u32 }
-    let unit_cfg = AdcUnitCfg { unit_id: 0, clk_src: 0, ulp_mode: 0 };
+    struct AdcUnitCfg {
+        unit_id: u32,
+        clk_src: u32,
+        ulp_mode: u32,
+    }
+    let unit_cfg = AdcUnitCfg {
+        unit_id: 0,
+        clk_src: 0,
+        ulp_mode: 0,
+    };
 
     let err = adc_oneshot_new_unit(
         &unit_cfg as *const AdcUnitCfg as *const c_void,
@@ -450,8 +455,14 @@ unsafe extern "C" fn tp4065b_init(config: *const c_void) -> i32 {
     // adc_oneshot_chan_cfg_t: { atten: u32, bitwidth: u32 }
     // ADC_ATTEN_DB_12 = 3 (full-scale ~3.3 V), ADC_BITWIDTH_12 = 12.
     #[repr(C)]
-    struct AdcChanCfg { atten: u32, bitwidth: u32 }
-    let chan_cfg = AdcChanCfg { atten: 3, bitwidth: 12 };
+    struct AdcChanCfg {
+        atten: u32,
+        bitwidth: u32,
+    }
+    let chan_cfg = AdcChanCfg {
+        atten: 3,
+        bitwidth: 12,
+    };
 
     let err = adc_oneshot_config_channel(
         pwr.adc_handle,
@@ -645,16 +656,16 @@ mod tests {
     fn test_vtp_exact_breakpoints() {
         // Exact breakpoint values must match their table entries.
         assert_eq!(voltage_to_percent(4200), 100);
-        assert_eq!(voltage_to_percent(4060),  90);
-        assert_eq!(voltage_to_percent(3980),  80);
-        assert_eq!(voltage_to_percent(3920),  70);
-        assert_eq!(voltage_to_percent(3870),  60);
-        assert_eq!(voltage_to_percent(3820),  50);
-        assert_eq!(voltage_to_percent(3750),  40);
-        assert_eq!(voltage_to_percent(3700),  30);
-        assert_eq!(voltage_to_percent(3620),  20);
-        assert_eq!(voltage_to_percent(3500),  10);
-        assert_eq!(voltage_to_percent(3000),   0);
+        assert_eq!(voltage_to_percent(4060), 90);
+        assert_eq!(voltage_to_percent(3980), 80);
+        assert_eq!(voltage_to_percent(3920), 70);
+        assert_eq!(voltage_to_percent(3870), 60);
+        assert_eq!(voltage_to_percent(3820), 50);
+        assert_eq!(voltage_to_percent(3750), 40);
+        assert_eq!(voltage_to_percent(3700), 30);
+        assert_eq!(voltage_to_percent(3620), 20);
+        assert_eq!(voltage_to_percent(3500), 10);
+        assert_eq!(voltage_to_percent(3000), 0);
     }
 
     #[test]
@@ -895,7 +906,10 @@ mod tests {
     fn test_get_info_null_returns_invalid_arg() {
         unsafe {
             reset_state();
-            let cfg = PowerTp4065bConfig { adc_channel: 3, pin_charge_status: 4 };
+            let cfg = PowerTp4065bConfig {
+                adc_channel: 3,
+                pin_charge_status: 4,
+            };
             tp4065b_init(&cfg as *const PowerTp4065bConfig as *const c_void);
             assert_eq!(tp4065b_get_info(std::ptr::null_mut()), ESP_ERR_INVALID_ARG);
             tp4065b_deinit();
@@ -919,7 +933,10 @@ mod tests {
     fn test_get_info_after_init_populates_fields() {
         unsafe {
             reset_state();
-            let cfg = PowerTp4065bConfig { adc_channel: 3, pin_charge_status: 4 };
+            let cfg = PowerTp4065bConfig {
+                adc_channel: 3,
+                pin_charge_status: 4,
+            };
             assert_eq!(
                 tp4065b_init(&cfg as *const PowerTp4065bConfig as *const c_void),
                 ESP_OK
@@ -936,8 +953,7 @@ mod tests {
             assert!(info.percent <= 100);
             // Stub is not charging → Discharging or Charged (≥99 %)
             assert!(
-                info.state == HalPowerState::Discharging
-                    || info.state == HalPowerState::Charged
+                info.state == HalPowerState::Discharging || info.state == HalPowerState::Charged
             );
 
             tp4065b_deinit();
@@ -952,7 +968,10 @@ mod tests {
         // voltage_to_percent(get_battery_mv()).
         unsafe {
             reset_state();
-            let cfg = PowerTp4065bConfig { adc_channel: 3, pin_charge_status: 4 };
+            let cfg = PowerTp4065bConfig {
+                adc_channel: 3,
+                pin_charge_status: 4,
+            };
             assert_eq!(
                 tp4065b_init(&cfg as *const PowerTp4065bConfig as *const c_void),
                 ESP_OK

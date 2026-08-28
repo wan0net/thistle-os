@@ -14,7 +14,7 @@
 //   RateDialog — 1–5 star selection
 
 use std::ffi::CString;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 use std::sync::Mutex;
 
 use crate::app_manager::{CAppEntry, CAppManifest};
@@ -49,25 +49,37 @@ extern "C" {
     fn thistle_ui_set_text_color(widget: u32, color: u32);
     fn thistle_ui_set_font_size(widget: u32, size: i32);
     fn thistle_ui_set_radius(widget: u32, r: i32);
+    fn thistle_ui_destroy(widget: u32);
+    fn thistle_ui_on_event(
+        widget: u32,
+        event_type: i32,
+        callback: unsafe extern "C" fn(u32, i32, *mut c_void),
+        user_data: *mut c_void,
+    );
     fn thistle_ui_theme_bg() -> u32;
     fn thistle_ui_theme_text() -> u32;
     fn thistle_ui_theme_text_secondary() -> u32;
     fn thistle_ui_theme_surface() -> u32;
     fn thistle_ui_theme_primary() -> u32;
+    fn appstore_install_entry(
+        entry: *const CatalogEntry,
+        progress_cb: *const c_void,
+        user_data: *mut c_void,
+    ) -> i32;
 }
 
 // ---------------------------------------------------------------------------
 // Layout constants (e-paper 240×320)
 // ---------------------------------------------------------------------------
 
-const LAYOUT_COLUMN: i32 = 0;
-const LAYOUT_ROW: i32 = 1;
+const LAYOUT_COLUMN: i32 = 1;
+const LAYOUT_ROW: i32 = 2;
 const ALIGN_CENTER: i32 = 1;
 const ALIGN_SPACE_BETWEEN: i32 = 3;
+const EVENT_CLICK: i32 = 0;
 const STATUS_BAR_HEIGHT: i32 = 24;
 const ITEMS_PER_PAGE: usize = 5;
-const CATALOG_URL: &str =
-    "https://wan0net.github.io/thistle-apps/catalog.json";
+const CATALOG_URL: &str = "https://wan0net.github.io/thistle-apps/catalog.json";
 
 // ---------------------------------------------------------------------------
 // Category tab definitions
@@ -188,9 +200,14 @@ pub fn format_rating_count(count: u32) -> String {
 /// "★★★★☆  89 ratings  •  892 downloads"
 pub fn format_entry_subtitle(entry: &CatalogEntry) -> String {
     let stars = format_star_rating(entry.rating_stars);
-    let dl    = format_download_count(entry.download_count);
+    let dl = format_download_count(entry.download_count);
     if entry.rating_count > 0 {
-        format!("{}  {}  •  {} dl", stars, format_rating_count(entry.rating_count), dl)
+        format!(
+            "{}  {}  •  {} dl",
+            stars,
+            format_rating_count(entry.rating_count),
+            dl
+        )
     } else {
         format!("{} dl", dl)
     }
@@ -198,8 +215,8 @@ pub fn format_entry_subtitle(entry: &CatalogEntry) -> String {
 
 /// Format the decimal star value for the detail screen: "4.5" from 450.
 pub fn format_rating_decimal(rating_stars: u16) -> String {
-    let whole  = rating_stars / 100;
-    let frac   = (rating_stars % 100 + 5) / 10; // round to 1 decimal
+    let whole = rating_stars / 100;
+    let frac = (rating_stars % 100 + 5) / 10; // round to 1 decimal
     if frac == 0 {
         format!("{}.0", whole)
     } else {
@@ -228,12 +245,12 @@ pub fn entry_category_display(entry: &CatalogEntry) -> &str {
         .trim_end_matches('\0');
     match cat {
         "communication" => "Communication",
-        "tools"         => "Tools",
-        "system"        => "System",
-        "games"         => "Games",
-        "drivers"       => "Drivers",
-        "wm"            => "Window Manager",
-        _               => "App",
+        "tools" => "Tools",
+        "system" => "System",
+        "games" => "Games",
+        "drivers" => "Drivers",
+        "wm" => "Window Manager",
+        _ => "App",
     }
 }
 
@@ -276,10 +293,10 @@ unsafe fn build_status_bar(parent: u32, title: &str, right: &str) -> (Vec<CStrin
 
 /// Build a category tab row below the status bar.
 unsafe fn build_category_tabs(parent: u32, active_idx: usize) -> Vec<CString> {
-    let primary  = thistle_ui_theme_primary();
-    let bg       = thistle_ui_theme_bg();
-    let surface  = thistle_ui_theme_surface();
-    let text     = thistle_ui_theme_text();
+    let primary = thistle_ui_theme_primary();
+    let bg = thistle_ui_theme_bg();
+    let surface = thistle_ui_theme_surface();
+    let text = thistle_ui_theme_text();
     let secondary = thistle_ui_theme_text_secondary();
 
     let mut strings: Vec<CString> = Vec::new();
@@ -312,57 +329,31 @@ unsafe fn build_category_tabs(parent: u32, active_idx: usize) -> Vec<CString> {
 }
 
 /// Build a single app card for the browse list.
-unsafe fn build_app_card(parent: u32, entry: &CatalogEntry) -> Vec<CString> {
-    let surface  = thistle_ui_theme_surface();
-    let text     = thistle_ui_theme_text();
-    let secondary = thistle_ui_theme_text_secondary();
-    let bg       = thistle_ui_theme_bg();
-
-    let mut strings: Vec<CString> = Vec::new();
-
-    let card = thistle_ui_create_container(parent);
-    thistle_ui_set_layout(card, LAYOUT_COLUMN);
-    thistle_ui_set_size(card, -1, 54);
-    thistle_ui_set_padding(card, 4, 6, 4, 6);
-    thistle_ui_set_bg_color(card, surface);
-    thistle_ui_set_radius(card, 4);
-
-    // App name
+unsafe fn build_app_card(parent: u32, entry: &CatalogEntry) -> (Vec<CString>, u32) {
+    let surface = thistle_ui_theme_surface();
+    let text = thistle_ui_theme_text();
     let name_str = std::str::from_utf8(&entry.name)
         .unwrap_or("?")
         .trim_end_matches('\0');
-    let name_cstr = CString::new(name_str).unwrap_or_default();
-    let name_lbl = thistle_ui_create_label(card, name_cstr.as_ptr());
-    thistle_ui_set_text_color(name_lbl, text);
-    thistle_ui_set_font_size(name_lbl, 13);
-    strings.push(name_cstr);
+    let label = format!("{}\n{}", name_str, format_entry_subtitle(entry));
+    let view_cstr = CString::new(label).unwrap_or_default();
+    let view_btn = thistle_ui_create_button(parent, view_cstr.as_ptr());
+    thistle_ui_set_size(view_btn, -1, 54);
+    thistle_ui_set_bg_color(view_btn, surface);
+    thistle_ui_set_text_color(view_btn, text);
+    thistle_ui_set_font_size(view_btn, 12);
+    thistle_ui_set_radius(view_btn, 4);
 
-    // Subtitle: stars + rating count + downloads
-    let subtitle = format_entry_subtitle(entry);
-    let sub_cstr = CString::new(subtitle.as_str()).unwrap_or_default();
-    let sub_lbl = thistle_ui_create_label(card, sub_cstr.as_ptr());
-    thistle_ui_set_text_color(sub_lbl, secondary);
-    thistle_ui_set_font_size(sub_lbl, 10);
-    strings.push(sub_cstr);
-
-    // Category label
-    let cat_text = entry_category_display(entry);
-    let cat_cstr = CString::new(cat_text).unwrap_or_default();
-    let cat_lbl = thistle_ui_create_label(card, cat_cstr.as_ptr());
-    thistle_ui_set_text_color(cat_lbl, secondary);
-    thistle_ui_set_font_size(cat_lbl, 10);
-    strings.push(cat_cstr);
-
-    strings
+    (vec![view_cstr], view_btn)
 }
 
 /// Build the detail screen for a single entry.
-unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
-    let bg        = thistle_ui_theme_bg();
-    let text      = thistle_ui_theme_text();
+unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> (Vec<CString>, u32, u32) {
+    let bg = thistle_ui_theme_bg();
+    let text = thistle_ui_theme_text();
     let secondary = thistle_ui_theme_text_secondary();
-    let surface   = thistle_ui_theme_surface();
-    let primary   = thistle_ui_theme_primary();
+    let surface = thistle_ui_theme_surface();
+    let primary = thistle_ui_theme_primary();
 
     let mut strings: Vec<CString> = Vec::new();
 
@@ -374,7 +365,7 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
     thistle_ui_set_gap(col, 0);
 
     // Back button in status bar position
-    let (mut bar_strings, _bar) = build_status_bar(col, "< Back", "App Store");
+    let (mut bar_strings, _bar) = build_status_bar(col, "App Store", "");
     strings.append(&mut bar_strings);
 
     // Content area (scrollable)
@@ -386,32 +377,48 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
     thistle_ui_set_bg_color(content, bg);
     thistle_ui_set_gap(content, 4);
 
+    let back_cstr = CString::new("Back").unwrap_or_default();
+    let back_btn = thistle_ui_create_button(content, back_cstr.as_ptr());
+    thistle_ui_set_size(back_btn, 58, 24);
+    thistle_ui_set_bg_color(back_btn, surface);
+    thistle_ui_set_text_color(back_btn, text);
+    strings.push(back_cstr);
+
     // App name (large)
     let name_str = std::str::from_utf8(&entry.name)
         .unwrap_or("?")
         .trim_end_matches('\0');
     let name_cstr = CString::new(name_str).unwrap_or_default();
     let name_lbl = thistle_ui_create_label(content, name_cstr.as_ptr());
+    thistle_ui_set_size(name_lbl, -1, 22);
     thistle_ui_set_text_color(name_lbl, text);
     thistle_ui_set_font_size(name_lbl, 16);
     strings.push(name_cstr);
 
     // Version + author
-    let ver_str  = std::str::from_utf8(&entry.version).unwrap_or("").trim_end_matches('\0');
-    let auth_str = std::str::from_utf8(&entry.author).unwrap_or("").trim_end_matches('\0');
+    let ver_str = std::str::from_utf8(&entry.version)
+        .unwrap_or("")
+        .trim_end_matches('\0');
+    let auth_str = std::str::from_utf8(&entry.author)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     let meta_line = format!("v{}  by {}", ver_str, auth_str);
     let meta_cstr = CString::new(meta_line.as_str()).unwrap_or_default();
     let meta_lbl = thistle_ui_create_label(content, meta_cstr.as_ptr());
+    thistle_ui_set_size(meta_lbl, -1, 16);
     thistle_ui_set_text_color(meta_lbl, secondary);
     thistle_ui_set_font_size(meta_lbl, 11);
     strings.push(meta_cstr);
 
     // Updated date
-    let date_str = std::str::from_utf8(&entry.updated_date).unwrap_or("").trim_end_matches('\0');
+    let date_str = std::str::from_utf8(&entry.updated_date)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     if !date_str.is_empty() {
         let date_line = format!("Updated: {}", date_str);
         let date_cstr = CString::new(date_line.as_str()).unwrap_or_default();
         let date_lbl = thistle_ui_create_label(content, date_cstr.as_ptr());
+        thistle_ui_set_size(date_lbl, -1, 16);
         thistle_ui_set_text_color(date_lbl, secondary);
         thistle_ui_set_font_size(date_lbl, 11);
         strings.push(date_cstr);
@@ -419,14 +426,20 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
 
     // Rating row: ★★★★½ 4.5 (127 ratings)
     let stars_str = format_star_rating(entry.rating_stars);
-    let dec_str   = format_rating_decimal(entry.rating_stars);
+    let dec_str = format_rating_decimal(entry.rating_stars);
     let rating_line = if entry.rating_count > 0 {
-        format!("{} {} ({})", stars_str, dec_str, format_rating_count(entry.rating_count))
+        format!(
+            "{} {} ({})",
+            stars_str,
+            dec_str,
+            format_rating_count(entry.rating_count)
+        )
     } else {
         "No ratings yet".to_string()
     };
     let rating_cstr = CString::new(rating_line.as_str()).unwrap_or_default();
     let rating_lbl = thistle_ui_create_label(content, rating_cstr.as_ptr());
+    thistle_ui_set_size(rating_lbl, -1, 18);
     thistle_ui_set_text_color(rating_lbl, text);
     thistle_ui_set_font_size(rating_lbl, 12);
     strings.push(rating_cstr);
@@ -435,42 +448,53 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
     let dl_line = format!("{} downloads", format_download_count(entry.download_count));
     let dl_cstr = CString::new(dl_line.as_str()).unwrap_or_default();
     let dl_lbl = thistle_ui_create_label(content, dl_cstr.as_ptr());
+    thistle_ui_set_size(dl_lbl, -1, 16);
     thistle_ui_set_text_color(dl_lbl, secondary);
     thistle_ui_set_font_size(dl_lbl, 11);
     strings.push(dl_cstr);
 
     // Description
-    let desc_str = std::str::from_utf8(&entry.description).unwrap_or("").trim_end_matches('\0');
+    let desc_str = std::str::from_utf8(&entry.description)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     if !desc_str.is_empty() {
         let desc_cstr = CString::new(desc_str).unwrap_or_default();
         let desc_lbl = thistle_ui_create_label(content, desc_cstr.as_ptr());
+        thistle_ui_set_size(desc_lbl, -1, 34);
         thistle_ui_set_text_color(desc_lbl, text);
         thistle_ui_set_font_size(desc_lbl, 11);
         strings.push(desc_cstr);
     }
 
     // Changelog (What's new)
-    let cl_str = std::str::from_utf8(&entry.changelog).unwrap_or("").trim_end_matches('\0');
+    let cl_str = std::str::from_utf8(&entry.changelog)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     if !cl_str.is_empty() {
         let wn_cstr = CString::new("What's new:").unwrap_or_default();
         let wn_lbl = thistle_ui_create_label(content, wn_cstr.as_ptr());
+        thistle_ui_set_size(wn_lbl, -1, 16);
         thistle_ui_set_text_color(wn_lbl, text);
         thistle_ui_set_font_size(wn_lbl, 11);
         strings.push(wn_cstr);
 
         let cl_cstr = CString::new(cl_str).unwrap_or_default();
         let cl_lbl = thistle_ui_create_label(content, cl_cstr.as_ptr());
+        thistle_ui_set_size(cl_lbl, -1, 28);
         thistle_ui_set_text_color(cl_lbl, secondary);
         thistle_ui_set_font_size(cl_lbl, 10);
         strings.push(cl_cstr);
     }
 
     // Permissions
-    let perm_str = std::str::from_utf8(&entry.permissions).unwrap_or("").trim_end_matches('\0');
+    let perm_str = std::str::from_utf8(&entry.permissions)
+        .unwrap_or("")
+        .trim_end_matches('\0');
     if !perm_str.is_empty() {
         let perm_line = format!("Permissions: {}", perm_str);
         let perm_cstr = CString::new(perm_line.as_str()).unwrap_or_default();
         let perm_lbl = thistle_ui_create_label(content, perm_cstr.as_ptr());
+        thistle_ui_set_size(perm_lbl, -1, 16);
         thistle_ui_set_text_color(perm_lbl, secondary);
         thistle_ui_set_font_size(perm_lbl, 10);
         strings.push(perm_cstr);
@@ -479,11 +503,16 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
     // Size + signed status
     let size_line = format!(
         "Size: {}  Signed: {}",
-        format_size(entry.size_bytes),
+        format_size(if entry.package_size_bytes > 0 {
+            entry.package_size_bytes
+        } else {
+            entry.size_bytes
+        }),
         if entry.is_signed { "Yes" } else { "No" }
     );
     let size_cstr = CString::new(size_line.as_str()).unwrap_or_default();
     let size_lbl = thistle_ui_create_label(content, size_cstr.as_ptr());
+    thistle_ui_set_size(size_lbl, -1, 16);
     thistle_ui_set_text_color(size_lbl, secondary);
     thistle_ui_set_font_size(size_lbl, 10);
     strings.push(size_cstr);
@@ -512,15 +541,15 @@ unsafe fn build_detail_screen(root: u32, entry: &CatalogEntry) -> Vec<CString> {
     thistle_ui_set_font_size(rate_btn, 12);
     strings.push(rate_cstr);
 
-    strings
+    (strings, install_btn, back_btn)
 }
 
 /// Build the browse screen (category tabs + paginated list).
-unsafe fn build_browse_screen(root: u32, page: usize, category_idx: usize) -> Vec<CString> {
-    let bg        = thistle_ui_theme_bg();
-    let text      = thistle_ui_theme_text();
+unsafe fn build_browse_screen(root: u32, page: usize, category_idx: usize) -> (Vec<CString>, u32) {
+    let bg = thistle_ui_theme_bg();
+    let text = thistle_ui_theme_text();
     let secondary = thistle_ui_theme_text_secondary();
-    let primary   = thistle_ui_theme_primary();
+    let primary = thistle_ui_theme_primary();
 
     let mut strings: Vec<CString> = Vec::new();
 
@@ -532,7 +561,7 @@ unsafe fn build_browse_screen(root: u32, page: usize, category_idx: usize) -> Ve
     thistle_ui_set_gap(col, 0);
 
     // Status bar
-    let (mut bar_strings, _) = build_status_bar(col, "App Store", "[search]");
+    let (mut bar_strings, _) = build_status_bar(col, "App Store", "");
     strings.append(&mut bar_strings);
 
     // Category tabs
@@ -573,6 +602,7 @@ unsafe fn build_browse_screen(root: u32, page: usize, category_idx: usize) -> Ve
     let page_label = format!("Page {}", page + 1);
     let page_cstr = CString::new(page_label.as_str()).unwrap_or_default();
     let page_lbl = thistle_ui_create_label(footer, page_cstr.as_ptr());
+    thistle_ui_set_size(page_lbl, 60, 18);
     thistle_ui_set_font_size(page_lbl, 10);
     thistle_ui_set_text_color(page_lbl, secondary);
     strings.push(page_cstr);
@@ -583,12 +613,17 @@ unsafe fn build_browse_screen(root: u32, page: usize, category_idx: usize) -> Ve
     thistle_ui_set_font_size(next_btn, 10);
     strings.push(next_cstr);
 
-    strings
+    (strings, list)
 }
 
 /// Build the Installing progress screen.
-unsafe fn build_installing_screen(root: u32, entry_id: &str, step: &InstallStep, progress: u8) -> Vec<CString> {
-    let bg   = thistle_ui_theme_bg();
+unsafe fn build_installing_screen(
+    root: u32,
+    entry_id: &str,
+    step: &InstallStep,
+    progress: u8,
+) -> Vec<CString> {
+    let bg = thistle_ui_theme_bg();
     let text = thistle_ui_theme_text();
     let secondary = thistle_ui_theme_text_secondary();
 
@@ -617,9 +652,9 @@ unsafe fn build_installing_screen(root: u32, entry_id: &str, step: &InstallStep,
 
     let step_text = match step {
         InstallStep::Downloading => "Downloading...",
-        InstallStep::Verifying   => "Verifying signature...",
-        InstallStep::Done        => "Done!",
-        InstallStep::Failed      => "Install failed.",
+        InstallStep::Verifying => "Verifying signature...",
+        InstallStep::Done => "Done!",
+        InstallStep::Failed => "Install failed.",
     };
     let step_cstr = CString::new(step_text).unwrap_or_default();
     let step_lbl = thistle_ui_create_label(col, step_cstr.as_ptr());
@@ -628,9 +663,14 @@ unsafe fn build_installing_screen(root: u32, entry_id: &str, step: &InstallStep,
     strings.push(step_cstr);
 
     // ASCII progress bar: [====      ] 40%
-    let filled  = (progress as usize * 20 / 100).min(20);
-    let empty   = 20 - filled;
-    let bar = format!("[{}{}] {}%", "=".repeat(filled), " ".repeat(empty), progress);
+    let filled = (progress as usize * 20 / 100).min(20);
+    let empty = 20 - filled;
+    let bar = format!(
+        "[{}{}] {}%",
+        "=".repeat(filled),
+        " ".repeat(empty),
+        progress
+    );
     let bar_cstr = CString::new(bar.as_str()).unwrap_or_default();
     let bar_lbl = thistle_ui_create_label(col, bar_cstr.as_ptr());
     thistle_ui_set_text_color(bar_lbl, text);
@@ -642,8 +682,8 @@ unsafe fn build_installing_screen(root: u32, entry_id: &str, step: &InstallStep,
 
 /// Build the rate dialog screen.
 unsafe fn build_rate_dialog(root: u32, entry_id: &str, selected: u8) -> Vec<CString> {
-    let bg      = thistle_ui_theme_bg();
-    let text    = thistle_ui_theme_text();
+    let bg = thistle_ui_theme_bg();
+    let text = thistle_ui_theme_text();
     let primary = thistle_ui_theme_primary();
     let surface = thistle_ui_theme_surface();
     let secondary = thistle_ui_theme_text_secondary();
@@ -696,7 +736,7 @@ unsafe fn build_rate_dialog(root: u32, entry_id: &str, selected: u8) -> Vec<CStr
     thistle_ui_set_align(btn_row, ALIGN_CENTER, ALIGN_CENTER);
 
     let submit_cstr = CString::new("Submit").unwrap_or_default();
-    let submit_btn  = thistle_ui_create_button(btn_row, submit_cstr.as_ptr());
+    let submit_btn = thistle_ui_create_button(btn_row, submit_cstr.as_ptr());
     thistle_ui_set_size(submit_btn, 80, 28);
     thistle_ui_set_bg_color(submit_btn, primary);
     thistle_ui_set_text_color(submit_btn, bg);
@@ -704,7 +744,7 @@ unsafe fn build_rate_dialog(root: u32, entry_id: &str, selected: u8) -> Vec<CStr
     strings.push(submit_cstr);
 
     let cancel_cstr = CString::new("Cancel").unwrap_or_default();
-    let cancel_btn  = thistle_ui_create_button(btn_row, cancel_cstr.as_ptr());
+    let cancel_btn = thistle_ui_create_button(btn_row, cancel_cstr.as_ptr());
     thistle_ui_set_size(cancel_btn, 70, 28);
     thistle_ui_set_bg_color(cancel_btn, surface);
     thistle_ui_set_text_color(cancel_btn, text);
@@ -715,42 +755,138 @@ unsafe fn build_rate_dialog(root: u32, entry_id: &str, selected: u8) -> Vec<CStr
 }
 
 // ---------------------------------------------------------------------------
+// Interactive screen controller
+// ---------------------------------------------------------------------------
+
+fn catalog_cache_path() -> &'static str {
+    if cfg!(target_os = "espidf") {
+        "/sdcard/config/catalog_cache.json"
+    } else {
+        "/tmp/thistle_sdcard/config/catalog_cache.json"
+    }
+}
+
+unsafe fn clear_screen(state: &mut AppStoreState) {
+    for widget in state.root_widgets.drain(..) {
+        thistle_ui_destroy(widget);
+    }
+    state._label_strings.clear();
+}
+
+unsafe fn render_browse() {
+    let mut state = APPSTORE.lock().unwrap();
+    clear_screen(&mut state);
+    let (page, category_idx) = match state.screen {
+        AppStoreScreen::Browse { page, category_idx } => (page, category_idx),
+        _ => (0, 0),
+    };
+    state.screen = AppStoreScreen::Browse { page, category_idx };
+    let root = thistle_ui_get_app_root();
+    let screen = thistle_ui_create_container(root);
+    thistle_ui_set_size(screen, -1, -1);
+    let (mut strings, list) = build_browse_screen(screen, page, category_idx);
+    let start = page.saturating_mul(4);
+    let end = (start + 4).min(state.entries.len());
+    for index in start..end {
+        let entry = &state.entries[index] as *const CatalogEntry;
+        let (mut card_strings, view_button) = build_app_card(list, &*entry);
+        thistle_ui_on_event(
+            view_button, EVENT_CLICK, detail_clicked,
+            (index + 1) as *mut c_void,
+        );
+        strings.append(&mut card_strings);
+    }
+    if state.entries.is_empty() {
+        let empty = CString::new("No TAP apps in catalog").unwrap_or_default();
+        let label = thistle_ui_create_label(list, empty.as_ptr());
+        thistle_ui_set_font_size(label, 12);
+        strings.push(empty);
+    }
+    state.root_widgets.push(screen);
+    state._label_strings = strings;
+}
+
+unsafe fn render_detail(index: usize) {
+    let mut state = APPSTORE.lock().unwrap();
+    if index >= state.entries.len() { return; }
+    clear_screen(&mut state);
+    state.screen = AppStoreScreen::Detail { entry_idx: index };
+    let root = thistle_ui_get_app_root();
+    let screen = thistle_ui_create_container(root);
+    thistle_ui_set_size(screen, -1, -1);
+    let entry = &state.entries[index] as *const CatalogEntry;
+    let (strings, install_button, back_button) = build_detail_screen(screen, &*entry);
+    thistle_ui_on_event(
+        install_button, EVENT_CLICK, install_clicked,
+        (index + 1) as *mut c_void,
+    );
+    thistle_ui_on_event(back_button, EVENT_CLICK, back_clicked, std::ptr::null_mut());
+    state.root_widgets.push(screen);
+    state._label_strings = strings;
+}
+
+unsafe fn render_installing(entry_id: &str, step: InstallStep, progress: u8) {
+    let mut state = APPSTORE.lock().unwrap();
+    clear_screen(&mut state);
+    state.screen = AppStoreScreen::Installing {
+        entry_id: entry_id.to_string(), step: step.clone(), progress,
+    };
+    let root = thistle_ui_get_app_root();
+    let screen = thistle_ui_create_container(root);
+    thistle_ui_set_size(screen, -1, -1);
+    let strings = build_installing_screen(screen, entry_id, &step, progress);
+    state.root_widgets.push(screen);
+    state._label_strings = strings;
+}
+
+unsafe extern "C" fn detail_clicked(_widget: u32, _event: i32, user_data: *mut c_void) {
+    let encoded = user_data as usize;
+    if encoded > 0 { render_detail(encoded - 1); }
+}
+
+unsafe extern "C" fn back_clicked(_widget: u32, _event: i32, _user_data: *mut c_void) {
+    render_browse();
+}
+
+unsafe extern "C" fn install_clicked(_widget: u32, _event: i32, user_data: *mut c_void) {
+    let encoded = user_data as usize;
+    if encoded == 0 { return; }
+    let index = encoded - 1;
+    let (entry_id, entry_ptr) = {
+        let state = APPSTORE.lock().unwrap();
+        let Some(entry) = state.entries.get(index) else { return; };
+        let id = std::str::from_utf8(&entry.id).unwrap_or("").trim_end_matches('\0').to_string();
+        (id, entry as *const CatalogEntry)
+    };
+    render_installing(&entry_id, InstallStep::Downloading, 10);
+    let result = appstore_install_entry(entry_ptr, std::ptr::null(), std::ptr::null_mut());
+    if result == ESP_OK {
+        render_installing(&entry_id, InstallStep::Done, 100);
+    } else {
+        render_installing(&entry_id, InstallStep::Failed, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle callbacks
 // ---------------------------------------------------------------------------
 
 /// on_create: build the loading screen, then fetch catalog.
 unsafe extern "C" fn on_create() -> i32 {
-    // WidgetId 0 is the legitimate tree root; not a failure sentinel.
-    let root = thistle_ui_get_app_root();
-
-    let bg   = thistle_ui_theme_bg();
-    let text = thistle_ui_theme_text();
-
-    let col = thistle_ui_create_container(root);
-    thistle_ui_set_layout(col, LAYOUT_COLUMN);
-    thistle_ui_set_size(col, -1, -1);
-    thistle_ui_set_flex_grow(col, 1);
-    thistle_ui_set_bg_color(col, bg);
-    thistle_ui_set_align(col, ALIGN_CENTER, ALIGN_CENTER);
-
-    let lbl = thistle_ui_create_label(col, b"Loading App Store...\0".as_ptr() as *const c_char);
-    thistle_ui_set_text_color(lbl, text);
-    thistle_ui_set_font_size(lbl, 13);
-
-    // In a real implementation we would kick off an async catalog fetch here.
-    // For this built-in stub we initialise with empty entries and wait for
-    // the catalog JSON to be available on the SD card.
     if let Ok(mut state) = APPSTORE.lock() {
-        state.screen = AppStoreScreen::Browse { page: 0, category_idx: 0 };
+        state.screen = AppStoreScreen::Browse {
+            page: 0,
+            category_idx: 0,
+        };
         state.entries.clear();
 
         // Attempt to load from SD card catalog cache
-        if let Ok(json) = std::fs::read_to_string("/sdcard/config/catalog_cache.json") {
+        if let Ok(json) = std::fs::read_to_string(catalog_cache_path()) {
             parse_catalog_entries(&json, "all", &mut state.entries);
             sort_entries_slice(&mut state.entries, SORT_BY_RATING, false);
         }
     }
-
+    render_browse();
     ESP_OK
 }
 
@@ -780,20 +916,20 @@ unsafe extern "C" fn on_destroy() {
 // ---------------------------------------------------------------------------
 
 static MANIFEST: CAppManifest = CAppManifest {
-    id:               b"com.thistle.appstore\0".as_ptr() as *const c_char,
-    name:             b"App Store\0".as_ptr() as *const c_char,
-    version:          b"1.0.0\0".as_ptr() as *const c_char,
+    id: b"com.thistle.appstore\0".as_ptr() as *const c_char,
+    name: b"App Store\0".as_ptr() as *const c_char,
+    version: b"1.0.0\0".as_ptr() as *const c_char,
     allow_background: false,
-    min_memory_kb:    64,
+    min_memory_kb: 64,
 };
 
 static ENTRY: CAppEntry = CAppEntry {
-    on_create:  Some(on_create),
-    on_start:   Some(on_start),
-    on_pause:   Some(on_pause),
-    on_resume:  Some(on_resume),
+    on_create: Some(on_create),
+    on_start: Some(on_start),
+    on_pause: Some(on_pause),
+    on_resume: Some(on_resume),
     on_destroy: Some(on_destroy),
-    manifest:   &MANIFEST as *const CAppManifest,
+    manifest: &MANIFEST as *const CAppManifest,
 };
 
 // ---------------------------------------------------------------------------
@@ -840,7 +976,10 @@ mod tests {
         // Must contain star glyphs, rating count, and download count
         assert!(sub.contains('★'), "subtitle must contain filled star");
         assert!(sub.contains("127"), "subtitle must contain rating count");
-        assert!(sub.contains("1.5K"), "subtitle must contain formatted download count");
+        assert!(
+            sub.contains("1.5K"),
+            "subtitle must contain formatted download count"
+        );
     }
 
     #[test]
@@ -848,7 +987,10 @@ mod tests {
         let mut e = CatalogEntry::default();
         e.download_count = 500;
         let sub = format_entry_subtitle(&e);
-        assert!(sub.contains("500"), "subtitle must show exact count for <1000");
+        assert!(
+            sub.contains("500"),
+            "subtitle must show exact count for <1000"
+        );
     }
 
     #[test]
@@ -857,16 +999,16 @@ mod tests {
         assert_eq!(format_rating_decimal(400), "4.0");
         assert_eq!(format_rating_decimal(500), "5.0");
         assert_eq!(format_rating_decimal(391), "3.9");
-        assert_eq!(format_rating_decimal(0),   "0.0");
+        assert_eq!(format_rating_decimal(0), "0.0");
     }
 
     #[test]
     fn test_format_size() {
-        assert_eq!(format_size(0),          "? KB");
-        assert_eq!(format_size(1024),       "1 KB");
-        assert_eq!(format_size(65536),      "64 KB");
-        assert_eq!(format_size(1_048_576),  "1.0 MB");
-        assert_eq!(format_size(1_258_291),  "1.2 MB");
+        assert_eq!(format_size(0), "? KB");
+        assert_eq!(format_size(1024), "1 KB");
+        assert_eq!(format_size(65536), "64 KB");
+        assert_eq!(format_size(1_048_576), "1.0 MB");
+        assert_eq!(format_size(1_258_291), "1.2 MB");
     }
 
     #[test]
@@ -890,8 +1032,8 @@ mod tests {
 
     #[test]
     fn test_format_rating_count() {
-        assert_eq!(format_rating_count(0),   "0 ratings");
-        assert_eq!(format_rating_count(1),   "1 rating");
+        assert_eq!(format_rating_count(0), "0 ratings");
+        assert_eq!(format_rating_count(1), "1 rating");
         assert_eq!(format_rating_count(127), "127 ratings");
     }
 
@@ -909,9 +1051,10 @@ mod tests {
         assert_eq!(entries.len(), 2, "tools filter should return 2 entries");
 
         // Verify the right entries were returned
-        let names: Vec<&str> = entries.iter().map(|e| {
-            std::str::from_utf8(&e.name).unwrap().trim_end_matches('\0')
-        }).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| std::str::from_utf8(&e.name).unwrap().trim_end_matches('\0'))
+            .collect();
         assert!(names.contains(&"Navigator"));
         assert!(names.contains(&"Notes"));
     }
@@ -936,23 +1079,28 @@ mod tests {
     fn test_install_progress_bar_format() {
         // Simulate what build_installing_screen would produce
         let progress = 40u8;
-        let filled   = (progress as usize * 20 / 100).min(20);
-        let empty    = 20 - filled;
-        let bar      = format!("[{}{}] {}%", "=".repeat(filled), " ".repeat(empty), progress);
+        let filled = (progress as usize * 20 / 100).min(20);
+        let empty = 20 - filled;
+        let bar = format!(
+            "[{}{}] {}%",
+            "=".repeat(filled),
+            " ".repeat(empty),
+            progress
+        );
         assert_eq!(bar, "[========            ] 40%");
     }
 
     #[test]
     fn test_category_label() {
-        assert_eq!(Category::All.label(),            "All");
-        assert_eq!(Category::Communication.label(),  "Comms");
+        assert_eq!(Category::All.label(), "All");
+        assert_eq!(Category::Communication.label(), "Comms");
         assert_eq!(Category::WindowManagers.label(), "WM");
     }
 
     #[test]
     fn test_category_filter_str() {
-        assert_eq!(Category::All.filter_str(),    "all");
+        assert_eq!(Category::All.filter_str(), "all");
         assert_eq!(Category::Drivers.filter_str(), "driver");
-        assert_eq!(Category::Tools.filter_str(),   "tools");
+        assert_eq!(Category::Tools.filter_str(), "tools");
     }
 }

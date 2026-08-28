@@ -224,12 +224,20 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     let signature = match std::fs::read(format!("{update_path}.sig")) {
         Ok(bytes) => bytes,
         Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot open OTA signature\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Cannot open OTA signature\0".as_ptr(),
+            );
             return ESP_ERR_NOT_FOUND;
         }
     };
     if signature.len() != 64 {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"OTA signature has invalid size\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"OTA signature has invalid size\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -265,11 +273,8 @@ pub unsafe extern "C" fn ota_apply_from_sd(
         }
 
         let mut written: u32 = 0;
-        let stream_result = verify_exact_reader_with(
-            &mut file,
-            file_size as usize,
-            &signature,
-            |chunk| {
+        let stream_result =
+            verify_exact_reader_with(&mut file, file_size as usize, &signature, |chunk| {
                 let ret = esp_ota_write(ota_handle, chunk.as_ptr(), chunk.len());
                 if ret != ESP_OK {
                     return Err(ret);
@@ -279,8 +284,7 @@ pub unsafe extern "C" fn ota_apply_from_sd(
                     cb(written, file_size as u32, user_data);
                 }
                 Ok(())
-            },
-        );
+            });
         if let Err(error) = stream_result {
             esp_log_write(
                 ESP_LOG_ERROR,
@@ -326,12 +330,9 @@ pub unsafe extern "C" fn ota_apply_from_sd(
     #[cfg(not(target_os = "espidf"))]
     {
         // Simulator: exercise the same one-open-object verification boundary.
-        if let Err(error) = verify_exact_reader_with(
-            &mut file,
-            file_size as usize,
-            &signature,
-            |_| Ok(()),
-        ) {
+        if let Err(error) =
+            verify_exact_reader_with(&mut file, file_size as usize, &signature, |_| Ok(()))
+        {
             esp_log_write(
                 ESP_LOG_ERROR,
                 TAG.as_ptr(),

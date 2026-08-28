@@ -101,13 +101,17 @@ pub(crate) fn verify_exact_reader_with(
     let verifying_key = key_guard.as_ref().ok_or(ESP_ERR_INVALID_STATE)?;
     let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| ESP_ERR_INVALID_SIZE)?;
     let signature = Signature::from_bytes(&sig_bytes);
-    let mut verifier = verifying_key.verify_stream(&signature).map_err(|_| ESP_ERR_INVALID_CRC)?;
+    let mut verifier = verifying_key
+        .verify_stream(&signature)
+        .map_err(|_| ESP_ERR_INVALID_CRC)?;
 
     let mut buffer = [0u8; 4096];
     let mut consumed = 0usize;
     while consumed < expected_size {
         let wanted = buffer.len().min(expected_size - consumed);
-        let count = reader.read(&mut buffer[..wanted]).map_err(|_| ESP_ERR_INVALID_SIZE)?;
+        let count = reader
+            .read(&mut buffer[..wanted])
+            .map_err(|_| ESP_ERR_INVALID_SIZE)?;
         if count == 0 {
             return Err(ESP_ERR_INVALID_SIZE);
         }
@@ -121,7 +125,9 @@ pub(crate) fn verify_exact_reader_with(
         return Err(ESP_ERR_INVALID_SIZE);
     }
 
-    verifier.finalize_and_verify().map_err(|_| ESP_ERR_INVALID_CRC)
+    verifier
+        .finalize_and_verify()
+        .map_err(|_| ESP_ERR_INVALID_CRC)
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +280,9 @@ mod tests {
         if let Ok(mut g) = VERIFYING_KEY.lock() {
             *g = None;
         }
-        unsafe { HEX_BUF = [0u8; 65]; }
+        unsafe {
+            HEX_BUF = [0u8; 65];
+        }
     }
 
     fn fresh_verifying_key_bytes() -> [u8; 32] {
@@ -297,7 +305,10 @@ mod tests {
     fn streamed_verification_binds_exact_consumed_bytes_before_activation() {
         reset();
         let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
-        assert_eq!(unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) }, ESP_OK);
+        assert_eq!(
+            unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) },
+            ESP_OK
+        );
         let payload = vec![0x5au8; 9000];
         let signature = signing_key.sign(&payload).to_bytes();
 
@@ -334,7 +345,10 @@ mod tests {
     fn streamed_verification_rejects_truncation_and_overrun() {
         reset();
         let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
-        assert_eq!(unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) }, ESP_OK);
+        assert_eq!(
+            unsafe { signing_init(signing_key.verifying_key().as_bytes().as_ptr()) },
+            ESP_OK
+        );
         let payload = b"signed firmware bytes";
         let signature = signing_key.sign(payload).to_bytes();
 
@@ -379,8 +393,7 @@ mod tests {
 
         let data = b"hello thistle";
         let zero_sig = [0u8; 64];
-        let result =
-            unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
+        let result = unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
         assert_eq!(result, ESP_ERR_INVALID_CRC);
     }
 
@@ -402,8 +415,7 @@ mod tests {
         reset();
         let data = b"some data";
         let zero_sig = [0u8; 64];
-        let result =
-            unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
+        let result = unsafe { signing_verify(data.as_ptr(), data.len(), zero_sig.as_ptr()) };
         assert_eq!(result, ESP_ERR_INVALID_STATE);
     }
 
@@ -447,7 +459,10 @@ mod tests {
         unsafe { signing_init(verifying_key_b.as_ptr()) };
 
         let result = unsafe { signing_verify(data.as_ptr(), data.len(), sig_bytes.as_ptr()) };
-        assert_eq!(result, ESP_ERR_INVALID_CRC, "signature from wrong key must fail");
+        assert_eq!(
+            result, ESP_ERR_INVALID_CRC,
+            "signature from wrong key must fail"
+        );
     }
 
     #[test]
@@ -467,8 +482,13 @@ mod tests {
 
         // Tamper: use different data with the original signature
         let tampered_data = b"tampered data!!";
-        let result =
-            unsafe { signing_verify(tampered_data.as_ptr(), tampered_data.len(), sig_bytes.as_ptr()) };
+        let result = unsafe {
+            signing_verify(
+                tampered_data.as_ptr(),
+                tampered_data.len(),
+                sig_bytes.as_ptr(),
+            )
+        };
         assert_eq!(result, ESP_ERR_INVALID_CRC, "tampered data must not verify");
     }
 
@@ -485,7 +505,10 @@ mod tests {
         let seed_b = [0x66u8; 32];
         let vk_b = SigningKey::from_bytes(&seed_b).verifying_key().to_bytes();
         let r2 = unsafe { signing_init(vk_b.as_ptr()) };
-        assert_eq!(r2, ESP_OK, "calling signing_init a second time must succeed");
+        assert_eq!(
+            r2, ESP_OK,
+            "calling signing_init a second time must succeed"
+        );
     }
 
     #[test]
@@ -497,12 +520,18 @@ mod tests {
         let zero_sig = [0u8; 64];
         // null data pointer
         let result = unsafe { signing_verify(std::ptr::null(), 10, zero_sig.as_ptr()) };
-        assert_eq!(result, ESP_ERR_INVALID_ARG, "null data must return ESP_ERR_INVALID_ARG");
+        assert_eq!(
+            result, ESP_ERR_INVALID_ARG,
+            "null data must return ESP_ERR_INVALID_ARG"
+        );
 
         // null signature pointer
         let data = b"some data";
         let result = unsafe { signing_verify(data.as_ptr(), data.len(), std::ptr::null()) };
-        assert_eq!(result, ESP_ERR_INVALID_ARG, "null signature must return ESP_ERR_INVALID_ARG");
+        assert_eq!(
+            result, ESP_ERR_INVALID_ARG,
+            "null signature must return ESP_ERR_INVALID_ARG"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -515,7 +544,10 @@ mod tests {
     fn test_has_signature_nonexistent_path() {
         let path = b"/nonexistent/path/that/does/not/exist.elf\0";
         let result = unsafe { signing_has_signature(path.as_ptr() as *const c_char) };
-        assert!(!result, "signing_has_signature must return false for missing file");
+        assert!(
+            !result,
+            "signing_has_signature must return false for missing file"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -660,7 +692,10 @@ mod tests {
         let ptr2 = signing_get_public_key_hex();
         let hex2 = unsafe { CStr::from_ptr(ptr2).to_str().unwrap().to_string() };
 
-        assert_eq!(hex1, hex2, "same key must produce identical hex output on two inits");
+        assert_eq!(
+            hex1, hex2,
+            "same key must produce identical hex output on two inits"
+        );
         assert_eq!(hex1.len(), 64, "hex output must be exactly 64 characters");
     }
 

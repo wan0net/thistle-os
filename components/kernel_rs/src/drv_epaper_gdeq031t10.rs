@@ -25,8 +25,8 @@ const ESP_ERR_TIMEOUT: i32 = 0x107;
 const ESP_ERR_NOT_SUPPORTED: i32 = 0x106;
 
 // ── Panel geometry ────────────────────────────────────────────────────────────
-// T-Deck Pro is held portrait (like BlackBerry). Native panel matches:
-// 240 columns × 320 rows. No rotation needed.
+// T-Deck Pro is held portrait (like BlackBerry). The panel is 240 columns ×
+// 320 rows with a vertically reversed row scan; columns remain left-to-right.
 
 const EPD_WIDTH: usize = 240;
 const EPD_HEIGHT: usize = 320;
@@ -42,7 +42,7 @@ const CMD_BOOSTER_SOFT_START: u8 = 0x06;
 const CMD_RESOLUTION_SETTING: u8 = 0x61;
 const CMD_DEEP_SLEEP: u8 = 0x07;
 const CMD_DATA_START_TRANSMISSION: u8 = 0x10; // old frame
-const CMD_NEW_DATA_TRANSMISSION: u8 = 0x13;   // new frame
+const CMD_NEW_DATA_TRANSMISSION: u8 = 0x13; // new frame
 #[allow(dead_code)]
 const CMD_DATA_STOP: u8 = 0x11;
 const CMD_DISPLAY_REFRESH: u8 = 0x12;
@@ -69,33 +69,21 @@ const CMD_TEMPERATURE_FORCED: u8 = 0xE5;
 
 #[allow(dead_code)]
 static LUT_FULL_UPDATE: [u8; 66] = [
-    0x80, 0x60, 0x40, 0x00, 0x00, 0x00, 0x00,
-    0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00,
-    0x80, 0x60, 0x40, 0x00, 0x00, 0x00, 0x00,
-    0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x03, 0x03, 0x00, 0x00, 0x02,
-    0x09, 0x09, 0x00, 0x00, 0x02,
-    0x03, 0x03, 0x00, 0x00, 0x02,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x15, 0x41, 0xA8, 0x32, 0x30, 0x0A,
+    0x80, 0x60, 0x40, 0x00, 0x00, 0x00, 0x00, 0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00, 0x80, 0x60,
+    0x40, 0x00, 0x00, 0x00, 0x00, 0x10, 0x60, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x03, 0x03, 0x00, 0x00, 0x02, 0x09, 0x09, 0x00, 0x00, 0x02, 0x03, 0x03, 0x00,
+    0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15, 0x41, 0xA8, 0x32,
+    0x30, 0x0A,
 ];
 
 // Partial-refresh LUT (faster, some ghosting)
 #[allow(dead_code)]
 static LUT_PARTIAL_UPDATE: [u8; 66] = [
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x0A, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x15, 0x41, 0xA8, 0x32, 0x30, 0x0A,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15, 0x41, 0xA8, 0x32,
+    0x30, 0x0A,
 ];
 
 // ── Configuration struct (must match C epaper_gdeq031t10_config_t layout) ─────
@@ -177,16 +165,22 @@ static FB: StaticCell<[u8; EPD_FB_BYTES]> = StaticCell(UnsafeCell::new([0u8; EPD
 static FB_OLD: StaticCell<[u8; EPD_FB_BYTES]> = StaticCell(UnsafeCell::new([0u8; EPD_FB_BYTES]));
 
 #[inline]
-unsafe fn fb_ptr() -> *mut u8 { (*FB.0.get()).as_mut_ptr() }
+unsafe fn fb_ptr() -> *mut u8 {
+    (*FB.0.get()).as_mut_ptr()
+}
 #[inline]
-unsafe fn fb_old_ptr() -> *mut u8 { (*FB_OLD.0.get()).as_mut_ptr() }
+unsafe fn fb_old_ptr() -> *mut u8 {
+    (*FB_OLD.0.get()).as_mut_ptr()
+}
 #[inline]
-unsafe fn spi_cmd_ptr() -> *mut u8 { SPI_CMD_BUF.0.get() }
+unsafe fn spi_cmd_ptr() -> *mut u8 {
+    SPI_CMD_BUF.0.get()
+}
 
 // ── Driver state ──────────────────────────────────────────────────────────────
 
 struct EpaperState {
-    spi: *mut c_void,           // SPI device handle
+    spi: *mut c_void, // SPI device handle
     cfg: EpaperConfig,
     refresh_mode: HalDisplayRefreshMode,
     initialized: bool,
@@ -368,7 +362,10 @@ unsafe fn epaper_send_cmd(cmd: u8) -> i32 {
         epaper_spi_cmd(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, cmd)
     }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = cmd; ESP_OK }
+    {
+        let _ = cmd;
+        ESP_OK
+    }
 }
 
 /// Transmit data bytes (DC=1).
@@ -380,7 +377,10 @@ unsafe fn epaper_send_data(data: *const u8, len: usize) -> i32 {
         epaper_spi_data(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, data, len)
     }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = (data, len); ESP_OK }
+    {
+        let _ = (data, len);
+        ESP_OK
+    }
 }
 
 /// Transmit a single data byte.
@@ -397,7 +397,10 @@ unsafe fn epaper_send_data_byte(val: u8) -> i32 {
         epaper_spi_data(s.spi, s.cfg.pin_cs, s.cfg.pin_dc, spi_cmd_ptr(), 1)
     }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = val; ESP_OK }
+    {
+        let _ = val;
+        ESP_OK
+    }
 }
 
 // ── Hardware reset ────────────────────────────────────────────────────────────
@@ -466,7 +469,7 @@ unsafe fn add_spi_device(cfg: &EpaperConfig) -> (*mut c_void, i32) {
         cs_ena_posttrans: 0,
         clock_speed_hz: clock,
         input_delay_ns: 0,
-        sample_point: 0, // SPI_SAMPLING_POINT_PHASE_0 (default)
+        sample_point: 0,  // SPI_SAMPLING_POINT_PHASE_0 (default)
         spics_io_num: -1, // Manual CS — same as GxEPD2
         flags: 0,
         queue_size: 1,
@@ -479,10 +482,14 @@ unsafe fn add_spi_device(cfg: &EpaperConfig) -> (*mut c_void, i32) {
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn configure_output_gpios(_cfg: &EpaperConfig) -> i32 { ESP_OK }
+unsafe fn configure_output_gpios(_cfg: &EpaperConfig) -> i32 {
+    ESP_OK
+}
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn configure_input_gpios(_cfg: &EpaperConfig) -> i32 { ESP_OK }
+unsafe fn configure_input_gpios(_cfg: &EpaperConfig) -> i32 {
+    ESP_OK
+}
 
 #[cfg(not(target_os = "espidf"))]
 unsafe fn add_spi_device(_cfg: &EpaperConfig) -> (*mut c_void, i32) {
@@ -552,58 +559,100 @@ pub unsafe extern "C" fn gdeq031t10_init(config: *const c_void) -> i32 {
         return fail_init();
     }
     ret = epaper_send_data_byte(0x1E); // PSR: soft reset active
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x0D);
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     delay_ms(10);
 
     // Power setting (VCOM, VGH, VGL, VDH, VDL) — required before CMD_POWER_ON
     ret = epaper_send_cmd(CMD_POWER_SETTING); // 0x01
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x07); // VDS_EN=1, VDG_EN=1
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x17); // VCOM_HV
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x3F); // VDH = +15V
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x3F); // VDL = -15V
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0xF1); // VSHR
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
 
     // Booster soft start (boost converter startup — required for power-on)
     ret = epaper_send_cmd(CMD_BOOSTER_SOFT_START); // 0x06
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x17); // Phase A: 40ms, strength 6
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x17); // Phase B: 40ms, strength 6
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x17); // Phase C: strength 6
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
 
     // Panel setting (operating config, no soft reset bit)
     ret = epaper_send_cmd(CMD_PANEL_SETTING);
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x1F); // KW mode, BWOTP
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x0D);
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
 
     // Resolution setting: 240×320
     ret = epaper_send_cmd(CMD_RESOLUTION_SETTING); // 0x61
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0xF0); // HRES = 240
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x01); // VRES high byte: 320 = 0x140
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x40); // VRES low byte
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
 
     // VCOM and data interval
     ret = epaper_send_cmd(CMD_VCOM_DATA_INTERVAL); // 0x50
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
     ret = epaper_send_data_byte(0x97);
-    if ret != ESP_OK { return fail_init(); }
+    if ret != ESP_OK {
+        return fail_init();
+    }
 
     s.initialized = true;
     s.power_on = false;
@@ -674,23 +723,25 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
         return ESP_ERR_INVALID_ARG;
     }
 
-
     let area = &*area;
     let x1 = area.x1 as usize;
     let y1 = area.y1 as usize;
     let mut x2 = area.x2 as usize;
     let mut y2 = area.y2 as usize;
 
-    if x2 >= EPD_WIDTH  { x2 = EPD_WIDTH  - 1; }
-    if y2 >= EPD_HEIGHT { y2 = EPD_HEIGHT - 1; }
+    if x2 >= EPD_WIDTH {
+        x2 = EPD_WIDTH - 1;
+    }
+    if y2 >= EPD_HEIGHT {
+        y2 = EPD_HEIGHT - 1;
+    }
 
     if x1 > x2 || y1 > y2 {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Direct copy — no rotation. LVGL renders 240×320 portrait, matching native.
-    // Updates only the in-memory framebuffer (fast). The actual panel refresh
-    // is triggered separately via refresh().
+    // Flip rows at the panel boundary. The WM and input stack keep ordinary
+    // top-left 240×320 portrait coordinates without mirroring glyphs.
     let src_w = x2 - x1 + 1;
     let src_row_bytes = (src_w + 7) / 8;
     let fb = std::slice::from_raw_parts_mut(fb_ptr(), EPD_FB_BYTES);
@@ -701,7 +752,9 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
             let src_byte = *color_data.add((row - y1) * src_row_bytes + src_bit_idx / 8);
             let src_bit = (src_byte >> (7 - (src_bit_idx & 7))) & 1;
 
-            let dst_bit_idx = row * EPD_WIDTH + col;
+            let dst_row = EPD_HEIGHT - 1 - row;
+            let dst_col = col;
+            let dst_bit_idx = dst_row * EPD_WIDTH + dst_col;
             let dst_byte_idx = dst_bit_idx / 8;
             let dst_mask = 0x80u8 >> (dst_bit_idx & 7);
 
@@ -736,11 +789,17 @@ pub unsafe extern "C" fn gdeq031t10_flush(area: *const HalArea, color_data: *con
 #[inline(always)]
 unsafe fn refresh_panel_soft_reset() -> i32 {
     let mut err = epaper_send_cmd(CMD_PANEL_SETTING);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     err = epaper_send_data_byte(0x1E);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     err = epaper_send_data_byte(0x0D);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     delay_ms(5);
     ESP_OK
 }
@@ -749,9 +808,13 @@ unsafe fn refresh_panel_soft_reset() -> i32 {
 #[inline(always)]
 unsafe fn refresh_panel_config() -> i32 {
     let mut err = epaper_send_cmd(CMD_PANEL_SETTING);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     err = epaper_send_data_byte(0x1F);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     epaper_send_data_byte(0x0D)
 }
 
@@ -762,8 +825,22 @@ unsafe fn refresh_panel_config() -> i32 {
 #[inline(always)]
 unsafe fn refresh_send_old_fb() -> i32 {
     let err = epaper_send_cmd(CMD_DATA_START_TRANSMISSION);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     epaper_send_data(fb_old_ptr(), EPD_FB_BYTES)
+}
+
+/// Send the current framebuffer through the controller's old-frame command.
+/// A full refresh requires identical new content in both controller planes;
+/// only fast differential refreshes use the actual previous framebuffer.
+#[inline(always)]
+unsafe fn refresh_send_current_as_old_fb() -> i32 {
+    let err = epaper_send_cmd(CMD_DATA_START_TRANSMISSION);
+    if err != ESP_OK {
+        return err;
+    }
+    epaper_send_data(fb_ptr(), EPD_FB_BYTES)
 }
 
 /// Send the current framebuffer (FB) via CMD_NEW_DATA_TRANSMISSION.
@@ -772,7 +849,9 @@ unsafe fn refresh_send_old_fb() -> i32 {
 #[inline(always)]
 unsafe fn refresh_send_new_fb() -> i32 {
     let err = epaper_send_cmd(CMD_NEW_DATA_TRANSMISSION);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     epaper_send_data(fb_ptr(), EPD_FB_BYTES)
 }
 
@@ -780,18 +859,30 @@ unsafe fn refresh_send_new_fb() -> i32 {
 #[inline(always)]
 unsafe fn refresh_vcom_and_fast(fast: bool) -> i32 {
     let mut err = epaper_send_cmd(CMD_VCOM_DATA_INTERVAL);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     err = epaper_send_data_byte(if fast { 0xD7 } else { 0x97 });
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     if fast {
         err = epaper_send_cmd(CMD_CASCADE);
-        if err != ESP_OK { return err; }
+        if err != ESP_OK {
+            return err;
+        }
         err = epaper_send_data_byte(0x02);
-        if err != ESP_OK { return err; }
+        if err != ESP_OK {
+            return err;
+        }
         err = epaper_send_cmd(CMD_TEMPERATURE_FORCED);
-        if err != ESP_OK { return err; }
+        if err != ESP_OK {
+            return err;
+        }
         err = epaper_send_data_byte(0x79);
-        if err != ESP_OK { return err; }
+        if err != ESP_OK {
+            return err;
+        }
     }
     ESP_OK
 }
@@ -801,38 +892,58 @@ unsafe fn refresh_vcom_and_fast(fast: bool) -> i32 {
 #[inline(always)]
 unsafe fn refresh_power_on() -> i32 {
     let err = epaper_send_cmd(CMD_POWER_ON);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     #[cfg(target_os = "espidf")]
     {
         let mut saw_high = false;
         let mut elapsed: u32 = 0;
         let mut last_b = gpio_read(state().cfg.pin_busy);
-        esp_log_write(3, b"epaper\0".as_ptr(),
-            b"I (?) epaper: POWER_ON wait start busy=%d\0".as_ptr(), last_b);
+        esp_log_write(
+            3,
+            b"epaper\0".as_ptr(),
+            b"I (?) epaper: POWER_ON wait start busy=%d\0".as_ptr(),
+            last_b,
+        );
         while elapsed < 3_000 {
             delay_ms(1);
             elapsed += 1;
             let b = gpio_read(state().cfg.pin_busy);
             if b != last_b {
-                esp_log_write(3, b"epaper\0".as_ptr(),
+                esp_log_write(
+                    3,
+                    b"epaper\0".as_ptr(),
                     b"I (?) epaper: POWER_ON busy_chg t=%dms b=%d\0".as_ptr(),
-                    elapsed, b);
+                    elapsed,
+                    b,
+                );
                 last_b = b;
             }
-            if b != 0 { saw_high = true; }
-            if saw_high && b == 0 { break; }
+            if b != 0 {
+                saw_high = true;
+            }
+            if saw_high && b == 0 {
+                break;
+            }
         }
-        esp_log_write(3, b"epaper\0".as_ptr(),
+        esp_log_write(
+            3,
+            b"epaper\0".as_ptr(),
             b"I (?) epaper: POWER_ON done saw_high=%d elapsed=%d\0".as_ptr(),
-            saw_high as i32, elapsed);
+            saw_high as i32,
+            elapsed,
+        );
         // Fallback: if BUSY never pulsed, give the controller extra time
         if !saw_high {
             delay_ms(200);
         }
     }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = epaper_wait_busy(5_000); }
+    {
+        let _ = epaper_wait_busy(5_000);
+    }
 
     ESP_OK
 }
@@ -842,7 +953,9 @@ unsafe fn refresh_power_on() -> i32 {
 #[inline(always)]
 unsafe fn refresh_display_and_wait(fast: bool) -> i32 {
     let err = epaper_send_cmd(CMD_DISPLAY_REFRESH);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     #[cfg(target_os = "espidf")]
     {
@@ -851,23 +964,37 @@ unsafe fn refresh_display_and_wait(fast: bool) -> i32 {
         delay_ms(min_delay); // guaranteed minimum wait
         let mut elapsed: u32 = min_delay;
         let mut last_busy = gpio_read(state().cfg.pin_busy);
-        esp_log_write(3, b"epaper\0".as_ptr(),
-            b"I (?) epaper: REFRESH min_delay done busy=%d\0".as_ptr(), last_busy);
+        esp_log_write(
+            3,
+            b"epaper\0".as_ptr(),
+            b"I (?) epaper: REFRESH min_delay done busy=%d\0".as_ptr(),
+            last_busy,
+        );
         // Continue polling until BUSY goes LOW (or timeout)
         while elapsed < max_delay {
             delay_ms(100);
             elapsed += 100;
             let b = gpio_read(state().cfg.pin_busy);
             if b != last_busy {
-                esp_log_write(3, b"epaper\0".as_ptr(),
+                esp_log_write(
+                    3,
+                    b"epaper\0".as_ptr(),
                     b"I (?) epaper: REFRESH busy_change %dms busy=%d\0".as_ptr(),
-                    elapsed, b);
+                    elapsed,
+                    b,
+                );
                 last_busy = b;
             }
-            if b == 0 { break; }
+            if b == 0 {
+                break;
+            }
         }
-        esp_log_write(3, b"epaper\0".as_ptr(),
-            b"I (?) epaper: REFRESH done elapsed=%d\0".as_ptr(), elapsed);
+        esp_log_write(
+            3,
+            b"epaper\0".as_ptr(),
+            b"I (?) epaper: REFRESH done elapsed=%d\0".as_ptr(),
+            elapsed,
+        );
     }
     #[cfg(not(target_os = "espidf"))]
     {
@@ -900,9 +1027,13 @@ pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
     {
         let busy_pin = s.cfg.pin_busy;
         let busy_val = gpio_read(busy_pin);
-        esp_log_write(3, b"epaper\0".as_ptr(),
+        esp_log_write(
+            3,
+            b"epaper\0".as_ptr(),
             b"I (?) epaper: refresh start busy_pin=%d busy_val=%d\0".as_ptr(),
-            busy_pin, busy_val);
+            busy_pin,
+            busy_val,
+        );
     }
 
     // Use fast mode unless: first refresh, or explicitly set to FULL
@@ -910,39 +1041,62 @@ pub unsafe extern "C" fn gdeq031t10_refresh() -> i32 {
 
     // Panel soft reset (as in C driver)
     let err = refresh_panel_soft_reset();
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     // Panel setting (operating config)
     let err = refresh_panel_config();
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
-    // Write old framebuffer via cmd 0x10 (previous frame) — BEFORE POWER_ON
-    let err = refresh_send_old_fb();
-    if err != ESP_OK { return err; }
+    // Full refresh: current image goes into both controller planes. Fast
+    // differential refresh: the actual previous image goes into cmd 0x10.
+    let err = if fast {
+        refresh_send_old_fb()
+    } else {
+        refresh_send_current_as_old_fb()
+    };
+    if err != ESP_OK {
+        return err;
+    }
 
     // Write new framebuffer via cmd 0x13 (current frame)
     let err = refresh_send_new_fb();
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     // VCOM and data interval (+ fast-refresh extras if applicable)
     let err = refresh_vcom_and_fast(fast);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     // POWER_ON → wait/delay
     let err = refresh_power_on();
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     // Display refresh → wait/delay
     let err = refresh_display_and_wait(fast);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
 
     // Power off
     let err = epaper_send_cmd(CMD_POWER_OFF);
-    if err != ESP_OK { return err; }
+    if err != ESP_OK {
+        return err;
+    }
     #[cfg(target_os = "espidf")]
     delay_ms(300);
     #[cfg(not(target_os = "espidf"))]
-    { let _ = epaper_wait_busy(5_000); }
+    {
+        let _ = epaper_wait_busy(5_000);
+    }
 
     s.power_on = false;
 
@@ -980,20 +1134,30 @@ pub unsafe extern "C" fn gdeq031t10_sleep(enter: bool) -> i32 {
 
     if enter {
         let ret = epaper_send_cmd(CMD_POWER_OFF);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         let ret = epaper_wait_busy(3_000);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
 
         let ret = epaper_send_cmd(CMD_DEEP_SLEEP);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         epaper_send_data_byte(0xA5)
     } else {
         // Wake: hardware reset + re-issue power-on
         epaper_hw_reset();
         let ret = epaper_wait_busy(3_000);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         let ret = epaper_send_cmd(CMD_POWER_ON);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         epaper_wait_busy(3_000)
     }
 }
@@ -1089,11 +1253,14 @@ mod tests {
     #[test]
     fn test_flush_before_init_returns_invalid_state() {
         reset_state();
-        let area = HalArea { x1: 0, y1: 0, x2: 10, y2: 10 };
-        let data = vec![0u8; 16];
-        let ret = unsafe {
-            gdeq031t10_flush(&area as *const HalArea, data.as_ptr())
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 10,
+            y2: 10,
         };
+        let data = vec![0u8; 16];
+        let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_ERR_INVALID_STATE);
     }
 
@@ -1138,31 +1305,48 @@ mod tests {
         assert_eq!(fb[0], 0x00);
         assert_eq!(fb[30], 0xFF);
 
-        // Flush a small white area in the top-left corner.
-        let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 }; // 8 pixels wide, 1 row
+        // Flush a small white area in logical top-left. The reversed row scan
+        // places it at the beginning of the final physical framebuffer row.
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 7,
+            y2: 0,
+        }; // 8 pixels wide, 1 row
         let data = [0xFFu8; 1]; // 8 pixels, all white
         let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_OK);
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
-        assert_eq!(fb[0], 0xFF);
+        let bottom_left = (EPD_HEIGHT - 1) * (EPD_WIDTH / 8);
+        assert_eq!(fb[bottom_left], 0xFF);
 
-        // Flush a small black area (0x00 = black pixels) in the top-left corner
-        let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 }; // 8 pixels wide, 1 row
+        // Flush a small black area (0x00 = black pixels) in logical top-left.
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 7,
+            y2: 0,
+        }; // 8 pixels wide, 1 row
         let data = [0x00u8; 1]; // 8 pixels, all black
         let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_OK);
 
-        // First byte of fb should now be 0x00 (all black)
+        // First byte of the final row should now be 0x00 (all black).
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
-        assert_eq!(fb[0], 0x00);
+        assert_eq!(fb[bottom_left], 0x00);
 
         // Flush a white area back
-        let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 7,
+            y2: 0,
+        };
         let data = [0xFFu8; 1];
         let ret = unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_OK);
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
-        assert_eq!(fb[0], 0xFF);
+        assert_eq!(fb[bottom_left], 0xFF);
 
         // Cleanup
         unsafe { gdeq031t10_deinit() };
@@ -1175,7 +1359,12 @@ mod tests {
         let cfg = EpaperConfig::default();
         unsafe { gdeq031t10_init(&cfg as *const EpaperConfig as *const c_void) };
 
-        let area = HalArea { x1: 0, y1: 0, x2: 7, y2: 0 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 7,
+            y2: 0,
+        };
         let data = [0u8; 1];
 
         assert_eq!(
@@ -1264,16 +1453,30 @@ mod tests {
         let cfg = EpaperConfig::default();
         unsafe { gdeq031t10_init(&cfg as *const EpaperConfig as *const c_void) };
 
-        // Set a single pixel at (0,0) to black (bit 7 of byte 0 = 0)
-        let area = HalArea { x1: 0, y1: 0, x2: 0, y2: 0 };
+        // Logical (0,0) maps to physical (0,319), bit 7 of the final row.
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+        };
         let data = [0x00u8]; // MSB = 0 = black
         unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
-        assert_eq!(unsafe { *fb_ptr() } & 0x80, 0x00, "pixel (0,0) should be black");
+        let bottom_left = unsafe { fb_ptr().add((EPD_HEIGHT - 1) * (EPD_WIDTH / 8)) };
+        assert_eq!(
+            unsafe { *bottom_left } & 0x80,
+            0x00,
+            "logical pixel (0,0) should be black"
+        );
 
-        // Set it back to white (bit 7 = 1)
+        // Set it back to white.
         let data = [0x80u8]; // MSB = 1 = white
         unsafe { gdeq031t10_flush(&area as *const HalArea, data.as_ptr()) };
-        assert_eq!(unsafe { *fb_ptr() } & 0x80, 0x80, "pixel (0,0) should be white");
+        assert_eq!(
+            unsafe { *bottom_left } & 0x80,
+            0x80,
+            "logical pixel (0,0) should be white"
+        );
 
         unsafe { gdeq031t10_deinit() };
     }
@@ -1283,14 +1486,19 @@ mod tests {
         reset_state();
         state_mut().initialized = true;
 
-        let area = HalArea { x1: 1, y1: 2, x2: 3, y2: 3 };
+        let area = HalArea {
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 3,
+        };
         let data = [0b1010_0000, 0b0100_0000];
         assert_eq!(unsafe { gdeq031t10_flush(&area, data.as_ptr()) }, ESP_OK);
 
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
         let row_bytes = EPD_WIDTH / 8;
-        assert_eq!(fb[2 * row_bytes], 0b0101_0000);
-        assert_eq!(fb[3 * row_bytes], 0b0010_0000);
+        assert_eq!(fb[317 * row_bytes], 0b0101_0000);
+        assert_eq!(fb[316 * row_bytes], 0b0010_0000);
     }
 
     #[test]
@@ -1298,24 +1506,34 @@ mod tests {
         reset_state();
         state_mut().initialized = true;
 
-        let area = HalArea { x1: 8, y1: 4, x2: 16, y2: 5 };
+        let area = HalArea {
+            x1: 8,
+            y1: 4,
+            x2: 16,
+            y2: 5,
+        };
         let data = [0b1010_1010, 0b1000_0000, 0b0101_0101, 0b0000_0000];
         assert_eq!(unsafe { gdeq031t10_flush(&area, data.as_ptr()) }, ESP_OK);
 
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
         let row_bytes = EPD_WIDTH / 8;
-        assert_eq!(fb[4 * row_bytes + 1], 0b1010_1010);
-        assert_eq!(fb[4 * row_bytes + 2], 0b1000_0000);
-        assert_eq!(fb[5 * row_bytes + 1], 0b0101_0101);
-        assert_eq!(fb[5 * row_bytes + 2], 0b0000_0000);
+        assert_eq!(fb[315 * row_bytes + 1], 0b1010_1010);
+        assert_eq!(fb[315 * row_bytes + 2], 0b1000_0000);
+        assert_eq!(fb[314 * row_bytes + 1], 0b0101_0101);
+        assert_eq!(fb[314 * row_bytes + 2], 0b0000_0000);
     }
 
     #[test]
-    fn test_flush_keeps_aligned_full_width_rows_unchanged() {
+    fn test_flush_flips_aligned_full_width_rows_vertically() {
         reset_state();
         state_mut().initialized = true;
 
-        let area = HalArea { x1: 0, y1: 7, x2: 239, y2: 8 };
+        let area = HalArea {
+            x1: 0,
+            y1: 7,
+            x2: 239,
+            y2: 8,
+        };
         let mut data = [0u8; 60];
         data[..30].fill(0xA5);
         data[30..].fill(0x5A);
@@ -1323,8 +1541,8 @@ mod tests {
 
         let fb = unsafe { std::slice::from_raw_parts(fb_ptr(), EPD_FB_BYTES) };
         let row_bytes = EPD_WIDTH / 8;
-        assert_eq!(&fb[7 * row_bytes..8 * row_bytes], &data[..30]);
-        assert_eq!(&fb[8 * row_bytes..9 * row_bytes], &data[30..]);
+        assert_eq!(&fb[312 * row_bytes..313 * row_bytes], &data[..30]);
+        assert_eq!(&fb[311 * row_bytes..312 * row_bytes], &data[30..]);
     }
 
     #[test]

@@ -151,6 +151,13 @@ pub struct CatalogEntry {
     pub updated_date: [u8; 11],
     /// What's new in this version
     pub changelog: [u8; 512],
+    /// TAP v1 package URL and detached package signature.
+    pub package_url: [u8; 256],
+    pub package_sig_url: [u8; 256],
+    pub package_sha256_hex: [u8; 65],
+    pub package_size_bytes: u32,
+    pub release_sequence: u32,
+    pub publisher_key_id: [u8; 64],
 }
 
 impl Default for CatalogEntry {
@@ -183,6 +190,12 @@ impl Default for CatalogEntry {
             download_count: 0,
             updated_date: [0u8; 11],
             changelog: [0u8; 512],
+            package_url: [0u8; 256],
+            package_sig_url: [0u8; 256],
+            package_sha256_hex: [0u8; 65],
+            package_size_bytes: 0,
+            release_sequence: 0,
+            publisher_key_id: [0u8; 64],
         }
     }
 }
@@ -215,7 +228,8 @@ fn install_destination(entry_type: u32, id: &str) -> Result<std::path::PathBuf, 
         CATALOG_TYPE_FIRMWARE => ("/sdcard/update", "thistle_os.bin".to_string()),
         CATALOG_TYPE_DRIVER => ("/sdcard/drivers", format!("{id}.drv.elf")),
         CATALOG_TYPE_WM => ("/sdcard/wm", format!("{id}.wm.elf")),
-        _ => ("/sdcard/apps", format!("{id}.app.elf")),
+        CATALOG_TYPE_APP => return Err(ESP_ERR_NOT_SUPPORTED),
+        _ => return Err(ESP_ERR_INVALID_ARG),
     };
 
     let root = std::path::Path::new(root);
@@ -654,7 +668,7 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
 
     // Parse individual { ... } objects from the JSON array
     let mut count = 0i32;
-    let mut cursor = json.as_str();
+    let mut cursor = catalog_entries_json(json.as_str());
 
     while count < max_entries {
         let obj_start = match cursor.find('{') {
@@ -708,11 +722,29 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
         if let Some(v) = json_str_extract(obj, "min_os_version") {
             copy_str_to_buf(&v, &mut entry.min_os_version);
         }
+        if let Some(v) = json_str_extract(obj, "package_url") {
+            copy_str_to_buf(&v, &mut entry.package_url);
+        }
+        if let Some(v) = json_str_extract(obj, "package_sig_url") {
+            copy_str_to_buf(&v, &mut entry.package_sig_url);
+        }
+        if let Some(v) = json_str_extract(obj, "package_sha256") {
+            copy_str_to_buf(&v, &mut entry.package_sha256_hex);
+        }
+        if let Some(v) = json_str_extract(obj, "publisher_key_id") {
+            copy_str_to_buf(&v, &mut entry.publisher_key_id);
+        }
 
         if let Some(sz) = json_int_extract(obj, "size_bytes") {
             if sz > 0 && sz <= u32::MAX as i64 {
                 entry.size_bytes = sz as u32;
             }
+        }
+        if let Some(sz) = json_int_extract(obj, "package_size_bytes") {
+            if sz > 0 && sz <= u32::MAX as i64 { entry.package_size_bytes = sz as u32; }
+        }
+        if let Some(sequence) = json_int_extract(obj, "release_sequence") {
+            if sequence > 0 && sequence <= u32::MAX as i64 { entry.release_sequence = sequence as u32; }
         }
 
         if let Some(t) = json_str_extract(obj, "type") {
@@ -779,7 +811,7 @@ pub unsafe extern "C" fn appstore_fetch_catalog(
             entry.screenshot_count = sc_count;
         }
 
-        entry.is_signed = entry.sig_url[0] != 0;
+        entry.is_signed = entry.sig_url[0] != 0 || entry.package_sig_url[0] != 0;
 
         // Only count entries that have at minimum an id
         if entry.id[0] != 0 {
@@ -917,6 +949,15 @@ fn valid_sha256_hex(value: &str) -> bool {
 fn fixed_cstr(value: &[u8]) -> Option<&str> {
     let end = value.iter().position(|byte| *byte == 0)?;
     std::str::from_utf8(&value[..end]).ok()
+}
+
+fn catalog_entries_json(json: &str) -> &str {
+    if let Some(key) = json.find("\"entries\"") {
+        if let Some(array) = json[key..].find('[') {
+            return &json[key + array + 1..];
+        }
+    }
+    json
 }
 
 fn max_download_for_type(entry_type: u32) -> u64 {
@@ -1326,6 +1367,76 @@ pub unsafe extern "C" fn appstore_download_file(
 // Install a catalog entry
 // ---------------------------------------------------------------------------
 
+#[cfg(not(test))]
+unsafe fn install_tap_entry(
+    entry: &CatalogEntry,
+    progress_cb: Option<DownloadProgressCb>,
+    user_data: *mut c_void,
+) -> i32 {
+    let id = match validated_catalog_id(&entry.id) { Ok(value) => value, Err(error) => return error };
+    let version = match fixed_cstr(&entry.version) { Some(value) if !value.is_empty() => value, _ => return ESP_ERR_INVALID_ARG };
+    let package_url = match fixed_cstr(&entry.package_url) { Some(value) if !value.is_empty() => value, _ => return ESP_ERR_INVALID_ARG };
+    let package_sig_url = match fixed_cstr(&entry.package_sig_url) { Some(value) if !value.is_empty() => value, _ => return ESP_ERR_INVALID_ARG };
+    let package_hash = match fixed_cstr(&entry.package_sha256_hex) {
+        Some(value) if valid_sha256_hex(value) => value,
+        _ => return ESP_ERR_INVALID_ARG,
+    };
+    if entry.package_size_bytes == 0 || entry.package_size_bytes as u64 > 2 * 1024 * 1024
+        || entry.release_sequence == 0 { return ESP_ERR_INVALID_SIZE; }
+
+    let app_dir = Path::new("/sdcard/apps").join(id);
+    if std::fs::create_dir_all(&app_dir).is_err() { return ESP_FAIL; }
+    let package_destination = app_dir.join(format!("{id}.tap"));
+    let mut staged_package = match StagedFile::create_for(&package_destination) {
+        Ok(value) => value,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+    let package_url = match std::ffi::CString::new(package_url) { Ok(value) => value, Err(_) => return ESP_ERR_INVALID_ARG };
+    let package_hash = match std::ffi::CString::new(package_hash) { Ok(value) => value, Err(_) => return ESP_ERR_INVALID_ARG };
+    let result = download_into_staged(
+        package_url.as_ptr(), package_hash.as_ptr(), Some(entry.package_size_bytes as u64),
+        2 * 1024 * 1024, progress_cb, user_data, &mut staged_package,
+    );
+    if result != ESP_OK { return result; }
+
+    let staged_sig_path = PathBuf::from(format!("{}.sig", staged_package.path.display()));
+    let mut staged_signature = match StagedFile::create_exact(staged_sig_path) {
+        Ok(value) => value,
+        Err(_) => return ESP_ERR_NOT_FOUND,
+    };
+    let package_sig_url = match std::ffi::CString::new(package_sig_url) { Ok(value) => value, Err(_) => return ESP_ERR_INVALID_ARG };
+    let result = download_into_staged(
+        package_sig_url.as_ptr(), std::ptr::null(), Some(MAX_SIGNATURE_DOWNLOAD),
+        MAX_SIGNATURE_DOWNLOAD, None, std::ptr::null_mut(), &mut staged_signature,
+    );
+    if result != ESP_OK { return result; }
+
+    let staged_path = match std::ffi::CString::new(staged_package.path.to_string_lossy().as_bytes()) {
+        Ok(value) => value,
+        Err(_) => return ESP_FAIL,
+    };
+    if signing_verify_file(staged_path.as_ptr()) != ESP_OK { return ESP_ERR_INVALID_CRC; }
+
+    match crate::tap_installer::install_tap_with(
+        &staged_package.path, Path::new("/sdcard/apps"), id, version,
+        entry.release_sequence,
+        |tap| std::ffi::CString::new(tap.to_string_lossy().as_bytes()).ok()
+            .is_some_and(|path| unsafe { signing_verify_file(path.as_ptr()) == ESP_OK }),
+        |elf| std::ffi::CString::new(elf.to_string_lossy().as_bytes()).ok()
+            .is_some_and(|path| unsafe { signing_verify_file(path.as_ptr()) == ESP_OK }),
+    ) {
+        Ok(_) => ESP_OK,
+        Err(crate::tap_installer::TapError::Limit) => ESP_ERR_INVALID_SIZE,
+        Err(crate::tap_installer::TapError::InvalidPath)
+        | Err(crate::tap_installer::TapError::InvalidManifest)
+        | Err(crate::tap_installer::TapError::Mismatch) => ESP_ERR_INVALID_ARG,
+        Err(crate::tap_installer::TapError::Integrity)
+        | Err(crate::tap_installer::TapError::Signature) => ESP_ERR_INVALID_CRC,
+        Err(crate::tap_installer::TapError::Downgrade) => ESP_ERR_NOT_SUPPORTED,
+        Err(_) => ESP_FAIL,
+    }
+}
+
 /// Download and install a catalog entry to the correct SD card directory.
 ///
 /// # Safety
@@ -1344,6 +1455,12 @@ pub unsafe extern "C" fn appstore_install_entry(
     }
 
     let e = &*entry;
+
+    // Application installs use the signed TAP transaction. Legacy ELF fields
+    // remain catalogued only for older firmware during the migration window.
+    if e.entry_type == CATALOG_TYPE_APP {
+        return install_tap_entry(e, progress_cb, user_data);
+    }
 
     if e.url[0] == 0 {
         return ESP_ERR_INVALID_ARG;
@@ -1517,6 +1634,15 @@ pub unsafe extern "C" fn appstore_install_entry(
         return ESP_ERR_INVALID_ARG;
     }
     let e = &*entry;
+    if e.entry_type == CATALOG_TYPE_APP {
+        if e.package_url[0] == 0 || e.package_sig_url[0] == 0
+            || !matches!(fixed_cstr(&e.package_sha256_hex), Some(hash) if valid_sha256_hex(hash)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if e.package_size_bytes == 0 || e.package_size_bytes as u64 > 2 * 1024 * 1024
+            || e.release_sequence == 0 { return ESP_ERR_INVALID_SIZE; }
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if e.url[0] == 0 {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1612,7 +1738,7 @@ pub unsafe extern "C" fn appstore_entry_get_changelog(entry: *const CatalogEntry
 pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Vec<CatalogEntry>) {
     entries.clear();
 
-    let mut cursor = json;
+    let mut cursor = catalog_entries_json(json);
     loop {
         let obj_start = match cursor.find('{') {
             Some(i) => i,
@@ -1668,6 +1794,18 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
         if let Some(v) = json_str_extract(obj, "min_os_version") {
             copy_str_to_buf(&v, &mut entry.min_os_version);
         }
+        if let Some(v) = json_str_extract(obj, "package_url") {
+            copy_str_to_buf(&v, &mut entry.package_url);
+        }
+        if let Some(v) = json_str_extract(obj, "package_sig_url") {
+            copy_str_to_buf(&v, &mut entry.package_sig_url);
+        }
+        if let Some(v) = json_str_extract(obj, "package_sha256") {
+            copy_str_to_buf(&v, &mut entry.package_sha256_hex);
+        }
+        if let Some(v) = json_str_extract(obj, "publisher_key_id") {
+            copy_str_to_buf(&v, &mut entry.publisher_key_id);
+        }
         if let Some(v) = json_str_extract(obj, "category") {
             copy_str_to_buf(&v, &mut entry.category);
         }
@@ -1685,6 +1823,12 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
             if sz > 0 && sz <= u32::MAX as i64 {
                 entry.size_bytes = sz as u32;
             }
+        }
+        if let Some(sz) = json_int_extract(obj, "package_size_bytes") {
+            if sz > 0 && sz <= u32::MAX as i64 { entry.package_size_bytes = sz as u32; }
+        }
+        if let Some(sequence) = json_int_extract(obj, "release_sequence") {
+            if sequence > 0 && sequence <= u32::MAX as i64 { entry.release_sequence = sequence as u32; }
         }
         if let Some(f) = json_float_extract(obj, "rating") {
             entry.rating_stars = (f * 100.0 + 0.5) as u16;
@@ -1727,7 +1871,7 @@ pub fn parse_catalog_entries(json: &str, category_filter: &str, entries: &mut Ve
             entry.detection_chip_id_reg = extract_detection_u16(obj, "chip_id_reg");
             entry.detection_chip_id_value = extract_detection_u16(obj, "chip_id_value");
         }
-        entry.is_signed = entry.sig_url[0] != 0;
+        entry.is_signed = entry.sig_url[0] != 0 || entry.package_sig_url[0] != 0;
 
         // Category filter
         if !category_filter.is_empty() && category_filter != "all" {
@@ -1829,6 +1973,12 @@ pub unsafe extern "C" fn appstore_fetch_by_category(
             download_count: e.download_count,
             updated_date: e.updated_date,
             changelog: e.changelog,
+            package_url: e.package_url,
+            package_sig_url: e.package_sig_url,
+            package_sha256_hex: e.package_sha256_hex,
+            package_size_bytes: e.package_size_bytes,
+            release_sequence: e.release_sequence,
+            publisher_key_id: e.publisher_key_id,
         };
         out_idx += 1;
     }
@@ -2285,13 +2435,7 @@ mod tests {
         let staged_payload = stage_bytes(&payload, b"new-payload");
         let staged_signature = stage_bytes(&signature, b"new-signature");
 
-        atomic_replace_pair(
-            &staged_payload,
-            &payload,
-            &staged_signature,
-            &signature,
-        )
-        .unwrap();
+        atomic_replace_pair(&staged_payload, &payload, &staged_signature, &signature).unwrap();
 
         assert_eq!(std::fs::read(&payload).unwrap(), b"new-payload");
         assert_eq!(std::fs::read(&signature).unwrap(), b"new-signature");
@@ -2361,7 +2505,6 @@ mod tests {
     #[test]
     fn test_install_destinations_stay_in_type_specific_roots() {
         for (entry_type, expected) in [
-            (CATALOG_TYPE_APP, "/sdcard/apps/safe.app.elf"),
             (CATALOG_TYPE_DRIVER, "/sdcard/drivers/safe.drv.elf"),
             (CATALOG_TYPE_WM, "/sdcard/wm/safe.wm.elf"),
             (CATALOG_TYPE_FIRMWARE, "/sdcard/update/thistle_os.bin"),
@@ -2390,6 +2533,7 @@ mod tests {
     #[test]
     fn test_install_requires_valid_sha256_and_declared_size_before_io() {
         let mut entry = CatalogEntry::default();
+        entry.entry_type = CATALOG_TYPE_DRIVER;
         copy_str_to_buf("safe-app", &mut entry.id);
         copy_str_to_buf("https://example.invalid/app.elf", &mut entry.url);
         entry.size_bytes = 1;
@@ -2413,6 +2557,28 @@ mod tests {
     }
 
     #[test]
+    fn test_app_install_requires_complete_tap_catalog_contract() {
+        let mut entry = CatalogEntry::default();
+        copy_str_to_buf("com.thistle.notes", &mut entry.id);
+        copy_str_to_buf("1.0.0", &mut entry.version);
+        copy_str_to_buf("https://example.invalid/notes.tap", &mut entry.package_url);
+        copy_str_to_buf("https://example.invalid/notes.tap.sig", &mut entry.package_sig_url);
+        copy_str_to_buf(&"a".repeat(64), &mut entry.package_sha256_hex);
+        entry.package_size_bytes = 1024;
+        entry.release_sequence = 1;
+        assert_eq!(
+            unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
+            ESP_ERR_NOT_SUPPORTED
+        );
+
+        entry.package_sig_url.fill(0);
+        assert_eq!(
+            unsafe { appstore_install_entry(&entry, None, std::ptr::null_mut()) },
+            ESP_ERR_INVALID_ARG
+        );
+    }
+
+    #[test]
     fn test_catalog_parser_does_not_wrap_oversized_size() {
         let mut entries = Vec::new();
         parse_catalog_entries(
@@ -2422,6 +2588,26 @@ mod tests {
         );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].size_bytes, 0);
+    }
+
+    #[test]
+    fn test_catalog_parser_accepts_tap_only_application_delivery() {
+        let mut entries = Vec::new();
+        parse_catalog_entries(
+            &format!(
+                r#"[{{"id":"com.thistle.notes","name":"Notes","version":"1.0.0","type":"app","package_url":"https://example.invalid/notes.tap","package_sig_url":"https://example.invalid/notes.tap.sig","package_sha256":"{}","package_size_bytes":4096,"release_sequence":1,"publisher_key_id":"official-2026"}}]"#,
+                "a".repeat(64)
+            ),
+            "all",
+            &mut entries,
+        );
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(fixed_cstr(&entry.package_url), Some("https://example.invalid/notes.tap"));
+        assert_eq!(entry.package_size_bytes, 4096);
+        assert_eq!(entry.release_sequence, 1);
+        assert_eq!(entry.url[0], 0, "raw ELF URL must remain absent");
+        assert!(entry.is_signed);
     }
 
     // -----------------------------------------------------------------------

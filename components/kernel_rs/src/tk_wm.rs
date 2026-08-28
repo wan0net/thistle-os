@@ -10,8 +10,8 @@
 // render function runs layout, renders to a framebuffer, and flushes to the
 // HAL display driver.
 
-use core::sync::atomic::{AtomicBool, Ordering};
-use std::os::raw::c_char;
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::os::raw::{c_char, c_void};
 use std::sync::Mutex;
 
 #[cfg(target_os = "espidf")]
@@ -27,6 +27,37 @@ macro_rules! wm_log {
 }
 
 static REFRESH_NEEDED: AtomicBool = AtomicBool::new(false);
+static PENDING_C_CALLBACK: AtomicU32 = AtomicU32::new(0);
+
+type CWidgetCallback = unsafe extern "C" fn(u32, i32, *mut c_void);
+
+#[derive(Clone, Copy)]
+struct CCallbackSlot {
+    callback: Option<CWidgetCallback>,
+    user_data: usize,
+    event_type: i32,
+}
+
+impl CCallbackSlot {
+    const EMPTY: Self = Self { callback: None, user_data: 0, event_type: 0 };
+}
+
+const C_CALLBACK_CAPACITY: usize = 256;
+static C_CALLBACKS: Mutex<[CCallbackSlot; C_CALLBACK_CAPACITY]> =
+    Mutex::new([CCallbackSlot::EMPTY; C_CALLBACK_CAPACITY]);
+
+fn queue_c_callback(id: WidgetId) {
+    PENDING_C_CALLBACK.store(id as u32, Ordering::Release);
+}
+
+fn dispatch_pending_c_callback() {
+    let id = PENDING_C_CALLBACK.swap(0, Ordering::AcqRel);
+    if id == 0 || id as usize >= C_CALLBACK_CAPACITY { return; }
+    let slot = C_CALLBACKS.lock().unwrap()[id as usize];
+    if let Some(callback) = slot.callback {
+        unsafe { callback(id, slot.event_type, slot.user_data as *mut c_void) };
+    }
+}
 
 use thistle_tk::color::Color;
 use thistle_tk::layout::{Align, Direction, Rect};
@@ -430,6 +461,8 @@ pub extern "C" fn tk_wm_init() -> i32 {
 pub extern "C" fn tk_wm_deinit() {
     let mut lock = TK_WM.lock().unwrap();
     *lock = None;
+    *C_CALLBACKS.lock().unwrap() = [CCallbackSlot::EMPTY; C_CALLBACK_CAPACITY];
+    PENDING_C_CALLBACK.store(0, Ordering::Release);
 }
 
 #[no_mangle]
@@ -794,6 +827,9 @@ pub extern "C" fn tk_wm_widget_destroy(widget: u32) {
         None => return,
     };
     if state.tree.remove(widget as WidgetId) {
+        if (widget as usize) < C_CALLBACK_CAPACITY {
+            C_CALLBACKS.lock().unwrap()[widget as usize] = CCallbackSlot::EMPTY;
+        }
         state.dirty = true;
     }
 }
@@ -859,12 +895,18 @@ pub extern "C" fn tk_wm_widget_set_size(widget: u32, w: i32, h: i32) {
     let id = widget as WidgetId;
     if let Some(wgt) = state.tree.get_mut(id) {
         let c = wgt.common_mut();
-        if w > 0 {
-            c.width_hint = SizeHint::Fixed(w as u32);
-        }
-        if h > 0 {
-            c.height_hint = SizeHint::Fixed(h as u32);
-        }
+        c.width_hint = match w {
+            -1 => SizeHint::Percent(1.0),
+            -2 => SizeHint::Auto,
+            value if value > 0 => SizeHint::Fixed(value as u32),
+            _ => c.width_hint,
+        };
+        c.height_hint = match h {
+            -1 => SizeHint::Percent(1.0),
+            -2 => SizeHint::Auto,
+            value if value > 0 => SizeHint::Fixed(value as u32),
+            _ => c.height_hint,
+        };
         mark_dirty(state, id);
     }
 }
@@ -967,8 +1009,9 @@ pub extern "C" fn tk_wm_widget_set_layout(widget: u32, layout: i32) {
         None => return,
     };
     let id = widget as WidgetId;
-    // layout: 0 = column, 1 = row (matches LVGL LV_FLEX_FLOW convention)
-    let dir = if layout == 1 {
+    // Public thistle_layout_t values: 0 = none, 1 = column, 2 = row.
+    // Treat NONE as the toolkit's default column flow.
+    let dir = if layout == 2 {
         Direction::Row
     } else {
         Direction::Column
@@ -1025,9 +1068,20 @@ pub extern "C" fn tk_wm_widget_set_flex_grow(widget: u32, grow: i32) {
         None => return,
     };
     let id = widget as WidgetId;
+    let direction = state.tree.parent(id)
+        .and_then(|parent| state.tree.get(parent))
+        .and_then(|parent| match parent {
+            Widget::Container(container) => Some(container.direction),
+            _ => None,
+        })
+        .unwrap_or(Direction::Column);
     if let Some(wgt) = state.tree.get_mut(id) {
-        // flex-grow applies to the main axis size hint
-        wgt.common_mut().height_hint = SizeHint::Flex(grow.max(0) as f32);
+        // flex-grow applies to the parent container's main axis.
+        let hint = SizeHint::Flex(grow.max(0) as f32);
+        match direction {
+            Direction::Row => wgt.common_mut().width_hint = hint,
+            Direction::Column => wgt.common_mut().height_hint = hint,
+        }
         mark_dirty(state, id);
     }
 }
@@ -1165,7 +1219,7 @@ pub extern "C" fn tk_wm_widget_on_event(
     widget: u32,
     event_type: i32,
     cb: *const std::os::raw::c_void,
-    _ud: *mut std::os::raw::c_void,
+    user_data: *mut std::os::raw::c_void,
 ) {
     // Map C callbacks to thistle-tk fn-pointer callbacks.
     // event_type 0 = press (matches LV_EVENT_CLICKED convention).
@@ -1180,14 +1234,21 @@ pub extern "C" fn tk_wm_widget_on_event(
         if let Some(Widget::Button(b)) = state.tree.get_mut(id) {
             if cb.is_null() {
                 b.on_press = None;
+                if (widget as usize) < C_CALLBACK_CAPACITY {
+                    C_CALLBACKS.lock().unwrap()[widget as usize] = CCallbackSlot::EMPTY;
+                }
             } else {
-                // Transmute the C callback to a Rust fn pointer.
-                // The C callback signature is void(*)(uint32_t, int, void*)
-                // but thistle-tk uses fn(WidgetId). We store a wrapper.
-                // For now, store as on_press — the C callback user_data
-                // is not propagated (apps should use the widget id).
-                let _cb_fn = cb; // TODO: proper callback bridging
-                b.on_press = None; // placeholder — needs callback adapter
+                if (widget as usize) >= C_CALLBACK_CAPACITY { return; }
+                let callback: CWidgetCallback = unsafe { core::mem::transmute(cb) };
+                C_CALLBACKS.lock().unwrap()[widget as usize] = CCallbackSlot {
+                    callback: Some(callback),
+                    user_data: user_data as usize,
+                    event_type,
+                };
+                // Queue while dispatch_input holds TK_WM. The actual C call is
+                // made after that lock is released, allowing callbacks to
+                // create, hide, or destroy widgets safely.
+                b.on_press = Some(queue_c_callback);
             }
         }
     }
@@ -1384,6 +1445,7 @@ pub unsafe extern "C" fn tk_wm_on_input(event: *const HalInputEvent) -> bool {
     // from inside dispatch_input would re-enter the WM via the new app's
     // on_create and deadlock.
     drop(lock);
+    dispatch_pending_c_callback();
     crate::tk_launcher::process_pending_launch();
 
     handled || auto_focused

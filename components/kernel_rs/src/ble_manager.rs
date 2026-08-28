@@ -51,8 +51,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 
 // ---------------------------------------------------------------------------
@@ -98,12 +98,12 @@ extern "C" {
 #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGapAdvParams {
-    conn_mode: u8,      // BLE_GAP_CONN_MODE_UND = 2
-    disc_mode: u8,      // BLE_GAP_DISC_MODE_GEN = 2
-    itvl_min: u16,      // 0 = use stack default (~160 * 0.625 ms)
-    itvl_max: u16,      // 0 = use stack default
-    channel_map: u8,    // 0 = all three channels
-    filter_policy: u8,  // 0 = no filter
+    conn_mode: u8,     // BLE_GAP_CONN_MODE_UND = 2
+    disc_mode: u8,     // BLE_GAP_DISC_MODE_GEN = 2
+    itvl_min: u16,     // 0 = use stack default (~160 * 0.625 ms)
+    itvl_max: u16,     // 0 = use stack default
+    channel_map: u8,   // 0 = all three channels
+    filter_policy: u8, // 0 = no filter
     high_duty_cycle: u8,
 }
 
@@ -121,7 +121,7 @@ struct BleGapEvent {
 #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleUuidAny {
-    u_type: u8,      // BLE_UUID_TYPE_128 = 4
+    u_type: u8, // BLE_UUID_TYPE_128 = 4
     _pad: [u8; 3],
     value: [u8; 16],
 }
@@ -166,7 +166,7 @@ struct BleGattChrDef {
 #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 #[repr(C)]
 struct BleGattSvcDef {
-    svc_type: u8,              // BLE_GATT_SVC_TYPE_PRIMARY = 1
+    svc_type: u8, // BLE_GATT_SVC_TYPE_PRIMARY = 1
     uuid: *const BleUuidAny,
     includes: *const *const BleGattSvcDef,
     characteristics: *const BleGattChrDef,
@@ -193,8 +193,8 @@ static NUS_SVC_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
     value: [
-        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-        0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E,
+        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40,
+        0x6E,
     ],
 };
 
@@ -203,8 +203,8 @@ static NUS_RX_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
     value: [
-        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-        0x93, 0xF3, 0xA3, 0xB5, 0x02, 0x00, 0x40, 0x6E,
+        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x02, 0x00, 0x40,
+        0x6E,
     ],
 };
 
@@ -213,8 +213,8 @@ static NUS_TX_UUID: BleUuidAny = BleUuidAny {
     u_type: 4,
     _pad: [0; 3],
     value: [
-        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-        0x93, 0xF3, 0xA3, 0xB5, 0x03, 0x00, 0x40, 0x6E,
+        0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x03, 0x00, 0x40,
+        0x6E,
     ],
 };
 
@@ -329,12 +329,7 @@ unsafe extern "C" fn nus_rx_access_cb(
     let mut buf = [0u8; 512];
     let rc = os_mbuf_copydata(om, 0, data_len as u32, buf.as_mut_ptr());
     if rc == 0 {
-        ble_manager_rx_dispatch_authorized(
-            conn_handle,
-            true,
-            buf.as_ptr(),
-            data_len as u16,
-        );
+        ble_manager_rx_dispatch_authorized(conn_handle, true, buf.as_ptr(), data_len as u16);
     }
     0
 }
@@ -358,8 +353,8 @@ unsafe extern "C" fn nus_tx_access_cb(
 #[cfg(all(target_os = "espidf", feature = "ble-hardware"))]
 unsafe fn do_advertise() -> i32 {
     let adv_params = BleGapAdvParams {
-        conn_mode: 2,       // BLE_GAP_CONN_MODE_UND
-        disc_mode: 2,       // BLE_GAP_DISC_MODE_GEN
+        conn_mode: 2, // BLE_GAP_CONN_MODE_UND
+        disc_mode: 2, // BLE_GAP_DISC_MODE_GEN
         itvl_min: 0,
         itvl_max: 0,
         channel_map: 0,
@@ -367,9 +362,9 @@ unsafe fn do_advertise() -> i32 {
         high_duty_cycle: 0,
     };
     ble_gap_adv_start(
-        0,                           // BLE_OWN_ADDR_PUBLIC
-        std::ptr::null(),            // direct_addr = none
-        i32::MAX,                    // BLE_HS_FOREVER
+        0,                // BLE_OWN_ADDR_PUBLIC
+        std::ptr::null(), // direct_addr = none
+        i32::MAX,         // BLE_HS_FOREVER
         &adv_params,
         gap_event_cb,
         std::ptr::null_mut(),
@@ -411,7 +406,12 @@ unsafe extern "C" fn gap_event_cb(event: *mut BleGapEvent, _arg: *mut c_void) ->
                     s.tx_attr_handle = NUS_TX_VAL_HANDLE;
                 }
                 #[cfg(not(test))]
-                esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"BLE connected handle=%d\0".as_ptr(), conn_handle as i32);
+                esp_log_write(
+                    ESP_LOG_INFO,
+                    TAG.as_ptr(),
+                    b"BLE connected handle=%d\0".as_ptr(),
+                    conn_handle as i32,
+                );
             } else {
                 // Connection attempt failed — restart advertising
                 do_advertise();
@@ -421,7 +421,11 @@ unsafe extern "C" fn gap_event_cb(event: *mut BleGapEvent, _arg: *mut c_void) ->
             // BLE_GAP_EVENT_DISCONNECT
             ble_manager_set_conn_state(BLE_STATE_OFF, 0xFFFF);
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"BLE disconnected, restarting adv\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"BLE disconnected, restarting adv\0".as_ptr(),
+            );
             do_advertise();
         }
         _ => {}
@@ -442,13 +446,23 @@ unsafe fn register_gatt_services() -> i32 {
     let rc = ble_gatts_count_cfg(NUS_SERVICES.as_ptr());
     if rc != 0 {
         #[cfg(not(test))]
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ble_gatts_count_cfg failed: %d\0".as_ptr(), rc);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"ble_gatts_count_cfg failed: %d\0".as_ptr(),
+            rc,
+        );
         return rc;
     }
     let rc = ble_gatts_add_svcs(NUS_SERVICES.as_ptr());
     if rc != 0 {
         #[cfg(not(test))]
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ble_gatts_add_svcs failed: %d\0".as_ptr(), rc);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"ble_gatts_add_svcs failed: %d\0".as_ptr(),
+            rc,
+        );
     }
     rc
 }
@@ -538,7 +552,12 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
         let ret = nimble_port_init();
         if ret != ESP_OK {
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"nimble_port_init failed: %d\0".as_ptr(), ret);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"nimble_port_init failed: %d\0".as_ptr(),
+                ret,
+            );
             return ret;
         }
 
@@ -554,7 +573,12 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
         let rc = register_gatt_services();
         if rc != 0 {
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"GATT service registration failed: %d\0".as_ptr(), rc);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"GATT service registration failed: %d\0".as_ptr(),
+                rc,
+            );
             return ESP_FAIL;
         }
 
@@ -583,7 +607,11 @@ pub unsafe extern "C" fn ble_manager_init(device_name: *const c_char) -> i32 {
     #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     {
         #[cfg(not(test))]
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"BLE: simulator stub\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"BLE: simulator stub\0".as_ptr(),
+        );
     }
 
     ESP_OK
@@ -605,7 +633,12 @@ pub extern "C" fn ble_manager_start_advertising() -> i32 {
         let rc = do_advertise();
         if rc != 0 {
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ble_gap_adv_start failed: %d\0".as_ptr(), rc);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"ble_gap_adv_start failed: %d\0".as_ptr(),
+                rc,
+            );
             return ESP_FAIL;
         }
     }
@@ -616,14 +649,22 @@ pub extern "C" fn ble_manager_start_advertising() -> i32 {
 
     unsafe {
         #[cfg(not(test))]
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"BLE advertising started\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"BLE advertising started\0".as_ptr(),
+        );
     }
 
     #[cfg(any(not(target_os = "espidf"), not(feature = "ble-hardware")))]
     {
         unsafe {
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"BLE advertise: simulator stub\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"BLE advertise: simulator stub\0".as_ptr(),
+            );
         }
     }
 
@@ -723,7 +764,12 @@ pub unsafe extern "C" fn ble_manager_send(data: *const u8, len: usize) -> i32 {
         let rc = ble_gatts_notify_custom(conn_handle, tx_handle, om);
         if rc != 0 {
             #[cfg(not(test))]
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ble_gatts_notify_custom failed: %d\0".as_ptr(), rc);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"ble_gatts_notify_custom failed: %d\0".as_ptr(),
+                rc,
+            );
             return ESP_FAIL;
         }
         return ESP_OK;
@@ -733,7 +779,11 @@ pub unsafe extern "C" fn ble_manager_send(data: *const u8, len: usize) -> i32 {
     {
         let _ = (conn_handle, tx_handle);
         #[cfg(not(test))]
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"BLE send: simulator stub\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"BLE send: simulator stub\0".as_ptr(),
+        );
         ESP_ERR_NOT_SUPPORTED
     }
 }
@@ -752,7 +802,7 @@ pub unsafe extern "C" fn ble_manager_send_notification(
     }
 
     let title_str = CStr::from_ptr(title).to_str().unwrap_or("");
-    let body_str  = CStr::from_ptr(body).to_str().unwrap_or("");
+    let body_str = CStr::from_ptr(body).to_str().unwrap_or("");
 
     let msg = format!("NOTIF:{}\n{}", title_str, body_str);
     if msg.len() >= 256 {
@@ -878,11 +928,7 @@ mod tests {
 
     static RX_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-    unsafe extern "C" fn counting_rx_cb(
-        _data: *const u8,
-        _len: u16,
-        _user_data: *mut c_void,
-    ) {
+    unsafe extern "C" fn counting_rx_cb(_data: *const u8, _len: u16, _user_data: *mut c_void) {
         RX_CALLS.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -1091,10 +1137,7 @@ mod tests {
         unsafe extern "C" fn dummy_cb(_data: *const u8, _len: u16, _user_data: *mut c_void) {}
         let mut context = 42u32;
         let rc = unsafe {
-            ble_manager_register_rx_cb(
-                Some(dummy_cb),
-                &mut context as *mut _ as *mut c_void,
-            )
+            ble_manager_register_rx_cb(Some(dummy_cb), &mut context as *mut _ as *mut c_void)
         };
         assert_eq!(rc, ESP_OK);
     }
@@ -1102,7 +1145,10 @@ mod tests {
     #[test]
     fn test_nus_rx_requires_authenticated_encrypted_128_bit_write() {
         assert_eq!(NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE, BLE_GATT_CHR_F_WRITE);
-        assert_eq!(NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE_ENC, BLE_GATT_CHR_F_WRITE_ENC);
+        assert_eq!(
+            NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE_ENC,
+            BLE_GATT_CHR_F_WRITE_ENC
+        );
         assert_eq!(
             NUS_RX_FLAGS & BLE_GATT_CHR_F_WRITE_AUTHEN,
             BLE_GATT_CHR_F_WRITE_AUTHEN

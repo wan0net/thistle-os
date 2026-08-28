@@ -166,13 +166,7 @@ impl NotificationManager {
     }
 
     /// Post a progress notification (category = Progress, priority = Normal).
-    pub fn post_progress(
-        &mut self,
-        app_id: &str,
-        title: &str,
-        body: &str,
-        progress: u8,
-    ) -> u32 {
+    pub fn post_progress(&mut self, app_id: &str, title: &str, body: &str, progress: u8) -> u32 {
         let id = self.post(
             app_id,
             title,
@@ -188,7 +182,10 @@ impl NotificationManager {
 
     /// Update progress on an existing progress notification.
     pub fn update_progress(&mut self, id: u32, progress: u8) -> Result<(), i32> {
-        let n = self.notifications.iter_mut().find(|n| n.id == id)
+        let n = self
+            .notifications
+            .iter_mut()
+            .find(|n| n.id == id)
             .ok_or(ESP_ERR_INVALID_ARG)?;
         if n.category != NotificationCategory::Progress {
             return Err(ESP_ERR_INVALID_STATE);
@@ -199,7 +196,10 @@ impl NotificationManager {
 
     /// Set an action label on a notification.
     pub fn set_action(&mut self, id: u32, label: &str) -> Result<(), i32> {
-        let n = self.notifications.iter_mut().find(|n| n.id == id)
+        let n = self
+            .notifications
+            .iter_mut()
+            .find(|n| n.id == id)
             .ok_or(ESP_ERR_INVALID_ARG)?;
         n.action_label = Some(label.to_string());
         Ok(())
@@ -212,7 +212,10 @@ impl NotificationManager {
 
     /// Mark a notification as read.
     pub fn mark_read(&mut self, id: u32) -> Result<(), i32> {
-        let n = self.notifications.iter_mut().find(|n| n.id == id)
+        let n = self
+            .notifications
+            .iter_mut()
+            .find(|n| n.id == id)
             .ok_or(ESP_ERR_INVALID_ARG)?;
         n.read = true;
         Ok(())
@@ -220,7 +223,10 @@ impl NotificationManager {
 
     /// Dismiss a notification.
     pub fn dismiss(&mut self, id: u32) -> Result<(), i32> {
-        let n = self.notifications.iter_mut().find(|n| n.id == id)
+        let n = self
+            .notifications
+            .iter_mut()
+            .find(|n| n.id == id)
             .ok_or(ESP_ERR_INVALID_ARG)?;
         n.dismissed = true;
         Ok(())
@@ -240,12 +246,16 @@ impl NotificationManager {
 
     /// Count of unread, non-dismissed notifications.
     pub fn unread_count(&self) -> usize {
-        self.notifications.iter().filter(|n| !n.read && !n.dismissed).count()
+        self.notifications
+            .iter()
+            .filter(|n| !n.read && !n.dismissed)
+            .count()
     }
 
     /// Count of unread, non-dismissed notifications from a specific app.
     pub fn unread_count_by_app(&self, app_id: &str) -> usize {
-        self.notifications.iter()
+        self.notifications
+            .iter()
             .filter(|n| n.app_id == app_id && !n.read && !n.dismissed)
             .count()
     }
@@ -253,11 +263,11 @@ impl NotificationManager {
     /// Active notifications: not dismissed, not expired. Sorted by priority
     /// descending, then timestamp descending.
     pub fn active_notifications(&self) -> Vec<&Notification> {
-        let mut result: Vec<&Notification> = self.notifications.iter()
-            .filter(|n| !n.dismissed)
-            .collect();
+        let mut result: Vec<&Notification> =
+            self.notifications.iter().filter(|n| !n.dismissed).collect();
         result.sort_by(|a, b| {
-            b.priority.cmp(&a.priority)
+            b.priority
+                .cmp(&a.priority)
                 .then(b.timestamp.cmp(&a.timestamp))
         });
         result
@@ -265,27 +275,31 @@ impl NotificationManager {
 
     /// All notifications from a specific app.
     pub fn notifications_by_app(&self, app_id: &str) -> Vec<&Notification> {
-        self.notifications.iter()
+        self.notifications
+            .iter()
             .filter(|n| n.app_id == app_id)
             .collect()
     }
 
     /// All notifications of a specific category.
     pub fn notifications_by_category(&self, category: NotificationCategory) -> Vec<&Notification> {
-        self.notifications.iter()
+        self.notifications
+            .iter()
             .filter(|n| n.category == category)
             .collect()
     }
 
     /// Whether there are any active urgent notifications.
     pub fn has_urgent(&self) -> bool {
-        self.notifications.iter()
+        self.notifications
+            .iter()
             .any(|n| n.priority == NotificationPriority::Urgent && !n.dismissed && !n.read)
     }
 
     /// The oldest unread urgent notification.
     pub fn next_urgent(&self) -> Option<&Notification> {
-        self.notifications.iter()
+        self.notifications
+            .iter()
             .filter(|n| n.priority == NotificationPriority::Urgent && !n.dismissed && !n.read)
             .min_by_key(|n| n.timestamp)
     }
@@ -371,8 +385,13 @@ impl NotificationManager {
         }
     }
 
-    fn find_eviction_candidate(&self, dismissed: bool, priority: NotificationPriority) -> Option<usize> {
-        self.notifications.iter()
+    fn find_eviction_candidate(
+        &self,
+        dismissed: bool,
+        priority: NotificationPriority,
+    ) -> Option<usize> {
+        self.notifications
+            .iter()
             .enumerate()
             .filter(|(_, n)| n.dismissed == dismissed && n.priority == priority)
             .min_by_key(|(_, n)| n.id)
@@ -397,7 +416,9 @@ fn truncate(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------------------
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rs_notification_manager_create(max_capacity: u32) -> *mut NotificationManager {
+pub unsafe extern "C" fn rs_notification_manager_create(
+    max_capacity: u32,
+) -> *mut NotificationManager {
     let mgr = Box::new(NotificationManager::new(max_capacity as usize));
     Box::into_raw(mgr)
 }
@@ -511,7 +532,11 @@ pub unsafe extern "C" fn rs_notification_has_urgent(mgr: *const NotificationMana
         return 0;
     }
     let mgr = unsafe { &*mgr };
-    if mgr.has_urgent() { 1 } else { 0 }
+    if mgr.has_urgent() {
+        1
+    } else {
+        0
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -563,8 +588,20 @@ mod tests {
     #[test]
     fn test_post_and_id_increments() {
         let mut mgr = make_mgr();
-        let id1 = mgr.post("app.test", "Hello", "World", NotificationPriority::Normal, NotificationCategory::App);
-        let id2 = mgr.post("app.test", "Hello2", "World2", NotificationPriority::Normal, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app.test",
+            "Hello",
+            "World",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        let id2 = mgr.post(
+            "app.test",
+            "Hello2",
+            "World2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert_eq!(id1, 1);
         assert_eq!(id2, 2);
         assert!(id2 > id1);
@@ -575,7 +612,13 @@ mod tests {
     #[test]
     fn test_get_by_id() {
         let mut mgr = make_mgr();
-        let id = mgr.post("app.test", "Title", "Body", NotificationPriority::High, NotificationCategory::Message);
+        let id = mgr.post(
+            "app.test",
+            "Title",
+            "Body",
+            NotificationPriority::High,
+            NotificationCategory::Message,
+        );
         let n = mgr.get(id).unwrap();
         assert_eq!(n.id, id);
         assert_eq!(n.app_id, "app.test");
@@ -600,7 +643,13 @@ mod tests {
     #[test]
     fn test_mark_read() {
         let mut mgr = make_mgr();
-        let id = mgr.post("app.test", "T", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id = mgr.post(
+            "app.test",
+            "T",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert!(!mgr.get(id).unwrap().read);
         assert_eq!(mgr.mark_read(id), Ok(()));
         assert!(mgr.get(id).unwrap().read);
@@ -611,7 +660,13 @@ mod tests {
     #[test]
     fn test_dismiss() {
         let mut mgr = make_mgr();
-        let id = mgr.post("app.test", "T", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id = mgr.post(
+            "app.test",
+            "T",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert!(!mgr.get(id).unwrap().dismissed);
         assert_eq!(mgr.dismiss(id), Ok(()));
         assert!(mgr.get(id).unwrap().dismissed);
@@ -622,9 +677,27 @@ mod tests {
     #[test]
     fn test_dismiss_all_from_app() {
         let mut mgr = make_mgr();
-        mgr.post("app.a", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.a", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.b", "T3", "B3", NotificationPriority::Normal, NotificationCategory::App);
+        mgr.post(
+            "app.a",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.a",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.b",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
 
         let count = mgr.dismiss_all_from_app("app.a");
         assert_eq!(count, 2);
@@ -636,8 +709,20 @@ mod tests {
     #[test]
     fn test_unread_count() {
         let mut mgr = make_mgr();
-        mgr.post("app.test", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.test", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
+        mgr.post(
+            "app.test",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.test",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.unread_count(), 2);
 
         let id = 1;
@@ -650,9 +735,27 @@ mod tests {
     #[test]
     fn test_unread_count_by_app() {
         let mut mgr = make_mgr();
-        mgr.post("app.a", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.a", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.b", "T3", "B3", NotificationPriority::Normal, NotificationCategory::App);
+        mgr.post(
+            "app.a",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.a",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.b",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
 
         assert_eq!(mgr.unread_count_by_app("app.a"), 2);
         assert_eq!(mgr.unread_count_by_app("app.b"), 1);
@@ -666,17 +769,35 @@ mod tests {
         let mut mgr = make_mgr();
 
         // Post with different priorities and timestamps
-        let id_low = mgr.post("app", "Low", "B", NotificationPriority::Low, NotificationCategory::App);
+        let id_low = mgr.post(
+            "app",
+            "Low",
+            "B",
+            NotificationPriority::Low,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_low) {
             n.timestamp = 100;
         }
 
-        let id_high = mgr.post("app", "High", "B", NotificationPriority::High, NotificationCategory::App);
+        let id_high = mgr.post(
+            "app",
+            "High",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_high) {
             n.timestamp = 200;
         }
 
-        let id_normal = mgr.post("app", "Normal", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id_normal = mgr.post(
+            "app",
+            "Normal",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_normal) {
             n.timestamp = 300;
         }
@@ -694,9 +815,27 @@ mod tests {
     #[test]
     fn test_filter_by_app() {
         let mut mgr = make_mgr();
-        mgr.post("app.a", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.b", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app.a", "T3", "B3", NotificationPriority::Normal, NotificationCategory::App);
+        mgr.post(
+            "app.a",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.b",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app.a",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
 
         let from_a = mgr.notifications_by_app("app.a");
         assert_eq!(from_a.len(), 2);
@@ -710,9 +849,27 @@ mod tests {
     #[test]
     fn test_filter_by_category() {
         let mut mgr = make_mgr();
-        mgr.post("app", "T1", "B1", NotificationPriority::Normal, NotificationCategory::Message);
-        mgr.post("app", "T2", "B2", NotificationPriority::Normal, NotificationCategory::System);
-        mgr.post("app", "T3", "B3", NotificationPriority::Normal, NotificationCategory::Message);
+        mgr.post(
+            "app",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::Message,
+        );
+        mgr.post(
+            "app",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::System,
+        );
+        mgr.post(
+            "app",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::Message,
+        );
 
         let messages = mgr.notifications_by_category(NotificationCategory::Message);
         assert_eq!(messages.len(), 2);
@@ -732,12 +889,24 @@ mod tests {
         assert!(!mgr.has_urgent());
         assert!(mgr.next_urgent().is_none());
 
-        let id1 = mgr.post("app", "Urgent1", "B", NotificationPriority::Urgent, NotificationCategory::Alert);
+        let id1 = mgr.post(
+            "app",
+            "Urgent1",
+            "B",
+            NotificationPriority::Urgent,
+            NotificationCategory::Alert,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id1) {
             n.timestamp = 200;
         }
 
-        let id2 = mgr.post("app", "Urgent2", "B", NotificationPriority::Urgent, NotificationCategory::Alert);
+        let id2 = mgr.post(
+            "app",
+            "Urgent2",
+            "B",
+            NotificationPriority::Urgent,
+            NotificationCategory::Alert,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id2) {
             n.timestamp = 100; // older
         }
@@ -753,7 +922,9 @@ mod tests {
     fn test_post_with_expiry_and_expire_old() {
         let mut mgr = make_mgr();
         let id = mgr.post_with_expiry(
-            "app", "Expiring", "B",
+            "app",
+            "Expiring",
+            "B",
             NotificationPriority::Normal,
             NotificationCategory::App,
             1000,
@@ -776,8 +947,21 @@ mod tests {
     #[test]
     fn test_expire_doesnt_touch_non_expired() {
         let mut mgr = make_mgr();
-        mgr.post_with_expiry("app", "Far future", "B", NotificationPriority::Normal, NotificationCategory::App, 9999);
-        mgr.post("app", "No expiry", "B", NotificationPriority::Normal, NotificationCategory::App);
+        mgr.post_with_expiry(
+            "app",
+            "Far future",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+            9999,
+        );
+        mgr.post(
+            "app",
+            "No expiry",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
 
         let count = mgr.expire_old(5000);
         // At time 5000: expires_at=9999 has NOT expired. No-expiry also fine.
@@ -807,7 +991,13 @@ mod tests {
     #[test]
     fn test_update_progress_on_non_progress_fails() {
         let mut mgr = make_mgr();
-        let id = mgr.post("app", "Normal", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id = mgr.post(
+            "app",
+            "Normal",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         let result = mgr.update_progress(id, 50);
         assert_eq!(result, Err(ESP_ERR_INVALID_STATE));
     }
@@ -829,7 +1019,13 @@ mod tests {
     #[test]
     fn test_set_action_label() {
         let mut mgr = make_mgr();
-        let id = mgr.post("app", "Msg", "B", NotificationPriority::Normal, NotificationCategory::Message);
+        let id = mgr.post(
+            "app",
+            "Msg",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::Message,
+        );
         assert!(mgr.get(id).unwrap().action_label.is_none());
 
         mgr.set_action(id, "Reply").unwrap();
@@ -842,7 +1038,13 @@ mod tests {
     fn test_title_truncation() {
         let mut mgr = make_mgr();
         let long_title = "A".repeat(100);
-        let id = mgr.post("app", &long_title, "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id = mgr.post(
+            "app",
+            &long_title,
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         let n = mgr.get(id).unwrap();
         assert_eq!(n.title.len(), TITLE_MAX_LEN);
     }
@@ -853,7 +1055,13 @@ mod tests {
     fn test_body_truncation() {
         let mut mgr = make_mgr();
         let long_body = "B".repeat(500);
-        let id = mgr.post("app", "T", &long_body, NotificationPriority::Normal, NotificationCategory::App);
+        let id = mgr.post(
+            "app",
+            "T",
+            &long_body,
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         let n = mgr.get(id).unwrap();
         assert_eq!(n.body.len(), BODY_MAX_LEN);
     }
@@ -864,18 +1072,45 @@ mod tests {
     fn test_capacity_eviction_dismissed_low_first() {
         let mut mgr = NotificationManager::new(3);
 
-        let id1 = mgr.post("app", "Low1", "B", NotificationPriority::Low, NotificationCategory::App);
-        let id2 = mgr.post("app", "Normal1", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app",
+            "Low1",
+            "B",
+            NotificationPriority::Low,
+            NotificationCategory::App,
+        );
+        let id2 = mgr.post(
+            "app",
+            "Normal1",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         mgr.dismiss(id1).unwrap(); // dismiss the Low one
 
         // Capacity is 3, we have 2. Add one more to fill.
-        let _id3 = mgr.post("app", "High1", "B", NotificationPriority::High, NotificationCategory::App);
+        let _id3 = mgr.post(
+            "app",
+            "High1",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
 
         // Now adding a 4th should evict the dismissed Low
-        let _id4 = mgr.post("app", "New", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let _id4 = mgr.post(
+            "app",
+            "New",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
-        assert!(mgr.get(id1).is_none(), "dismissed Low should have been evicted");
+        assert!(
+            mgr.get(id1).is_none(),
+            "dismissed Low should have been evicted"
+        );
         assert!(mgr.get(id2).is_some());
     }
 
@@ -885,17 +1120,44 @@ mod tests {
     fn test_capacity_eviction_dismissed_normal_next() {
         let mut mgr = NotificationManager::new(3);
 
-        let id1 = mgr.post("app", "Normal1", "B", NotificationPriority::Normal, NotificationCategory::App);
-        let id2 = mgr.post("app", "High1", "B", NotificationPriority::High, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app",
+            "Normal1",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        let id2 = mgr.post(
+            "app",
+            "High1",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
         mgr.dismiss(id1).unwrap(); // dismiss the Normal one
 
-        let _id3 = mgr.post("app", "High2", "B", NotificationPriority::High, NotificationCategory::App);
+        let _id3 = mgr.post(
+            "app",
+            "High2",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
 
         // Adding 4th should evict the dismissed Normal (no dismissed Low exists)
-        let _id4 = mgr.post("app", "New", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let _id4 = mgr.post(
+            "app",
+            "New",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
-        assert!(mgr.get(id1).is_none(), "dismissed Normal should have been evicted");
+        assert!(
+            mgr.get(id1).is_none(),
+            "dismissed Normal should have been evicted"
+        );
         assert!(mgr.get(id2).is_some());
     }
 
@@ -905,15 +1167,42 @@ mod tests {
     fn test_capacity_eviction_active_low_last_resort() {
         let mut mgr = NotificationManager::new(3);
 
-        let id1 = mgr.post("app", "Low1", "B", NotificationPriority::Low, NotificationCategory::App);
-        let _id2 = mgr.post("app", "High1", "B", NotificationPriority::High, NotificationCategory::App);
-        let _id3 = mgr.post("app", "High2", "B", NotificationPriority::High, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app",
+            "Low1",
+            "B",
+            NotificationPriority::Low,
+            NotificationCategory::App,
+        );
+        let _id2 = mgr.post(
+            "app",
+            "High1",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
+        let _id3 = mgr.post(
+            "app",
+            "High2",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
         // No dismissed notifications, so active Low should be evicted
 
-        let _id4 = mgr.post("app", "New", "B", NotificationPriority::Normal, NotificationCategory::App);
+        let _id4 = mgr.post(
+            "app",
+            "New",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         assert_eq!(mgr.total_count(), 3);
-        assert!(mgr.get(id1).is_none(), "active Low should have been evicted as last resort");
+        assert!(
+            mgr.get(id1).is_none(),
+            "active Low should have been evicted as last resort"
+        );
     }
 
     // ── test_clear_all ──────────────────────────────────────────────────
@@ -921,9 +1210,27 @@ mod tests {
     #[test]
     fn test_clear_all() {
         let mut mgr = make_mgr();
-        mgr.post("app", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app", "T2", "B2", NotificationPriority::High, NotificationCategory::App);
-        mgr.post("app", "T3", "B3", NotificationPriority::Urgent, NotificationCategory::Alert);
+        mgr.post(
+            "app",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app",
+            "T2",
+            "B2",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app",
+            "T3",
+            "B3",
+            NotificationPriority::Urgent,
+            NotificationCategory::Alert,
+        );
 
         mgr.clear_all();
         assert_eq!(mgr.active_count(), 0);
@@ -936,17 +1243,35 @@ mod tests {
     fn test_history() {
         let mut mgr = make_mgr();
 
-        let id1 = mgr.post("app", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id1) {
             n.timestamp = 100;
         }
 
-        let id2 = mgr.post("app", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
+        let id2 = mgr.post(
+            "app",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id2) {
             n.timestamp = 300;
         }
 
-        let id3 = mgr.post("app", "T3", "B3", NotificationPriority::Normal, NotificationCategory::App);
+        let id3 = mgr.post(
+            "app",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
         if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id3) {
             n.timestamp = 200;
         }
@@ -965,9 +1290,27 @@ mod tests {
     #[test]
     fn test_total_count_vs_active_count() {
         let mut mgr = make_mgr();
-        let id1 = mgr.post("app", "T1", "B1", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app", "T2", "B2", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("app", "T3", "B3", NotificationPriority::Normal, NotificationCategory::App);
+        let id1 = mgr.post(
+            "app",
+            "T1",
+            "B1",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app",
+            "T2",
+            "B2",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "app",
+            "T3",
+            "B3",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
 
         assert_eq!(mgr.total_count(), 3);
         assert_eq!(mgr.active_count(), 3);
@@ -987,17 +1330,49 @@ mod tests {
 
         let mut mgr = make_mgr();
         // Post in random order
-        let id_n = mgr.post("app", "Normal", "B", NotificationPriority::Normal, NotificationCategory::App);
-        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_n) { n.timestamp = 1; }
+        let id_n = mgr.post(
+            "app",
+            "Normal",
+            "B",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_n) {
+            n.timestamp = 1;
+        }
 
-        let id_u = mgr.post("app", "Urgent", "B", NotificationPriority::Urgent, NotificationCategory::Alert);
-        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_u) { n.timestamp = 2; }
+        let id_u = mgr.post(
+            "app",
+            "Urgent",
+            "B",
+            NotificationPriority::Urgent,
+            NotificationCategory::Alert,
+        );
+        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_u) {
+            n.timestamp = 2;
+        }
 
-        let id_l = mgr.post("app", "Low", "B", NotificationPriority::Low, NotificationCategory::App);
-        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_l) { n.timestamp = 3; }
+        let id_l = mgr.post(
+            "app",
+            "Low",
+            "B",
+            NotificationPriority::Low,
+            NotificationCategory::App,
+        );
+        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_l) {
+            n.timestamp = 3;
+        }
 
-        let id_h = mgr.post("app", "High", "B", NotificationPriority::High, NotificationCategory::App);
-        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_h) { n.timestamp = 4; }
+        let id_h = mgr.post(
+            "app",
+            "High",
+            "B",
+            NotificationPriority::High,
+            NotificationCategory::App,
+        );
+        if let Some(n) = mgr.notifications.iter_mut().find(|n| n.id == id_h) {
+            n.timestamp = 4;
+        }
 
         let active = mgr.active_notifications();
         assert_eq!(active[0].priority, NotificationPriority::Urgent);
@@ -1011,10 +1386,34 @@ mod tests {
     #[test]
     fn test_multiple_apps_posting() {
         let mut mgr = make_mgr();
-        mgr.post("messenger", "New msg", "Hi", NotificationPriority::Normal, NotificationCategory::Message);
-        mgr.post("system", "Battery low", "10%", NotificationPriority::High, NotificationCategory::System);
-        mgr.post("assistant", "Response ready", "...", NotificationPriority::Normal, NotificationCategory::App);
-        mgr.post("messenger", "New msg2", "Hey", NotificationPriority::Normal, NotificationCategory::Message);
+        mgr.post(
+            "messenger",
+            "New msg",
+            "Hi",
+            NotificationPriority::Normal,
+            NotificationCategory::Message,
+        );
+        mgr.post(
+            "system",
+            "Battery low",
+            "10%",
+            NotificationPriority::High,
+            NotificationCategory::System,
+        );
+        mgr.post(
+            "assistant",
+            "Response ready",
+            "...",
+            NotificationPriority::Normal,
+            NotificationCategory::App,
+        );
+        mgr.post(
+            "messenger",
+            "New msg2",
+            "Hey",
+            NotificationPriority::Normal,
+            NotificationCategory::Message,
+        );
 
         assert_eq!(mgr.total_count(), 4);
         assert_eq!(mgr.unread_count_by_app("messenger"), 2);
@@ -1043,29 +1442,48 @@ mod tests {
             // All FFI functions should handle null gracefully
             rs_notification_manager_destroy(std::ptr::null_mut());
 
-            assert_eq!(rs_notification_post(
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                0, 0,
-            ), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                rs_notification_post(
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                    0,
+                ),
+                ESP_ERR_INVALID_ARG
+            );
 
-            assert_eq!(rs_notification_post_progress(
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                0,
-            ), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                rs_notification_post_progress(
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    0,
+                ),
+                ESP_ERR_INVALID_ARG
+            );
 
-            assert_eq!(rs_notification_update_progress(std::ptr::null_mut(), 1, 50), ESP_ERR_INVALID_ARG);
-            assert_eq!(rs_notification_mark_read(std::ptr::null_mut(), 1), ESP_ERR_INVALID_ARG);
-            assert_eq!(rs_notification_dismiss(std::ptr::null_mut(), 1), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                rs_notification_update_progress(std::ptr::null_mut(), 1, 50),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                rs_notification_mark_read(std::ptr::null_mut(), 1),
+                ESP_ERR_INVALID_ARG
+            );
+            assert_eq!(
+                rs_notification_dismiss(std::ptr::null_mut(), 1),
+                ESP_ERR_INVALID_ARG
+            );
             assert_eq!(rs_notification_unread_count(std::ptr::null()), 0);
             assert_eq!(rs_notification_has_urgent(std::ptr::null()), 0);
             assert_eq!(rs_notification_active_count(std::ptr::null()), 0);
-            assert_eq!(rs_notification_expire(std::ptr::null_mut(), 0), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                rs_notification_expire(std::ptr::null_mut(), 0),
+                ESP_ERR_INVALID_ARG
+            );
         }
     }
 

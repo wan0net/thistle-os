@@ -50,10 +50,7 @@ fn union_rect(a: Rectangle, b: Rectangle) -> Rectangle {
 
     Rectangle::new(
         Point::new(min_x, min_y),
-        embedded_graphics::geometry::Size::new(
-            (max_x - min_x) as u32,
-            (max_y - min_y) as u32,
-        ),
+        embedded_graphics::geometry::Size::new((max_x - min_x) as u32, (max_y - min_y) as u32),
     )
 }
 
@@ -175,11 +172,7 @@ impl UiTree {
     /// children list is full.
     pub fn add_child(&mut self, parent: WidgetId, mut widget: Widget) -> Option<WidgetId> {
         // Validate parent.
-        if !self
-            .nodes
-            .get(parent as usize)
-            .map_or(false, |n| n.alive)
-        {
+        if !self.nodes.get(parent as usize).map_or(false, |n| n.alive) {
             return None;
         }
 
@@ -227,11 +220,7 @@ impl UiTree {
         if id == self.root {
             return false; // cannot remove root
         }
-        if !self
-            .nodes
-            .get(id as usize)
-            .map_or(false, |n| n.alive)
-        {
+        if !self.nodes.get(id as usize).map_or(false, |n| n.alive) {
             return false;
         }
 
@@ -399,7 +388,9 @@ mod tests {
     #[test]
     fn remove_subtree() {
         let mut tree = UiTree::new(Widget::Container(ContainerWidget::default()));
-        let a = tree.add_child(tree.root(), Widget::Container(ContainerWidget::default())).unwrap();
+        let a = tree
+            .add_child(tree.root(), Widget::Container(ContainerWidget::default()))
+            .unwrap();
         let _b = tree.add_child(a, label("nested")).unwrap();
 
         assert!(tree.remove(a));

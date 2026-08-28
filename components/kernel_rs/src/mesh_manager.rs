@@ -166,14 +166,16 @@ impl MeshManagerState {
     /// Ensure the inbox array is heap-allocated, returning a mutable ref.
     fn ensure_inbox(&mut self) -> &mut [CMeshMessage; INBOX_SIZE] {
         if self.inbox.is_none() {
-            self.inbox = Some(Box::new([CMeshMessage {
-                sender_key: [0u8; 32],
-                sender_name: [0u8; 32],
-                sender_name_len: 0,
-                timestamp: 0,
-                text: [0u8; 200],
-                text_len: 0,
-            }; INBOX_SIZE]));
+            self.inbox = Some(Box::new(
+                [CMeshMessage {
+                    sender_key: [0u8; 32],
+                    sender_name: [0u8; 32],
+                    sender_name_len: 0,
+                    timestamp: 0,
+                    text: [0u8; 200],
+                    text_len: 0,
+                }; INBOX_SIZE],
+            ));
         }
         self.inbox.as_mut().unwrap()
     }
@@ -248,10 +250,7 @@ unsafe extern "C" fn on_mesh_message(
 /// We don't store contacts ourselves — the C shim maintains that list.
 /// This callback is a no-op placeholder for future event-bus integration.
 #[cfg(target_os = "espidf")]
-unsafe extern "C" fn on_mesh_contact(
-    _contact: *const CMeshContact,
-    _ud: *mut c_void,
-) {
+unsafe extern "C" fn on_mesh_contact(_contact: *const CMeshContact, _ud: *mut c_void) {
     // Future: publish an event via the event bus
 }
 
@@ -587,7 +586,9 @@ pub extern "C" fn rs_mesh_get_inbox_message(index: i32, out: *mut CMeshMessage) 
 
     match state.inbox_get(index as usize) {
         Some(msg) => {
-            unsafe { *out = *msg; }
+            unsafe {
+                *out = *msg;
+            }
             ESP_OK
         }
         None => ESP_ERR_INVALID_ARG,
@@ -636,7 +637,9 @@ pub extern "C" fn rs_mesh_get_self_key(out: *mut u8) -> i32 {
     #[cfg(not(target_os = "espidf"))]
     {
         // Stub: zero-fill
-        unsafe { std::ptr::write_bytes(out, 0, 32); }
+        unsafe {
+            std::ptr::write_bytes(out, 0, 32);
+        }
         ESP_OK
     }
 }
@@ -693,7 +696,9 @@ pub extern "C" fn rs_mesh_get_stats(out: *mut CMeshStats) -> i32 {
 
     #[cfg(not(target_os = "espidf"))]
     {
-        unsafe { *out = CMeshStats::default(); }
+        unsafe {
+            *out = CMeshStats::default();
+        }
         ESP_OK
     }
 }
@@ -818,8 +823,11 @@ mod tests {
         reset_state();
         let name = CString::new("Node").unwrap();
         assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 0) }, ESP_OK);
-        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 0) }, ESP_ERR_INVALID_STATE,
-            "double init must return INVALID_STATE");
+        assert_eq!(
+            unsafe { rs_mesh_init(name.as_ptr(), 0) },
+            ESP_ERR_INVALID_STATE,
+            "double init must return INVALID_STATE"
+        );
         rs_mesh_deinit();
     }
 
@@ -836,7 +844,11 @@ mod tests {
         let name = CString::new("Node").unwrap();
         assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 1) }, ESP_OK);
         assert_eq!(rs_mesh_deinit(), ESP_OK);
-        assert_eq!(unsafe { rs_mesh_init(name.as_ptr(), 2) }, ESP_OK, "re-init after deinit must succeed");
+        assert_eq!(
+            unsafe { rs_mesh_init(name.as_ptr(), 2) },
+            ESP_OK,
+            "re-init after deinit must succeed"
+        );
         rs_mesh_deinit();
     }
 
@@ -894,11 +906,18 @@ mod tests {
         // Oldest should be message #5 (first 5 were overwritten)
         let mut out = CMeshMessage::default();
         rs_mesh_get_inbox_message(0, &mut out as *mut CMeshMessage);
-        assert_eq!(out.timestamp, 5, "oldest message should be #5 after overflow");
+        assert_eq!(
+            out.timestamp, 5,
+            "oldest message should be #5 after overflow"
+        );
 
         // Newest should be INBOX_SIZE + 4
         rs_mesh_get_inbox_message((INBOX_SIZE - 1) as i32, &mut out as *mut CMeshMessage);
-        assert_eq!(out.timestamp, (INBOX_SIZE + 4) as u32, "newest message should be last pushed");
+        assert_eq!(
+            out.timestamp,
+            (INBOX_SIZE + 4) as u32,
+            "newest message should be last pushed"
+        );
 
         rs_mesh_deinit();
     }
@@ -1069,8 +1088,15 @@ mod tests {
     fn test_get_self_name_without_init() {
         reset_state();
         let ptr = rs_mesh_get_self_name();
-        assert!(!ptr.is_null(), "get_self_name must return non-null even without init");
+        assert!(
+            !ptr.is_null(),
+            "get_self_name must return non-null even without init"
+        );
         let c_str = unsafe { std::ffi::CStr::from_ptr(ptr) };
-        assert_eq!(c_str.to_bytes().len(), 0, "name should be empty string without init");
+        assert_eq!(
+            c_str.to_bytes().len(),
+            0,
+            "name should be empty string without init"
+        );
     }
 }

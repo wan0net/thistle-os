@@ -48,8 +48,7 @@ const STORAGE_PATH: &str = "/sdcard/data/msg_queue.json";
 // Base64 encode/decode (minimal, standard alphabet with padding)
 // ---------------------------------------------------------------------------
 
-const B64_CHARS: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -361,7 +360,8 @@ impl QueuedMessage {
         let created_at = json_get_int(json, "created_at").unwrap_or(0) as u64;
         let next_retry_at = json_get_int(json, "next_retry_at").unwrap_or(0) as u64;
         let retry_count = json_get_int(json, "retry_count").unwrap_or(0) as u32;
-        let max_retries = json_get_int(json, "max_retries").unwrap_or(DEFAULT_MAX_RETRIES as i64) as u32;
+        let max_retries =
+            json_get_int(json, "max_retries").unwrap_or(DEFAULT_MAX_RETRIES as i64) as u32;
         let ttl_ms = json_get_int(json, "ttl_ms").unwrap_or(DEFAULT_TTL_MS as i64) as u64;
         let status_val = json_get_int(json, "status").unwrap_or(0) as u8;
         let status = MsgStatus::from_u8(status_val).unwrap_or(MsgStatus::Pending);
@@ -863,10 +863,7 @@ pub extern "C" fn rs_msg_queue_tick(now_ms: u64) -> i32 {
 ///
 /// `out` must point to an array of at least `max` CQueuedMsgInfo structs.
 #[no_mangle]
-pub unsafe extern "C" fn rs_msg_queue_get_ready(
-    out: *mut CQueuedMsgInfo,
-    max: u32,
-) -> i32 {
+pub unsafe extern "C" fn rs_msg_queue_get_ready(out: *mut CQueuedMsgInfo, max: u32) -> i32 {
     if out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -894,11 +891,7 @@ pub unsafe extern "C" fn rs_msg_queue_get_ready(
 ///
 /// `out` must point to a writable buffer of at least `max_len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn rs_msg_queue_get_payload(
-    id: u32,
-    out: *mut u8,
-    max_len: u16,
-) -> i32 {
+pub unsafe extern "C" fn rs_msg_queue_get_payload(id: u32, out: *mut u8, max_len: u16) -> i32 {
     if out.is_null() || max_len == 0 {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1203,7 +1196,9 @@ mod tests {
         // Just before TTL expires
         let _ = state.tick(1000 + DEFAULT_TTL_MS - 1);
         let info = state.get_info(id).unwrap();
-        assert!(info.status == MsgStatus::Pending as u8 || info.status == MsgStatus::Retrying as u8);
+        assert!(
+            info.status == MsgStatus::Pending as u8 || info.status == MsgStatus::Retrying as u8
+        );
     }
 
     #[test]
@@ -1217,7 +1212,9 @@ mod tests {
         let _ = state.tick(999_999_999);
         let info = state.get_info(id as u32).unwrap();
         // Should still be active, not expired
-        assert!(info.status == MsgStatus::Pending as u8 || info.status == MsgStatus::Retrying as u8);
+        assert!(
+            info.status == MsgStatus::Pending as u8 || info.status == MsgStatus::Retrying as u8
+        );
     }
 
     #[test]
@@ -1259,9 +1256,16 @@ mod tests {
         reset();
         let state = MSG_QUEUE.lock().unwrap();
         let mut out = [CQueuedMsgInfo {
-            id: 0, transport: 0, dest: [0u8; 32], dest_len: 0,
-            payload_len: 0, priority: 0, retry_count: 0, max_retries: 0,
-            status: 0, ttl_ms: 0,
+            id: 0,
+            transport: 0,
+            dest: [0u8; 32],
+            dest_len: 0,
+            payload_len: 0,
+            priority: 0,
+            retry_count: 0,
+            max_retries: 0,
+            status: 0,
+            ttl_ms: 0,
         }; 4];
         let count = state.get_ready(&mut out, 1000);
         assert_eq!(count, 0);
@@ -1274,9 +1278,16 @@ mod tests {
         enqueue_test_msg(&mut state, 0, MsgPriority::Normal);
         enqueue_test_msg(&mut state, 0, MsgPriority::Normal);
         let mut out = [CQueuedMsgInfo {
-            id: 0, transport: 0, dest: [0u8; 32], dest_len: 0,
-            payload_len: 0, priority: 0, retry_count: 0, max_retries: 0,
-            status: 0, ttl_ms: 0,
+            id: 0,
+            transport: 0,
+            dest: [0u8; 32],
+            dest_len: 0,
+            payload_len: 0,
+            priority: 0,
+            retry_count: 0,
+            max_retries: 0,
+            status: 0,
+            ttl_ms: 0,
         }; 4];
         // Messages created at 1000, next_retry_at = 1000
         let count = state.get_ready(&mut out, 1000);
@@ -1291,9 +1302,16 @@ mod tests {
         // Mark failed to push next_retry_at into the future
         state.mark_failed(id, 1000);
         let mut out = [CQueuedMsgInfo {
-            id: 0, transport: 0, dest: [0u8; 32], dest_len: 0,
-            payload_len: 0, priority: 0, retry_count: 0, max_retries: 0,
-            status: 0, ttl_ms: 0,
+            id: 0,
+            transport: 0,
+            dest: [0u8; 32],
+            dest_len: 0,
+            payload_len: 0,
+            priority: 0,
+            retry_count: 0,
+            max_retries: 0,
+            status: 0,
+            ttl_ms: 0,
         }; 4];
         // Check at time just after the failure — not enough time for backoff
         let count = state.get_ready(&mut out, 1001);
@@ -1308,9 +1326,16 @@ mod tests {
         let id_urgent = enqueue_test_msg(&mut state, 0, MsgPriority::Urgent);
         let _id_high = enqueue_test_msg(&mut state, 0, MsgPriority::High);
         let mut out = [CQueuedMsgInfo {
-            id: 0, transport: 0, dest: [0u8; 32], dest_len: 0,
-            payload_len: 0, priority: 0, retry_count: 0, max_retries: 0,
-            status: 0, ttl_ms: 0,
+            id: 0,
+            transport: 0,
+            dest: [0u8; 32],
+            dest_len: 0,
+            payload_len: 0,
+            priority: 0,
+            retry_count: 0,
+            max_retries: 0,
+            status: 0,
+            ttl_ms: 0,
         }; 4];
         let count = state.get_ready(&mut out, 2000);
         assert_eq!(count, 3);
@@ -1688,7 +1713,14 @@ mod tests {
         reset();
         let payload = b"FFI test";
         let id = unsafe {
-            rs_msg_queue_enqueue(0, std::ptr::null(), 0, payload.as_ptr(), payload.len() as u16, 0)
+            rs_msg_queue_enqueue(
+                0,
+                std::ptr::null(),
+                0,
+                payload.as_ptr(),
+                payload.len() as u16,
+                0,
+            )
         };
         assert!(id > 0);
         assert_eq!(rs_msg_queue_get_count(), 1);
@@ -1697,9 +1729,7 @@ mod tests {
     #[test]
     fn test_ffi_enqueue_null_payload_rejected() {
         reset();
-        let rc = unsafe {
-            rs_msg_queue_enqueue(0, std::ptr::null(), 0, std::ptr::null(), 10, 0)
-        };
+        let rc = unsafe { rs_msg_queue_enqueue(0, std::ptr::null(), 0, std::ptr::null(), 10, 0) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1715,7 +1745,14 @@ mod tests {
         reset();
         let payload = b"Cancel me";
         let id = unsafe {
-            rs_msg_queue_enqueue(0, std::ptr::null(), 0, payload.as_ptr(), payload.len() as u16, 0)
+            rs_msg_queue_enqueue(
+                0,
+                std::ptr::null(),
+                0,
+                payload.as_ptr(),
+                payload.len() as u16,
+                0,
+            )
         };
         assert!(id > 0);
         let rc = rs_msg_queue_cancel(id as u32);

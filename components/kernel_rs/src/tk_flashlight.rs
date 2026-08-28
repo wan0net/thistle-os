@@ -104,7 +104,7 @@ unsafe fn esp_timer_get_time() -> i64 {
 // Layout constants (match tk_launcher)
 // ---------------------------------------------------------------------------
 
-const LAYOUT_COLUMN: i32 = 0;
+const LAYOUT_COLUMN: i32 = 1;
 const ALIGN_CENTER: i32 = 1;
 
 // ---------------------------------------------------------------------------
@@ -122,25 +122,55 @@ const LETTER_GAP: i64 = 600_000;
 const WORD_GAP: i64 = 1_400_000;
 
 struct MorseStep {
-    on_us: i64,  // 0 = end-of-sequence marker
+    on_us: i64, // 0 = end-of-sequence marker
     off_us: i64,
 }
 
 static SOS_PATTERN: &[MorseStep] = &[
     // S
-    MorseStep { on_us: SHORT_ON, off_us: SHORT_OFF },
-    MorseStep { on_us: SHORT_ON, off_us: SHORT_OFF },
-    MorseStep { on_us: SHORT_ON, off_us: LETTER_GAP },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: SHORT_OFF,
+    },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: SHORT_OFF,
+    },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: LETTER_GAP,
+    },
     // O
-    MorseStep { on_us: LONG_ON, off_us: LONG_OFF },
-    MorseStep { on_us: LONG_ON, off_us: LONG_OFF },
-    MorseStep { on_us: LONG_ON, off_us: LETTER_GAP },
+    MorseStep {
+        on_us: LONG_ON,
+        off_us: LONG_OFF,
+    },
+    MorseStep {
+        on_us: LONG_ON,
+        off_us: LONG_OFF,
+    },
+    MorseStep {
+        on_us: LONG_ON,
+        off_us: LETTER_GAP,
+    },
     // S
-    MorseStep { on_us: SHORT_ON, off_us: SHORT_OFF },
-    MorseStep { on_us: SHORT_ON, off_us: SHORT_OFF },
-    MorseStep { on_us: SHORT_ON, off_us: WORD_GAP },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: SHORT_OFF,
+    },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: SHORT_OFF,
+    },
+    MorseStep {
+        on_us: SHORT_ON,
+        off_us: WORD_GAP,
+    },
     // End marker — restarts sequence
-    MorseStep { on_us: 0, off_us: 0 },
+    MorseStep {
+        on_us: 0,
+        off_us: 0,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -313,12 +343,10 @@ fn apply_mode(s: &mut FlashlightState, new_mode: FlashMode) {
                 thistle_ui_set_text(s.sos_btn, b"STOP SOS\0".as_ptr() as *const c_char);
             }
         }
-        FlashMode::Off => {
-            unsafe {
-                thistle_ui_set_text(s.flash_btn, b"FLASHLIGHT\0".as_ptr() as *const c_char);
-                thistle_ui_set_text(s.sos_btn, b"SOS\0".as_ptr() as *const c_char);
-            }
-        }
+        FlashMode::Off => unsafe {
+            thistle_ui_set_text(s.flash_btn, b"FLASHLIGHT\0".as_ptr() as *const c_char);
+            thistle_ui_set_text(s.sos_btn, b"SOS\0".as_ptr() as *const c_char);
+        },
     }
 }
 
@@ -347,10 +375,7 @@ unsafe extern "C" fn on_create() -> i32 {
     thistle_ui_set_gap(main_col, 20);
 
     // --- FLASHLIGHT button ---
-    let flash_btn = thistle_ui_create_button(
-        main_col,
-        b"FLASHLIGHT\0".as_ptr() as *const c_char,
-    );
+    let flash_btn = thistle_ui_create_button(main_col, b"FLASHLIGHT\0".as_ptr() as *const c_char);
     thistle_ui_set_size(flash_btn, 200, 52);
     thistle_ui_set_bg_color(flash_btn, primary_color);
     thistle_ui_set_text_color(flash_btn, bg_color);
@@ -358,10 +383,7 @@ unsafe extern "C" fn on_create() -> i32 {
     thistle_ui_set_font_size(flash_btn, 18);
 
     // --- SOS button ---
-    let sos_btn = thistle_ui_create_button(
-        main_col,
-        b"SOS\0".as_ptr() as *const c_char,
-    );
+    let sos_btn = thistle_ui_create_button(main_col, b"SOS\0".as_ptr() as *const c_char);
     thistle_ui_set_size(sos_btn, 200, 44);
     thistle_ui_set_bg_color(sos_btn, surface_color);
     thistle_ui_set_text_color(sos_btn, text_color);
@@ -473,20 +495,20 @@ pub extern "C" fn rs_flashlight_tick() {
 // ---------------------------------------------------------------------------
 
 static MANIFEST: CAppManifest = CAppManifest {
-    id:               b"com.thistle.flashlight\0".as_ptr() as *const c_char,
-    name:             b"Flashlight\0".as_ptr() as *const c_char,
-    version:          b"0.2.0\0".as_ptr() as *const c_char,
+    id: b"com.thistle.flashlight\0".as_ptr() as *const c_char,
+    name: b"Flashlight\0".as_ptr() as *const c_char,
+    version: b"0.2.0\0".as_ptr() as *const c_char,
     allow_background: false,
-    min_memory_kb:    0,
+    min_memory_kb: 0,
 };
 
 static ENTRY: CAppEntry = CAppEntry {
-    on_create:  Some(on_create),
-    on_start:   Some(on_start),
-    on_pause:   Some(on_pause),
-    on_resume:  Some(on_resume),
+    on_create: Some(on_create),
+    on_start: Some(on_start),
+    on_pause: Some(on_pause),
+    on_resume: Some(on_resume),
     on_destroy: Some(on_destroy),
-    manifest:   &MANIFEST as *const CAppManifest,
+    manifest: &MANIFEST as *const CAppManifest,
 };
 
 // ---------------------------------------------------------------------------

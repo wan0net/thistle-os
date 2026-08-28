@@ -60,7 +60,11 @@ struct GpioConfig {
 
 #[cfg(target_os = "espidf")]
 extern "C" {
-    fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_add_device(
+        bus: *mut c_void,
+        cfg: *const I2cDeviceConfig,
+        handle: *mut *mut c_void,
+    ) -> i32;
     fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
     fn i2c_master_transmit_receive(
         handle: *mut c_void,
@@ -70,10 +74,19 @@ extern "C" {
         read_size: usize,
         timeout_ms: i32,
     ) -> i32;
-    fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_transmit(
+        handle: *mut c_void,
+        data: *const u8,
+        len: usize,
+        timeout_ms: i32,
+    ) -> i32;
     fn gpio_config(cfg: *const GpioConfig) -> i32;
     fn gpio_set_level(pin: i32, level: u32) -> i32;
-    fn gpio_isr_handler_add(pin: i32, handler: unsafe extern "C" fn(*mut c_void), arg: *mut c_void) -> i32;
+    fn gpio_isr_handler_add(
+        pin: i32,
+        handler: unsafe extern "C" fn(*mut c_void),
+        arg: *mut c_void,
+    ) -> i32;
     fn gpio_isr_handler_remove(pin: i32) -> i32;
     fn gpio_install_isr_service(flags: i32) -> i32;
     fn esp_timer_get_time() -> i64;
@@ -81,12 +94,18 @@ extern "C" {
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_bus_add_device(_bus: *mut c_void, _cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32 {
+unsafe fn i2c_master_bus_add_device(
+    _bus: *mut c_void,
+    _cfg: *const I2cDeviceConfig,
+    handle: *mut *mut c_void,
+) -> i32 {
     *handle = 1usize as *mut c_void;
     ESP_OK
 }
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 { ESP_OK }
+unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
 unsafe fn i2c_master_transmit_receive(
     _handle: *mut c_void,
@@ -100,19 +119,42 @@ unsafe fn i2c_master_transmit_receive(
     ESP_OK
 }
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_transmit(_handle: *mut c_void, _data: *const u8, _len: usize, _timeout_ms: i32) -> i32 { ESP_OK }
+unsafe fn i2c_master_transmit(
+    _handle: *mut c_void,
+    _data: *const u8,
+    _len: usize,
+    _timeout_ms: i32,
+) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 { ESP_OK }
+unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 { ESP_OK }
+unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_isr_handler_add(_pin: i32, _handler: unsafe extern "C" fn(*mut c_void), _arg: *mut c_void) -> i32 { ESP_OK }
+unsafe fn gpio_isr_handler_add(
+    _pin: i32,
+    _handler: unsafe extern "C" fn(*mut c_void),
+    _arg: *mut c_void,
+) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_isr_handler_remove(_pin: i32) -> i32 { ESP_OK }
+unsafe fn gpio_isr_handler_remove(_pin: i32) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_install_isr_service(_flags: i32) -> i32 { ESP_OK }
+unsafe fn gpio_install_isr_service(_flags: i32) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn esp_timer_get_time() -> i64 { 0 }
+unsafe fn esp_timer_get_time() -> i64 {
+    0
+}
 #[cfg(not(target_os = "espidf"))]
 unsafe fn vTaskDelay(_ticks: u32) {}
 
@@ -193,12 +235,19 @@ fn transform_coords(cfg: TouchFt3x68Config, mut x: u16, mut y: u16) -> (u16, u16
         std::mem::swap(&mut x, &mut y);
     }
     if cfg.invert_x {
-        x = max_x.saturating_sub(1).saturating_sub(x.min(max_x.saturating_sub(1)));
+        x = max_x
+            .saturating_sub(1)
+            .saturating_sub(x.min(max_x.saturating_sub(1)));
     }
     if cfg.invert_y {
-        y = max_y.saturating_sub(1).saturating_sub(y.min(max_y.saturating_sub(1)));
+        y = max_y
+            .saturating_sub(1)
+            .saturating_sub(y.min(max_y.saturating_sub(1)));
     }
-    (x.min(max_x.saturating_sub(1)), y.min(max_y.saturating_sub(1)))
+    (
+        x.min(max_x.saturating_sub(1)),
+        y.min(max_y.saturating_sub(1)),
+    )
 }
 
 unsafe fn dispatch(event_type: HalInputEventType, x: u16, y: u16) {
@@ -243,7 +292,9 @@ unsafe extern "C" fn ft_init(config: *const c_void) -> i32 {
             intr_type: 0,
         };
         let ret = gpio_config(&cfg);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         hw_reset();
     }
 
@@ -275,10 +326,17 @@ unsafe extern "C" fn ft_init(config: *const c_void) -> i32 {
             intr_type: 2,
         };
         let ret = gpio_config(&cfg);
-        if ret != ESP_OK { return ret; }
-        let _ = gpio_install_isr_service(0);
+        if ret != ESP_OK {
+            return ret;
+        }
+        let ret = crate::gpio_isr_service::ensure_installed(0);
+        if ret != ESP_OK {
+            return ret;
+        }
         let ret = gpio_isr_handler_add(s.cfg.pin_int, ft_irq_handler, std::ptr::null_mut());
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
     }
 
     IRQ_PENDING.store(false, Ordering::Release);
@@ -357,7 +415,14 @@ unsafe extern "C" fn ft_sleep(enter: bool) -> i32 {
     if !state_mut().initialized {
         return ESP_ERR_INVALID_STATE;
     }
-    write_reg(FT_REG_POWER_MODE, if enter { FT_POWER_SLEEP } else { FT_POWER_ACTIVE })
+    write_reg(
+        FT_REG_POWER_MODE,
+        if enter {
+            FT_POWER_SLEEP
+        } else {
+            FT_POWER_ACTIVE
+        },
+    )
 }
 
 static FT3X68_DRIVER: HalInputDriver = HalInputDriver {

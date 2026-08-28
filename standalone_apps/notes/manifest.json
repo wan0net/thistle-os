@@ -1,0 +1,16 @@
+{
+  "type": "app",
+  "id": "com.thistle.notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "release_sequence": 1,
+  "author": "ThistleOS",
+  "description": "Local plain-text notes for colour and e-paper devices",
+  "category": "productivity",
+  "min_os": "0.3.0",
+  "arch": "esp32s3",
+  "entry": "notes.app.elf",
+  "permissions": ["storage"],
+  "background": false,
+  "min_memory_kb": 48
+}

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thistleos.dev/schemas/thistle-app-metadata-v1.schema.json",
+  "title": "ThistleOS application store metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x-[a-z0-9][a-z0-9.-]*$": true
+  },
+  "required": [
+    "schema",
+    "id",
+    "category",
+    "summary",
+    "description",
+    "license",
+    "releases"
+  ],
+  "properties": {
+    "schema": { "const": "thistle.app.metadata/v1" },
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$"
+    },
+    "category": {
+      "enum": [
+        "communication",
+        "development",
+        "games",
+        "media",
+        "productivity",
+        "system",
+        "tools",
+        "utilities"
+      ]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "license": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "homepage": { "type": "string", "format": "uri", "maxLength": 256 },
+    "source": { "type": "string", "format": "uri", "maxLength": 256 },
+    "support": { "type": "string", "format": "uri", "maxLength": 256 },
+    "screenshots": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "type": "string", "format": "uri", "maxLength": 256 }
+    },
+    "releases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/release" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "maxLength": 31,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "release_sequence", "released", "changes"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "release_sequence": { "type": "integer", "minimum": 1 },
+        "released": { "type": "string", "format": "date" },
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "min_os": { "$ref": "#/$defs/version" },
+        "yanked": { "type": "boolean", "default": false },
+        "yank_reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  }
+}

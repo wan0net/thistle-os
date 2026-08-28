@@ -20,8 +20,10 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hal_registry::{HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData,
-                          HalInputEventType, HalInputTouchData};
+use crate::hal_registry::{
+    HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData, HalInputEventType,
+    HalInputTouchData,
+};
 
 // ── ESP error codes ─────────────────────────────────────────────────────────
 
@@ -31,10 +33,10 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 
 // ── Register addresses (8-bit) ───────────────────────────────────────────────
 
-const CST816_REG_GESTURE:        u8 = 0x01;
-const CST816_REG_FINGER_CNT:     u8 = 0x02;
-const CST816_REG_X_HIGH:         u8 = 0x03;
-const CST816_REG_CHIP_ID:        u8 = 0xA7;
+const CST816_REG_GESTURE: u8 = 0x01;
+const CST816_REG_FINGER_CNT: u8 = 0x02;
+const CST816_REG_X_HIGH: u8 = 0x03;
+const CST816_REG_CHIP_ID: u8 = 0xA7;
 const CST816_REG_DIS_AUTO_SLEEP: u8 = 0xFE;
 
 const CST816_BURST_LEN: usize = 6; // gesture + finger_cnt + x_hi + x_lo + y_hi + y_lo
@@ -322,12 +324,12 @@ unsafe extern "C" fn cst816_init(config: *const c_void) -> i32 {
 
     // Copy config
     let src = &*(config as *const TouchCst816Config);
-    S_TOUCH.cfg.i2c_bus  = src.i2c_bus;
+    S_TOUCH.cfg.i2c_bus = src.i2c_bus;
     S_TOUCH.cfg.i2c_addr = src.i2c_addr;
-    S_TOUCH.cfg.pin_int  = src.pin_int;
-    S_TOUCH.cfg.pin_rst  = src.pin_rst;
-    S_TOUCH.cfg.max_x    = src.max_x;
-    S_TOUCH.cfg.max_y    = src.max_y;
+    S_TOUCH.cfg.pin_int = src.pin_int;
+    S_TOUCH.cfg.pin_rst = src.pin_rst;
+    S_TOUCH.cfg.max_x = src.max_x;
+    S_TOUCH.cfg.max_y = src.max_y;
 
     S_TOUCH.irq_pending.store(false, Ordering::Relaxed);
     S_TOUCH.touching = false;
@@ -397,7 +399,12 @@ unsafe extern "C" fn cst816_init(config: *const c_void) -> i32 {
             return ret;
         }
 
-        gpio_install_isr_service(0); // idempotent
+        let ret = crate::gpio_isr_service::ensure_installed(0);
+        if ret != ESP_OK {
+            i2c_master_bus_rm_device(S_TOUCH.dev);
+            S_TOUCH.dev = std::ptr::null_mut();
+            return ret;
+        }
 
         let ret = gpio_isr_handler_add(
             S_TOUCH.cfg.pin_int,
@@ -709,10 +716,7 @@ mod tests {
                 cst816_init(&cfg as *const TouchCst816Config as *const c_void),
                 ESP_OK
             );
-            unsafe extern "C" fn dummy_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {}
+            unsafe extern "C" fn dummy_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {}
             assert_eq!(
                 cst816_register_callback(Some(dummy_cb), std::ptr::null_mut()),
                 ESP_OK

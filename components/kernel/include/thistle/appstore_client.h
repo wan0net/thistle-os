@@ -12,26 +12,46 @@
 
 /* Entry types in the catalog */
 typedef enum {
-    CATALOG_TYPE_APP,        /* .app.elf — loaded via ELF loader */
+    CATALOG_TYPE_APP,        /* .tap — verified and activated as a generation */
     CATALOG_TYPE_FIRMWARE,   /* .bin — applied via OTA */
     CATALOG_TYPE_DRIVER,     /* .drv.elf — loaded as driver */
+    CATALOG_TYPE_WM,         /* .wm.elf — loaded as a window manager */
 } catalog_entry_type_t;
 
 typedef struct {
     char id[64];
-    char name[32];
+    char name[64];
     char version[16];
     char author[32];
-    char description[128];
-    catalog_entry_type_t type;
-    uint32_t size_bytes;
+    char description[256];
     char url[APPSTORE_URL_MAX];          /* HTTPS download URL */
     char sig_url[APPSTORE_URL_MAX];      /* Signature file URL */
     char sha256_hex[APPSTORE_HASH_HEX_LEN + 1]; /* Expected SHA-256 hash */
     char permissions[64];                /* Comma-separated */
     char min_os_version[16];
+    uint32_t size_bytes;
+    catalog_entry_type_t type;
     bool is_signed;
-    bool is_installed;                   /* true if file exists on SD card */
+    char compatible_boards[128];
+    char detection_bus[8];
+    uint16_t detection_address;
+    uint16_t detection_chip_id_reg;
+    uint16_t detection_chip_id_value;
+    char category[32];
+    char icon_url[APPSTORE_URL_MAX];
+    char screenshots[3][APPSTORE_URL_MAX];
+    uint8_t screenshot_count;
+    uint16_t rating_stars;
+    uint32_t rating_count;
+    uint32_t download_count;
+    char updated_date[11];
+    char changelog[512];
+    char package_url[APPSTORE_URL_MAX];
+    char package_sig_url[APPSTORE_URL_MAX];
+    char package_sha256_hex[APPSTORE_HASH_HEX_LEN + 1];
+    uint32_t package_size_bytes;
+    uint32_t release_sequence;
+    char publisher_key_id[64];
 } catalog_entry_t;
 
 #define CATALOG_MAX_ENTRIES 30
@@ -54,7 +74,8 @@ esp_err_t appstore_download_file(const char *url, const char *dest_path,
                                   void *user_data);
 
 /* Install a catalog entry:
- * - APP:      download .app.elf + .sig to /sdcard/apps/, verify sig
+ * - APP:      download signed .tap, verify both signatures and hashes, then
+ *             atomically activate /sdcard/apps/<id>/generations/<sequence>/
  * - FIRMWARE: download .bin + .sig to /sdcard/update/, verify sig
  * - DRIVER:   download .drv.elf + .sig to /sdcard/drivers/, verify sig
  */

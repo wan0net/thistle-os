@@ -51,8 +51,43 @@ static void run_tests(void)
 
 static const char *TAG = "thistle";
 
+#define TK_RENDER_STACK_SIZE 16384
+
+#if CONFIG_IDF_TARGET_ESP32S3
+static StackType_t *s_tk_render_stack;
+static StaticTask_t s_tk_render_tcb;
+
+static esp_err_t tk_render_stack_reserve(void)
+{
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+    s_tk_render_stack = heap_caps_malloc(
+        TK_RENDER_STACK_SIZE,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_tk_render_stack) {
+        ESP_LOGE(TAG,
+                 "tk_render: unable to reserve %u-byte internal stack "
+                 "(free=%u largest=%u)",
+                 TK_RENDER_STACK_SIZE,
+                 (unsigned)free_internal,
+                 (unsigned)largest_internal);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG,
+             "tk_render: reserved %u-byte internal stack "
+             "(free_before=%u largest_before=%u)",
+             TK_RENDER_STACK_SIZE,
+             (unsigned)free_internal,
+             (unsigned)largest_internal);
+    return ESP_OK;
+}
+#endif
+
 extern void tk_wm_do_refresh(void);
 extern bool tk_wm_on_input(const hal_input_event_t *event);
+extern void tk_launcher_tick(void);
 
 /* HAL → WM input dispatcher. The thistle-tk path doesn't have an equivalent
  * to the LVGL ui_input_hal_cb wiring (components/ui/src/manager.c); without
@@ -99,10 +134,17 @@ static void tk_render_task(void *arg)
      *
      * Refresh is invoked at this shallow call depth (not from inside the
      * deep render chain) to avoid Xtensa CALL8 register-window overflow. */
+    bool watermark_logged = false;
     for (;;) {
         tk_poll_inputs();
+        tk_launcher_tick();
         display_server_tick();
         tk_wm_do_refresh();
+        if (!watermark_logged) {
+            ESP_LOGI(TAG, "tk_render: stack high-water mark after first refresh: %u bytes",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            watermark_logged = true;
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -142,6 +184,15 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ThistleOS v0.1.0 starting...");
 
+#if CONFIG_IDF_TARGET_ESP32S3
+    /* Reserve the render stack before Wi-Fi and the driver graph fragment
+     * internal DRAM. It remains caller-owned and is attached to the task only
+     * after the board and WM have been selected. */
+    if (tk_render_stack_reserve() != ESP_OK) {
+        return;
+    }
+#endif
+
     /* Start kernel services: board init, driver manager, app manager, event bus, IPC */
     esp_err_t ret = kernel_init();
     if (ret != ESP_OK) {
@@ -178,6 +229,13 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to register window manager: %s", esp_err_to_name(ret));
         return;
     }
+
+#if CONFIG_IDF_TARGET_ESP32S3
+    if (!use_tk_wm && s_tk_render_stack) {
+        heap_caps_free(s_tk_render_stack);
+        s_tk_render_stack = NULL;
+    }
+#endif
 
 #ifdef THISTLE_LEGACY_C_APPS
     /* Subscribe to system events that warrant user-visible toasts. */
@@ -252,14 +310,24 @@ void app_main(void)
         /* Use an internal DRAM stack — Xtensa register window underflow/overflow
          * during vTaskDelay context switches is unreliable with PSRAM-backed stacks
          * because the saved register windows may be read incorrectly on resume. */
-        ESP_LOGI(TAG, "Free heap before render task: %lu bytes",
-                 (unsigned long)esp_get_free_heap_size());
-        BaseType_t task_ret = xTaskCreate(tk_render_task, "tk_render",
-                                           16384, NULL, 5, NULL);
+#if CONFIG_IDF_TARGET_ESP32S3
+        TaskHandle_t render_task = xTaskCreateStatic(
+            tk_render_task, "tk_render", TK_RENDER_STACK_SIZE, NULL, 5,
+            s_tk_render_stack, &s_tk_render_tcb);
+        if (!render_task) {
+            ESP_LOGE(TAG, "tk_render: xTaskCreateStatic failed");
+            heap_caps_free(s_tk_render_stack);
+            s_tk_render_stack = NULL;
+            return;
+        }
+#else
+        BaseType_t task_ret = xTaskCreate(
+            tk_render_task, "tk_render", TK_RENDER_STACK_SIZE, NULL, 5, NULL);
         if (task_ret != pdPASS) {
             ESP_LOGE(TAG, "tk_render: xTaskCreate failed (%d)", task_ret);
             return;
         }
+#endif
 #ifdef THISTLE_LEGACY_C_APPS
     } else {
         ret = app_manager_launch("com.thistle.launcher");

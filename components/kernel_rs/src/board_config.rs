@@ -2,8 +2,8 @@
 // Board config — reads board.json from SPIFFS, inits buses, loads drivers
 
 use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
 use std::fs;
+use std::os::raw::c_char;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -29,13 +29,23 @@ extern "C" {
 // Bus init + builtin driver init — only on real hardware (not in unit tests)
 #[cfg(not(test))]
 extern "C" {
-    fn board_bus_init_spi(host: i32, mosi: i32, miso: i32, sclk: i32, max_transfer_bytes: i32) -> i32;
+    fn board_bus_init_spi(
+        host: i32,
+        mosi: i32,
+        miso: i32,
+        sclk: i32,
+        max_transfer_bytes: i32,
+    ) -> i32;
     fn board_bus_init_i2c(port: i32, sda: i32, scl: i32, freq_hz: i32) -> i32;
-    fn board_builtin_driver_init(id: *const c_char, hal_type: *const c_char, config_json: *const c_char) -> i32;
+    fn board_builtin_driver_init(
+        id: *const c_char,
+        hal_type: *const c_char,
+        config_json: *const c_char,
+    ) -> i32;
 }
 
 // Reuse manifest JSON helpers
-use crate::manifest::{json_get_string, json_get_int};
+use crate::manifest::{json_get_int, json_get_string};
 
 fn set_board_name(name: &str) {
     if let Ok(mut buf) = BOARD_NAME.lock() {
@@ -64,8 +74,7 @@ where
             let mosi = json_get_int(&bus, "mosi").unwrap_or(-1) as i32;
             let miso = json_get_int(&bus, "miso").unwrap_or(-1) as i32;
             let sclk = json_get_int(&bus, "sclk").unwrap_or(-1) as i32;
-            let max_bytes =
-                json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
+            let max_bytes = json_get_int(&bus, "max_transfer_bytes").unwrap_or(4096) as i32;
             let ret = init_spi(host, mosi, miso, sclk, max_bytes);
             if ret != ESP_OK {
                 return ret;
@@ -107,16 +116,24 @@ fn load_config(config_path: &str) -> i32 {
                     Err(_) => {
                         // Detection succeeded but file still unreadable — safe mode
                         let ret = unsafe { board_init() };
-                        if ret != ESP_OK { return ret; }
-                        unsafe { crate::driver_manager::driver_manager_start_all(); }
+                        if ret != ESP_OK {
+                            return ret;
+                        }
+                        unsafe {
+                            crate::driver_manager::driver_manager_start_all();
+                        }
                         return ESP_OK;
                     }
                 }
             } else {
                 // Detection not available or failed — fall back to compiled board_init()
                 let ret = unsafe { board_init() };
-                if ret != ESP_OK { return ret; }
-                unsafe { crate::driver_manager::driver_manager_start_all(); }
+                if ret != ESP_OK {
+                    return ret;
+                }
+                unsafe {
+                    crate::driver_manager::driver_manager_start_all();
+                }
                 return ESP_OK;
             }
         }
@@ -144,7 +161,9 @@ fn load_config(config_path: &str) -> i32 {
         if let Some(name) = json_get_string(&board_section, "name") {
             set_board_name(&name);
             if let Ok(cname) = CString::new(name.as_str()) {
-                unsafe { hal_set_board_name(cname.as_ptr()); }
+                unsafe {
+                    hal_set_board_name(cname.as_ptr());
+                }
             }
         }
         if let Some(arch) = json_get_string(&board_section, "arch") {
@@ -158,8 +177,12 @@ fn load_config(config_path: &str) -> i32 {
     // (Mirrors board_tdeck_pro.c::gpio_deep_sleep_hold_dis() on boot.)
     #[cfg(all(not(test), not(feature = "esp32c6")))]
     {
-        extern "C" { fn gpio_deep_sleep_hold_dis(); }
-        unsafe { gpio_deep_sleep_hold_dis(); }
+        extern "C" {
+            fn gpio_deep_sleep_hold_dis();
+        }
+        unsafe {
+            gpio_deep_sleep_hold_dis();
+        }
     }
 
     // Configure board-level GPIO outputs (power enables, etc.) before bus init
@@ -170,11 +193,13 @@ fn load_config(config_path: &str) -> i32 {
         }
         for i in 0..16 {
             if let Some(entry) = nth_object(&gpio_arr, i) {
-                let gpio     = json_get_int(&entry, "gpio").unwrap_or(-1) as i32;
-                let level    = json_get_int(&entry, "level").unwrap_or(0) as i32;
+                let gpio = json_get_int(&entry, "gpio").unwrap_or(-1) as i32;
+                let level = json_get_int(&entry, "level").unwrap_or(0) as i32;
                 let delay_ms = json_get_int(&entry, "delay_ms").unwrap_or(0) as i32;
                 if gpio >= 0 {
-                    unsafe { board_gpio_set_output(gpio, level, delay_ms); }
+                    unsafe {
+                        board_gpio_set_output(gpio, level, delay_ms);
+                    }
                 }
             } else {
                 break;
@@ -199,19 +224,27 @@ fn load_config(config_path: &str) -> i32 {
     }
 
     // Load drivers from config
-    unsafe { driver_loader_init(); }
+    unsafe {
+        driver_loader_init();
+    }
 
     if let Some(drivers_arr) = find_array(&json, "drivers") {
         for i in 0..16 {
             if let Some(drv) = nth_object(&drivers_arr, i) {
-                let entry     = json_get_string(&drv, "entry").unwrap_or_default();
+                let entry = json_get_string(&drv, "entry").unwrap_or_default();
                 let driver_id = json_get_string(&drv, "id").unwrap_or_default();
-                let hal_type  = json_get_string(&drv, "hal").unwrap_or_default();
+                let hal_type = json_get_string(&drv, "hal").unwrap_or_default();
 
-                if entry.is_empty() { continue; }
+                if entry.is_empty() {
+                    continue;
+                }
 
                 // Sanitize entry path — reject traversal and absolute paths
-                if entry.contains("..") || entry.contains('/') || entry.contains('\\') || entry.starts_with('.') {
+                if entry.contains("..")
+                    || entry.contains('/')
+                    || entry.contains('\\')
+                    || entry.starts_with('.')
+                {
                     continue;
                 }
 
@@ -228,7 +261,9 @@ fn load_config(config_path: &str) -> i32 {
                 let mut found = false;
                 for path in &paths {
                     if Path::new(path).exists() {
-                        if let (Ok(cpath), Ok(cconfig)) = (CString::new(path.as_str()), CString::new(config.as_str())) {
+                        if let (Ok(cpath), Ok(cconfig)) =
+                            (CString::new(path.as_str()), CString::new(config.as_str()))
+                        {
                             unsafe {
                                 driver_loader_load_with_config(cpath.as_ptr(), cconfig.as_ptr());
                             }
@@ -248,7 +283,11 @@ fn load_config(config_path: &str) -> i32 {
                             CString::new(config.as_str()),
                         ) {
                             unsafe {
-                                board_builtin_driver_init(cid.as_ptr(), chal.as_ptr(), cconfig.as_ptr());
+                                board_builtin_driver_init(
+                                    cid.as_ptr(),
+                                    chal.as_ptr(),
+                                    cconfig.as_ptr(),
+                                );
                             }
                         }
                     }
@@ -260,20 +299,27 @@ fn load_config(config_path: &str) -> i32 {
     }
 
     // Start all registered drivers (display, inputs, radio, GPS, audio, power, IMU, storage)
-    unsafe { crate::driver_manager::driver_manager_start_all(); }
+    unsafe {
+        crate::driver_manager::driver_manager_start_all();
+    }
 
     ESP_OK
 }
 
 fn normalize_driver_config(driver_id: &str, board_arch: &str, config: &str) -> String {
-    if matches!(driver_id, "com.thistle.drv.power-tp4065b" | "com.thistle.drv.power-heltec-v3") {
+    if matches!(
+        driver_id,
+        "com.thistle.drv.power-tp4065b" | "com.thistle.drv.power-heltec-v3"
+    ) {
         return normalize_tp4065b_power_config(board_arch, config);
     }
     config.to_string()
 }
 
 fn normalize_tp4065b_power_config(board_arch: &str, config: &str) -> String {
-    if json_get_int(config, "adc_channel").is_some() && json_get_int(config, "pin_charge_status").is_some() {
+    if json_get_int(config, "adc_channel").is_some()
+        && json_get_int(config, "pin_charge_status").is_some()
+    {
         return config.to_string();
     }
 
@@ -314,7 +360,13 @@ fn append_json_fields(config: &str, fields: &str) -> String {
     let insert_at = trimmed.len() - 1;
     let needs_comma = !trimmed[..insert_at].trim_end().ends_with('{');
     let separator = if needs_comma { ", " } else { "" };
-    format!("{}{}{}{}", &trimmed[..insert_at], separator, fields, &trimmed[insert_at..])
+    format!(
+        "{}{}{}{}",
+        &trimmed[..insert_at],
+        separator,
+        fields,
+        &trimmed[insert_at..]
+    )
 }
 
 // Simple JSON array/object extraction helpers
@@ -324,7 +376,9 @@ fn find_array(json: &str, key: &str) -> Option<String> {
     let after = &json[start + pattern.len()..];
     let after = after.trim_start().strip_prefix(':')?;
     let trimmed = after.trim_start();
-    if !trimmed.starts_with('[') { return None; }
+    if !trimmed.starts_with('[') {
+        return None;
+    }
     let mut depth = 0;
     for (i, ch) in trimmed.char_indices() {
         match ch {
@@ -347,7 +401,9 @@ pub fn extract_object(json: &str, key: &str) -> Option<String> {
     let after = &json[start + pattern.len()..];
     let after = after.trim_start().strip_prefix(':')?;
     let trimmed = after.trim_start();
-    if !trimmed.starts_with('{') { return None; }
+    if !trimmed.starts_with('{') {
+        return None;
+    }
     let mut depth = 0;
     for (i, ch) in trimmed.char_indices() {
         match ch {
@@ -490,7 +546,11 @@ mod tests {
             json,
             |host, _, _, _, _| {
                 spi_calls.set(spi_calls.get() + 1);
-                if host == 3 { ESP_ERR_NO_MEM } else { ESP_OK }
+                if host == 3 {
+                    ESP_ERR_NO_MEM
+                } else {
+                    ESP_OK
+                }
             },
             |_, _, _, _| {
                 i2c_calls.set(i2c_calls.get() + 1);
@@ -512,7 +572,11 @@ mod tests {
             |_, _, _, _, _| ESP_OK,
             |port, _, _, _| {
                 calls.set(calls.get() + 1);
-                if port == 1 { ESP_ERR_INVALID_ARG } else { ESP_OK }
+                if port == 1 {
+                    ESP_ERR_INVALID_ARG
+                } else {
+                    ESP_OK
+                }
             },
         );
 

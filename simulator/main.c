@@ -30,6 +30,7 @@ void sim_lvgl_unlock(void) { pthread_mutex_unlock(&s_lvgl_mutex); }
 #include "sim_vfs.h"
 #include "sim_assert.h"
 #include "sim_scenario.h"
+#include "sim_app_loader.h"
 #include "launcher/launcher_app.h"
 #include "settings/settings_app.h"
 #if THISTLE_HAVE_FILEMGR
@@ -68,6 +69,7 @@ static int  s_timeout_ms = 0;
 static const char *s_assert_file = NULL;
 static const char *s_scenario_file = NULL;
 static const char *s_screenshot_file = NULL;
+static const char *s_launch_app = NULL;
 static int s_tap_x = -1;
 static int s_tap_y = -1;
 
@@ -115,6 +117,10 @@ int main(int argc, char **argv)
                 fprintf(stderr, "Invalid --tap value; expected X,Y\n");
                 return 2;
             }
+        } else if (strcmp(argv[i], "--launch-app") == 0 && i + 1 < argc) {
+            s_launch_app = argv[++i];
+        } else if (strncmp(argv[i], "--launch-app=", 13) == 0) {
+            s_launch_app = argv[i] + 13;
         } else if (strncmp(argv[i], "--tap=", 6) == 0) {
             if (sscanf(argv[i] + 6, "%d,%d", &s_tap_x, &s_tap_y) != 2) {
                 fprintf(stderr, "Invalid --tap value; expected X,Y\n");
@@ -130,6 +136,7 @@ int main(int argc, char **argv)
             printf("  --scenario FILE     Replay input scenario from FILE (future)\n");
             printf("  --screenshot FILE   Save native-resolution framebuffer as PPM on exit\n");
             printf("  --tap X,Y           Inject one native-coordinate tap after startup\n");
+            printf("  --launch-app ID     Launch a registered app instead of the launcher\n");
             printf("  -h, --help          Show this help\n");
             printf("Devices: tdeck-pro, tdeck, tdeck-plus, tdisplay, heltec-v3,\n");
             printf("         cardputer, t3-s3, rak3312\n");
@@ -179,6 +186,10 @@ int main(int argc, char **argv)
         }
     }
 
+    /* Signed host TAP generations are registered before legacy built-ins so
+     * an installed app wins the idempotent duplicate-ID registration rule. */
+    sim_app_loader_scan_and_register();
+
     /* Register built-in apps (always available) */
     launcher_app_register();
     settings_app_register();
@@ -220,10 +231,20 @@ int main(int argc, char **argv)
         navigator_app_register();
     }
 #endif
-    app_manager_launch(use_tk_wm ? "com.thistle.tk_launcher"
-                                 : "com.thistle.launcher");
-    printf("Launcher launched\n");
-    sim_assert_check_line("Launcher launched");
+    const char *initial_app = s_launch_app
+        ? s_launch_app
+        : (use_tk_wm ? "com.thistle.tk_launcher" : "com.thistle.launcher");
+    err = app_manager_launch(initial_app);
+    if (err != ESP_OK) {
+        fprintf(stderr, "Failed to launch app %s: %d\n", initial_app, err);
+        return 1;
+    }
+    if (s_launch_app) {
+        printf("App launched: %s\n", initial_app);
+    } else {
+        printf("Launcher launched\n");
+        sim_assert_check_line("Launcher launched");
+    }
     fflush(stdout);
 
     printf("ThistleOS Simulator ready. Close window to exit.\n");

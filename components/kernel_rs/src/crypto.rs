@@ -15,12 +15,12 @@
 
 use std::os::raw::c_char;
 
+use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt};
 use argon2::{Algorithm, Argon2, Params, Version};
+use ed25519_dalek::{Signer, Verifier};
 use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use pbkdf2::pbkdf2_hmac;
-use sha2::{Sha256, Digest};
-use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt};
-use ed25519_dalek::{Signer, Verifier};
+use sha2::{Digest, Sha256};
 
 const ESP_OK: i32 = 0;
 const ESP_ERR_INVALID_ARG: i32 = 0x102;
@@ -44,7 +44,9 @@ use crate::hal_registry::HalCryptoDriver;
 #[cfg(not(test))]
 unsafe fn get_hw_crypto() -> Option<&'static HalCryptoDriver> {
     let crypto_ptr = crate::hal_registry::registry().crypto;
-    if crypto_ptr.is_null() { return None; }
+    if crypto_ptr.is_null() {
+        return None;
+    }
     Some(&*crypto_ptr)
 }
 
@@ -72,11 +74,13 @@ fn sw_aes256_cbc_encrypt(key: &[u8; 32], iv: &[u8; 16], pt: &[u8], ct: &mut [u8]
     let mut prev = *iv;
     for i in (0..pt.len()).step_by(16) {
         let mut block = [0u8; 16];
-        for j in 0..16 { block[j] = pt[i + j] ^ prev[j]; }
+        for j in 0..16 {
+            block[j] = pt[i + j] ^ prev[j];
+        }
         let mut ga = aes::Block::from(block);
         cipher.encrypt_block(&mut ga);
-        ct[i..i+16].copy_from_slice(&ga);
-        prev.copy_from_slice(&ct[i..i+16]);
+        ct[i..i + 16].copy_from_slice(&ga);
+        prev.copy_from_slice(&ct[i..i + 16]);
     }
 }
 
@@ -86,8 +90,10 @@ fn sw_aes256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ct: &[u8], pt: &mut [u8]
     for i in (0..ct.len()).step_by(16) {
         let mut ga: aes::Block = <[u8; 16]>::try_from(&ct[i..i + 16]).unwrap().into();
         cipher.decrypt_block(&mut ga);
-        for j in 0..16 { pt[i + j] = ga[j] ^ prev[j]; }
-        prev.copy_from_slice(&ct[i..i+16]);
+        for j in 0..16 {
+            pt[i + j] = ga[j] ^ prev[j];
+        }
+        prev.copy_from_slice(&ct[i..i + 16]);
     }
 }
 
@@ -153,9 +159,13 @@ fn sw_aes128_ecb_decrypt_block(key: &[u8; 16], block_in: &[u8; 16], block_out: &
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_sha256(
-    data: *const u8, len: usize, hash_out: *mut u8,
+    data: *const u8,
+    len: usize,
+    hash_out: *mut u8,
 ) -> i32 {
-    if data.is_null() || hash_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if data.is_null() || hash_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     // Try hardware
     if let Some(hw) = get_hw_crypto() {
@@ -174,11 +184,15 @@ pub unsafe extern "C" fn thistle_crypto_sha256(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_hmac_sha256(
-    key: *const u8, key_len: usize,
-    data: *const u8, data_len: usize,
+    key: *const u8,
+    key_len: usize,
+    data: *const u8,
+    data_len: usize,
     mac_out: *mut u8,
 ) -> i32 {
-    if key.is_null() || data.is_null() || mac_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if key.is_null() || data.is_null() || mac_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     if let Some(hw) = get_hw_crypto() {
         if let Some(f) = hw.hmac_sha256 {
@@ -196,34 +210,50 @@ pub unsafe extern "C" fn thistle_crypto_hmac_sha256(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_hmac_verify(
-    key: *const u8, key_len: usize,
-    data: *const u8, data_len: usize,
+    key: *const u8,
+    key_len: usize,
+    data: *const u8,
+    data_len: usize,
     expected_mac: *const u8,
 ) -> i32 {
-    if key.is_null() || data.is_null() || expected_mac.is_null() { return ESP_ERR_INVALID_ARG; }
+    if key.is_null() || data.is_null() || expected_mac.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     // Compute HMAC via hardware if available, then compare
     let mut computed = [0u8; 32];
     let ret = thistle_crypto_hmac_sha256(key, key_len, data, data_len, computed.as_mut_ptr());
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // Constant-time comparison
     let expected = std::slice::from_raw_parts(expected_mac, 32);
     let mut diff: u8 = 0;
-    for i in 0..32 { diff |= computed[i] ^ expected[i]; }
-    if diff == 0 { ESP_OK } else { ESP_FAIL }
+    for i in 0..32 {
+        diff |= computed[i] ^ expected[i];
+    }
+    if diff == 0 {
+        ESP_OK
+    } else {
+        ESP_FAIL
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_aes256_cbc_encrypt(
-    key: *const u8, iv: *const u8,
-    plaintext: *const u8, len: usize,
+    key: *const u8,
+    iv: *const u8,
+    plaintext: *const u8,
+    len: usize,
     ciphertext_out: *mut u8,
 ) -> i32 {
     if key.is_null() || iv.is_null() || plaintext.is_null() || ciphertext_out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+    if len == 0 || len % 16 != 0 {
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     if let Some(hw) = get_hw_crypto() {
         if let Some(f) = hw.aes256_cbc_encrypt {
@@ -241,14 +271,18 @@ pub unsafe extern "C" fn thistle_crypto_aes256_cbc_encrypt(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_aes256_cbc_decrypt(
-    key: *const u8, iv: *const u8,
-    ciphertext: *const u8, len: usize,
+    key: *const u8,
+    iv: *const u8,
+    ciphertext: *const u8,
+    len: usize,
     plaintext_out: *mut u8,
 ) -> i32 {
     if key.is_null() || iv.is_null() || ciphertext.is_null() || plaintext_out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
-    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+    if len == 0 || len % 16 != 0 {
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     if let Some(hw) = get_hw_crypto() {
         if let Some(f) = hw.aes256_cbc_decrypt {
@@ -266,10 +300,16 @@ pub unsafe extern "C" fn thistle_crypto_aes256_cbc_decrypt(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_pbkdf2_sha256(
-    password: *const c_char, salt: *const u8, salt_len: usize,
-    iterations: u32, key_out: *mut u8, key_len: usize,
+    password: *const c_char,
+    salt: *const u8,
+    salt_len: usize,
+    iterations: u32,
+    key_out: *mut u8,
+    key_len: usize,
 ) -> i32 {
-    if password.is_null() || salt.is_null() || key_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if password.is_null() || salt.is_null() || key_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     // PBKDF2 is always software — no hardware accelerator provides it directly.
     // It uses HMAC-SHA256 internally, which may be hardware-accelerated.
@@ -317,7 +357,9 @@ pub unsafe extern "C" fn thistle_crypto_argon2id(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32 {
-    if buf.is_null() { return ESP_ERR_INVALID_ARG; }
+    if buf.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     if let Some(hw) = get_hw_crypto() {
         if let Some(f) = hw.random {
@@ -335,10 +377,17 @@ pub unsafe extern "C" fn thistle_crypto_random(buf: *mut u8, len: usize) -> i32 
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_aes128_ecb_encrypt(
-    key: *const u8, plaintext: *const u8, len: usize, ciphertext_out: *mut u8,
+    key: *const u8,
+    plaintext: *const u8,
+    len: usize,
+    ciphertext_out: *mut u8,
 ) -> i32 {
-    if key.is_null() || plaintext.is_null() || ciphertext_out.is_null() { return ESP_ERR_INVALID_ARG; }
-    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+    if key.is_null() || plaintext.is_null() || ciphertext_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if len == 0 || len % 16 != 0 {
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     // Try hardware
     if let Some(hw) = get_hw_crypto() {
@@ -351,8 +400,8 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_encrypt(
     let pt = std::slice::from_raw_parts(plaintext, len);
     let ct = std::slice::from_raw_parts_mut(ciphertext_out, len);
     for i in (0..len).step_by(16) {
-        let block_in: &[u8; 16] = pt[i..i+16].try_into().unwrap();
-        let block_out: &mut [u8; 16] = (&mut ct[i..i+16]).try_into().unwrap();
+        let block_in: &[u8; 16] = pt[i..i + 16].try_into().unwrap();
+        let block_out: &mut [u8; 16] = (&mut ct[i..i + 16]).try_into().unwrap();
         sw_aes128_ecb_encrypt_block(k, block_in, block_out);
     }
     ESP_OK
@@ -360,10 +409,17 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_encrypt(
 
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_aes128_ecb_decrypt(
-    key: *const u8, ciphertext: *const u8, len: usize, plaintext_out: *mut u8,
+    key: *const u8,
+    ciphertext: *const u8,
+    len: usize,
+    plaintext_out: *mut u8,
 ) -> i32 {
-    if key.is_null() || ciphertext.is_null() || plaintext_out.is_null() { return ESP_ERR_INVALID_ARG; }
-    if len == 0 || len % 16 != 0 { return ESP_ERR_INVALID_SIZE; }
+    if key.is_null() || ciphertext.is_null() || plaintext_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if len == 0 || len % 16 != 0 {
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     // Try hardware
     if let Some(hw) = get_hw_crypto() {
@@ -376,8 +432,8 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_decrypt(
     let ct = std::slice::from_raw_parts(ciphertext, len);
     let pt = std::slice::from_raw_parts_mut(plaintext_out, len);
     for i in (0..len).step_by(16) {
-        let block_in: &[u8; 16] = ct[i..i+16].try_into().unwrap();
-        let block_out: &mut [u8; 16] = (&mut pt[i..i+16]).try_into().unwrap();
+        let block_in: &[u8; 16] = ct[i..i + 16].try_into().unwrap();
+        let block_out: &mut [u8; 16] = (&mut pt[i..i + 16]).try_into().unwrap();
         sw_aes128_ecb_decrypt_block(k, block_in, block_out);
     }
     ESP_OK
@@ -390,15 +446,19 @@ pub unsafe extern "C" fn thistle_crypto_aes128_ecb_decrypt(
 /// public_key_out: 32 bytes
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_ed25519_keygen(
-    private_key_out: *mut u8,  // 32 bytes seed
-    public_key_out: *mut u8,   // 32 bytes
+    private_key_out: *mut u8, // 32 bytes seed
+    public_key_out: *mut u8,  // 32 bytes
 ) -> i32 {
-    if private_key_out.is_null() || public_key_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if private_key_out.is_null() || public_key_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     // Generate 32 random bytes for the seed
     let mut seed = [0u8; 32];
     let ret = thistle_crypto_random(seed.as_mut_ptr(), 32);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let verifying_key = signing_key.verifying_key();
@@ -413,11 +473,14 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_keygen(
 /// signature_out: 64 bytes
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_ed25519_sign(
-    private_key: *const u8,    // 32 bytes seed
-    message: *const u8, msg_len: usize,
-    signature_out: *mut u8,    // 64 bytes
+    private_key: *const u8, // 32 bytes seed
+    message: *const u8,
+    msg_len: usize,
+    signature_out: *mut u8, // 64 bytes
 ) -> i32 {
-    if private_key.is_null() || message.is_null() || signature_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if private_key.is_null() || message.is_null() || signature_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     let seed = &*(private_key as *const [u8; 32]);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
@@ -433,11 +496,14 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_sign(
 /// signature: 64 bytes
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_ed25519_verify(
-    public_key: *const u8,     // 32 bytes
-    message: *const u8, msg_len: usize,
-    signature: *const u8,      // 64 bytes
+    public_key: *const u8, // 32 bytes
+    message: *const u8,
+    msg_len: usize,
+    signature: *const u8, // 64 bytes
 ) -> i32 {
-    if public_key.is_null() || message.is_null() || signature.is_null() { return ESP_ERR_INVALID_ARG; }
+    if public_key.is_null() || message.is_null() || signature.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     let pk_bytes = &*(public_key as *const [u8; 32]);
     let verifying_key = match ed25519_dalek::VerifyingKey::from_bytes(pk_bytes) {
@@ -448,8 +514,8 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_verify(
     let sig = ed25519_dalek::Signature::from_bytes(sig_bytes);
     let msg = std::slice::from_raw_parts(message, msg_len);
     match verifying_key.verify(msg, &sig) {
-        Ok(()) => 0,  // Valid
-        Err(_) => 1,  // Invalid signature
+        Ok(()) => 0, // Valid
+        Err(_) => 1, // Invalid signature
     }
 }
 
@@ -458,10 +524,12 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_verify(
 /// public_key_out: 32 bytes
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_ed25519_derive_public(
-    private_key: *const u8,    // 32 bytes seed
-    public_key_out: *mut u8,   // 32 bytes
+    private_key: *const u8,  // 32 bytes seed
+    public_key_out: *mut u8, // 32 bytes
 ) -> i32 {
-    if private_key.is_null() || public_key_out.is_null() { return ESP_ERR_INVALID_ARG; }
+    if private_key.is_null() || public_key_out.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     let seed = &*(private_key as *const [u8; 32]);
     let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
@@ -480,17 +548,20 @@ pub unsafe extern "C" fn thistle_crypto_ed25519_derive_public(
 #[no_mangle]
 pub unsafe extern "C" fn thistle_crypto_x25519_key_exchange(
     ed25519_private_key: *const u8,      // 32 bytes seed
-    other_ed25519_public_key: *const u8,  // 32 bytes
-    shared_secret_out: *mut u8,           // 32 bytes
+    other_ed25519_public_key: *const u8, // 32 bytes
+    shared_secret_out: *mut u8,          // 32 bytes
 ) -> i32 {
-    if ed25519_private_key.is_null() || other_ed25519_public_key.is_null() || shared_secret_out.is_null() {
+    if ed25519_private_key.is_null()
+        || other_ed25519_public_key.is_null()
+        || shared_secret_out.is_null()
+    {
         return ESP_ERR_INVALID_ARG;
     }
 
     let seed = std::slice::from_raw_parts(ed25519_private_key, 32);
 
     // Ed25519 → X25519 private key conversion: SHA-512(seed)[0..32], clamped
-    use sha2::{Sha512, Digest as Sha512Digest};
+    use sha2::{Digest as Sha512Digest, Sha512};
     let hash = Sha512::digest(seed);
     let mut x_prv = [0u8; 32];
     x_prv.copy_from_slice(&hash[..32]);
@@ -537,20 +608,38 @@ mod tests {
         let data = b"message";
         let mut mac = [0u8; 32];
         let ret = unsafe {
-            thistle_crypto_hmac_sha256(key.as_ptr(), key.len(), data.as_ptr(), data.len(), mac.as_mut_ptr())
+            thistle_crypto_hmac_sha256(
+                key.as_ptr(),
+                key.len(),
+                data.as_ptr(),
+                data.len(),
+                mac.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(mac, [0u8; 32]);
 
         let ret = unsafe {
-            thistle_crypto_hmac_verify(key.as_ptr(), key.len(), data.as_ptr(), data.len(), mac.as_ptr())
+            thistle_crypto_hmac_verify(
+                key.as_ptr(),
+                key.len(),
+                data.as_ptr(),
+                data.len(),
+                mac.as_ptr(),
+            )
         };
         assert_eq!(ret, 0);
 
         let mut bad_mac = mac;
         bad_mac[0] ^= 0xFF;
         let ret = unsafe {
-            thistle_crypto_hmac_verify(key.as_ptr(), key.len(), data.as_ptr(), data.len(), bad_mac.as_ptr())
+            thistle_crypto_hmac_verify(
+                key.as_ptr(),
+                key.len(),
+                data.as_ptr(),
+                data.len(),
+                bad_mac.as_ptr(),
+            )
         };
         assert_eq!(ret, ESP_FAIL);
     }
@@ -562,7 +651,12 @@ mod tests {
         let mut key = [0u8; 32];
         let ret = unsafe {
             thistle_crypto_pbkdf2_sha256(
-                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000, key.as_mut_ptr(), 32,
+                password.as_ptr() as *const c_char,
+                salt.as_ptr(),
+                salt.len(),
+                1000,
+                key.as_mut_ptr(),
+                32,
             )
         };
         assert_eq!(ret, ESP_OK);
@@ -659,13 +753,25 @@ mod tests {
         let mut decrypted = [0u8; 32];
 
         let ret = unsafe {
-            thistle_crypto_aes256_cbc_encrypt(key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 32, ciphertext.as_mut_ptr())
+            thistle_crypto_aes256_cbc_encrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                plaintext.as_ptr(),
+                32,
+                ciphertext.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(ciphertext, plaintext);
 
         let ret = unsafe {
-            thistle_crypto_aes256_cbc_decrypt(key.as_ptr(), iv.as_ptr(), ciphertext.as_ptr(), 32, decrypted.as_mut_ptr())
+            thistle_crypto_aes256_cbc_decrypt(
+                key.as_ptr(),
+                iv.as_ptr(),
+                ciphertext.as_ptr(),
+                32,
+                decrypted.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_eq!(decrypted, plaintext);
@@ -683,10 +789,9 @@ mod tests {
     fn test_sha256_empty() {
         // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         let expected: [u8; 32] = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
-            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
-            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+            0x78, 0x52, 0xb8, 0x55,
         ];
         let mut hash = [0u8; 32];
         // Pass a non-null pointer with length 0 for the empty input
@@ -719,15 +824,26 @@ mod tests {
 
         let enc_ret = unsafe {
             thistle_crypto_aes256_cbc_encrypt(
-                key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 16, ciphertext.as_mut_ptr(),
+                key.as_ptr(),
+                iv.as_ptr(),
+                plaintext.as_ptr(),
+                16,
+                ciphertext.as_mut_ptr(),
             )
         };
         assert_eq!(enc_ret, ESP_OK);
-        assert_ne!(&ciphertext, plaintext, "ciphertext must differ from plaintext");
+        assert_ne!(
+            &ciphertext, plaintext,
+            "ciphertext must differ from plaintext"
+        );
 
         let dec_ret = unsafe {
             thistle_crypto_aes256_cbc_decrypt(
-                key.as_ptr(), iv.as_ptr(), ciphertext.as_ptr(), 16, decrypted.as_mut_ptr(),
+                key.as_ptr(),
+                iv.as_ptr(),
+                ciphertext.as_ptr(),
+                16,
+                decrypted.as_mut_ptr(),
             )
         };
         assert_eq!(dec_ret, ESP_OK);
@@ -743,7 +859,11 @@ mod tests {
 
         let ret = unsafe {
             thistle_crypto_aes256_cbc_encrypt(
-                key.as_ptr(), iv.as_ptr(), plaintext.as_ptr(), 15, ciphertext.as_mut_ptr(),
+                key.as_ptr(),
+                iv.as_ptr(),
+                plaintext.as_ptr(),
+                15,
+                ciphertext.as_mut_ptr(),
             )
         };
         assert_eq!(ret, ESP_ERR_INVALID_SIZE);
@@ -759,10 +879,18 @@ mod tests {
 
         unsafe {
             thistle_crypto_hmac_sha256(
-                key_a.as_ptr(), key_a.len(), data.as_ptr(), data.len(), mac_a.as_mut_ptr(),
+                key_a.as_ptr(),
+                key_a.len(),
+                data.as_ptr(),
+                data.len(),
+                mac_a.as_mut_ptr(),
             );
             thistle_crypto_hmac_sha256(
-                key_b.as_ptr(), key_b.len(), data.as_ptr(), data.len(), mac_b.as_mut_ptr(),
+                key_b.as_ptr(),
+                key_b.len(),
+                data.as_ptr(),
+                data.len(),
+                mac_b.as_mut_ptr(),
             );
         }
         assert_ne!(mac_a, mac_b, "different keys must produce different MACs");
@@ -777,14 +905,22 @@ mod tests {
 
         let ret1 = unsafe {
             thistle_crypto_pbkdf2_sha256(
-                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000,
-                key1.as_mut_ptr(), 32,
+                password.as_ptr() as *const c_char,
+                salt.as_ptr(),
+                salt.len(),
+                1000,
+                key1.as_mut_ptr(),
+                32,
             )
         };
         let ret2 = unsafe {
             thistle_crypto_pbkdf2_sha256(
-                password.as_ptr() as *const c_char, salt.as_ptr(), salt.len(), 1000,
-                key2.as_mut_ptr(), 32,
+                password.as_ptr() as *const c_char,
+                salt.as_ptr(),
+                salt.len(),
+                1000,
+                key2.as_mut_ptr(),
+                32,
             )
         };
         assert_eq!(ret1, ESP_OK);
@@ -801,7 +937,10 @@ mod tests {
         let ret2 = unsafe { thistle_crypto_random(buf2.as_mut_ptr(), 32) };
         assert_eq!(ret1, ESP_OK);
         assert_eq!(ret2, ESP_OK);
-        assert_ne!(buf1, buf2, "two random calls should (almost certainly) differ");
+        assert_ne!(
+            buf1, buf2,
+            "two random calls should (almost certainly) differ"
+        );
     }
 
     #[test]
@@ -835,7 +974,11 @@ mod tests {
         // aes encrypt: null key
         let r = unsafe {
             thistle_crypto_aes256_cbc_encrypt(
-                std::ptr::null(), dummy.as_ptr(), dummy.as_ptr(), 16, out.as_mut_ptr(),
+                std::ptr::null(),
+                dummy.as_ptr(),
+                dummy.as_ptr(),
+                16,
+                out.as_mut_ptr(),
             )
         };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
@@ -853,7 +996,12 @@ mod tests {
         let mut decrypted = [0u8; 32];
 
         let ret = unsafe {
-            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 32, ciphertext.as_mut_ptr())
+            thistle_crypto_aes128_ecb_encrypt(
+                key.as_ptr(),
+                plaintext.as_ptr(),
+                32,
+                ciphertext.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(ciphertext, plaintext);
@@ -861,7 +1009,12 @@ mod tests {
         assert_eq!(ciphertext[..16], ciphertext[16..32]);
 
         let ret = unsafe {
-            thistle_crypto_aes128_ecb_decrypt(key.as_ptr(), ciphertext.as_ptr(), 32, decrypted.as_mut_ptr())
+            thistle_crypto_aes128_ecb_decrypt(
+                key.as_ptr(),
+                ciphertext.as_ptr(),
+                32,
+                decrypted.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_eq!(decrypted, plaintext);
@@ -875,13 +1028,23 @@ mod tests {
         let mut decrypted = [0u8; 16];
 
         let ret = unsafe {
-            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 16, ciphertext.as_mut_ptr())
+            thistle_crypto_aes128_ecb_encrypt(
+                key.as_ptr(),
+                plaintext.as_ptr(),
+                16,
+                ciphertext.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_ne!(&ciphertext, plaintext);
 
         let ret = unsafe {
-            thistle_crypto_aes128_ecb_decrypt(key.as_ptr(), ciphertext.as_ptr(), 16, decrypted.as_mut_ptr())
+            thistle_crypto_aes128_ecb_decrypt(
+                key.as_ptr(),
+                ciphertext.as_ptr(),
+                16,
+                decrypted.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
         assert_eq!(&decrypted, plaintext);
@@ -893,7 +1056,12 @@ mod tests {
         let plaintext = [0u8; 15];
         let mut ciphertext = [0u8; 16];
         let ret = unsafe {
-            thistle_crypto_aes128_ecb_encrypt(key.as_ptr(), plaintext.as_ptr(), 15, ciphertext.as_mut_ptr())
+            thistle_crypto_aes128_ecb_encrypt(
+                key.as_ptr(),
+                plaintext.as_ptr(),
+                15,
+                ciphertext.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_ERR_INVALID_SIZE);
     }
@@ -902,7 +1070,8 @@ mod tests {
     fn test_ed25519_sign_verify() {
         let mut privkey = [0u8; 32];
         let mut pubkey = [0u8; 32];
-        let ret = unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
+        let ret =
+            unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
         assert_eq!(ret, ESP_OK);
         assert_ne!(privkey, [0u8; 32]);
         assert_ne!(pubkey, [0u8; 32]);
@@ -910,13 +1079,23 @@ mod tests {
         let message = b"hello ThistleOS";
         let mut signature = [0u8; 64];
         let ret = unsafe {
-            thistle_crypto_ed25519_sign(privkey.as_ptr(), message.as_ptr(), message.len(), signature.as_mut_ptr())
+            thistle_crypto_ed25519_sign(
+                privkey.as_ptr(),
+                message.as_ptr(),
+                message.len(),
+                signature.as_mut_ptr(),
+            )
         };
         assert_eq!(ret, ESP_OK);
 
         // Verify valid signature
         let ret = unsafe {
-            thistle_crypto_ed25519_verify(pubkey.as_ptr(), message.as_ptr(), message.len(), signature.as_ptr())
+            thistle_crypto_ed25519_verify(
+                pubkey.as_ptr(),
+                message.as_ptr(),
+                message.len(),
+                signature.as_ptr(),
+            )
         };
         assert_eq!(ret, 0, "valid signature must verify");
 
@@ -924,14 +1103,24 @@ mod tests {
         let mut bad_sig = signature;
         bad_sig[0] ^= 0xFF;
         let ret = unsafe {
-            thistle_crypto_ed25519_verify(pubkey.as_ptr(), message.as_ptr(), message.len(), bad_sig.as_ptr())
+            thistle_crypto_ed25519_verify(
+                pubkey.as_ptr(),
+                message.as_ptr(),
+                message.len(),
+                bad_sig.as_ptr(),
+            )
         };
         assert_eq!(ret, 1, "tampered signature must fail");
 
         // Wrong message
         let wrong_msg = b"wrong message!!";
         let ret = unsafe {
-            thistle_crypto_ed25519_verify(pubkey.as_ptr(), wrong_msg.as_ptr(), wrong_msg.len(), signature.as_ptr())
+            thistle_crypto_ed25519_verify(
+                pubkey.as_ptr(),
+                wrong_msg.as_ptr(),
+                wrong_msg.len(),
+                signature.as_ptr(),
+            )
         };
         assert_eq!(ret, 1, "wrong message must fail");
     }
@@ -940,13 +1129,18 @@ mod tests {
     fn test_ed25519_derive_public() {
         let mut privkey = [0u8; 32];
         let mut pubkey = [0u8; 32];
-        let ret = unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
+        let ret =
+            unsafe { thistle_crypto_ed25519_keygen(privkey.as_mut_ptr(), pubkey.as_mut_ptr()) };
         assert_eq!(ret, ESP_OK);
 
         let mut derived = [0u8; 32];
-        let ret = unsafe { thistle_crypto_ed25519_derive_public(privkey.as_ptr(), derived.as_mut_ptr()) };
+        let ret =
+            unsafe { thistle_crypto_ed25519_derive_public(privkey.as_ptr(), derived.as_mut_ptr()) };
         assert_eq!(ret, ESP_OK);
-        assert_eq!(pubkey, derived, "derived public key must match keygen output");
+        assert_eq!(
+            pubkey, derived,
+            "derived public key must match keygen output"
+        );
     }
 
     #[test]
@@ -957,10 +1151,14 @@ mod tests {
         let r = unsafe { thistle_crypto_ed25519_keygen(std::ptr::null_mut(), out.as_mut_ptr()) };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
 
-        let r = unsafe { thistle_crypto_ed25519_sign(std::ptr::null(), dummy.as_ptr(), 4, out.as_mut_ptr()) };
+        let r = unsafe {
+            thistle_crypto_ed25519_sign(std::ptr::null(), dummy.as_ptr(), 4, out.as_mut_ptr())
+        };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
 
-        let r = unsafe { thistle_crypto_ed25519_verify(std::ptr::null(), dummy.as_ptr(), 4, dummy.as_ptr()) };
+        let r = unsafe {
+            thistle_crypto_ed25519_verify(std::ptr::null(), dummy.as_ptr(), 4, dummy.as_ptr())
+        };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
 
         let r = unsafe { thistle_crypto_ed25519_derive_public(std::ptr::null(), out.as_mut_ptr()) };
@@ -983,14 +1181,25 @@ mod tests {
         let mut secret_ab = [0u8; 32];
         let mut secret_ba = [0u8; 32];
         let ret1 = unsafe {
-            thistle_crypto_x25519_key_exchange(prv_a.as_ptr(), pub_b.as_ptr(), secret_ab.as_mut_ptr())
+            thistle_crypto_x25519_key_exchange(
+                prv_a.as_ptr(),
+                pub_b.as_ptr(),
+                secret_ab.as_mut_ptr(),
+            )
         };
         let ret2 = unsafe {
-            thistle_crypto_x25519_key_exchange(prv_b.as_ptr(), pub_a.as_ptr(), secret_ba.as_mut_ptr())
+            thistle_crypto_x25519_key_exchange(
+                prv_b.as_ptr(),
+                pub_a.as_ptr(),
+                secret_ba.as_mut_ptr(),
+            )
         };
         assert_eq!(ret1, ESP_OK);
         assert_eq!(ret2, ESP_OK);
-        assert_eq!(secret_ab, secret_ba, "both sides must derive the same shared secret");
+        assert_eq!(
+            secret_ab, secret_ba,
+            "both sides must derive the same shared secret"
+        );
         assert_ne!(secret_ab, [0u8; 32], "shared secret must not be zero");
     }
 
@@ -998,11 +1207,17 @@ mod tests {
     fn test_x25519_null_args() {
         let dummy = [0u8; 32];
         let mut out = [0u8; 32];
-        let r = unsafe { thistle_crypto_x25519_key_exchange(std::ptr::null(), dummy.as_ptr(), out.as_mut_ptr()) };
+        let r = unsafe {
+            thistle_crypto_x25519_key_exchange(std::ptr::null(), dummy.as_ptr(), out.as_mut_ptr())
+        };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
-        let r = unsafe { thistle_crypto_x25519_key_exchange(dummy.as_ptr(), std::ptr::null(), out.as_mut_ptr()) };
+        let r = unsafe {
+            thistle_crypto_x25519_key_exchange(dummy.as_ptr(), std::ptr::null(), out.as_mut_ptr())
+        };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
-        let r = unsafe { thistle_crypto_x25519_key_exchange(dummy.as_ptr(), dummy.as_ptr(), std::ptr::null_mut()) };
+        let r = unsafe {
+            thistle_crypto_x25519_key_exchange(dummy.as_ptr(), dummy.as_ptr(), std::ptr::null_mut())
+        };
         assert_eq!(r, ESP_ERR_INVALID_ARG);
     }
 }

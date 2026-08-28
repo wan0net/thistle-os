@@ -261,7 +261,11 @@ fn platform_unload_driver(_id: u32) -> i32 {
 fn platform_start_driver(hal_type: u8) -> i32 {
     unsafe {
         let ret = thistle_driver_reload_start(hal_type);
-        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+        if ret == ESP_ERR_NOT_SUPPORTED {
+            ESP_OK
+        } else {
+            ret
+        }
     }
 }
 
@@ -269,7 +273,11 @@ fn platform_start_driver(hal_type: u8) -> i32 {
 fn platform_stop_driver(hal_type: u8) -> i32 {
     unsafe {
         let ret = thistle_driver_reload_stop(hal_type);
-        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+        if ret == ESP_ERR_NOT_SUPPORTED {
+            ESP_OK
+        } else {
+            ret
+        }
     }
 }
 
@@ -277,7 +285,11 @@ fn platform_stop_driver(hal_type: u8) -> i32 {
 fn platform_hal_pre_reload(hal_type: u8) -> i32 {
     unsafe {
         let ret = thistle_driver_reload_hal_pre_reload(hal_type);
-        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+        if ret == ESP_ERR_NOT_SUPPORTED {
+            ESP_OK
+        } else {
+            ret
+        }
     }
 }
 
@@ -290,7 +302,11 @@ fn platform_hal_pre_reload(_hal_type: u8) -> i32 {
 fn platform_hal_post_reload(hal_type: u8) -> i32 {
     unsafe {
         let ret = thistle_driver_reload_hal_post_reload(hal_type);
-        if ret == ESP_ERR_NOT_SUPPORTED { ESP_OK } else { ret }
+        if ret == ESP_ERR_NOT_SUPPORTED {
+            ESP_OK
+        } else {
+            ret
+        }
     }
 }
 
@@ -615,7 +631,8 @@ pub extern "C" fn rs_driver_reload_reload(id: u32) -> i32 {
             }
 
             // Unload
-            if drv.state == DriverState::Stopped || drv.state == DriverState::Loaded
+            if drv.state == DriverState::Stopped
+                || drv.state == DriverState::Loaded
                 || drv.state == DriverState::Error
             {
                 let pre_ret = platform_hal_pre_reload(drv.hal_type);
@@ -746,10 +763,7 @@ pub extern "C" fn rs_driver_reload_get_state(id: u32) -> i32 {
 /// # Safety
 /// `out` must be a valid pointer to `CDriverReloadInfo`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_driver_reload_get_info(
-    id: u32,
-    out: *mut CDriverReloadInfo,
-) -> i32 {
+pub unsafe extern "C" fn rs_driver_reload_get_info(id: u32, out: *mut CDriverReloadInfo) -> i32 {
     if out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -786,10 +800,7 @@ pub extern "C" fn rs_driver_reload_get_count() -> i32 {
 /// # Safety
 /// `out` must be a valid pointer to `CDriverReloadInfo`.
 #[no_mangle]
-pub unsafe extern "C" fn rs_driver_reload_get_at(
-    index: u32,
-    out: *mut CDriverReloadInfo,
-) -> i32 {
+pub unsafe extern "C" fn rs_driver_reload_get_at(index: u32, out: *mut CDriverReloadInfo) -> i32 {
     if out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -873,12 +884,10 @@ pub unsafe extern "C" fn rs_driver_reload_reload_by_path(path: *const c_char) ->
 
     // Find the driver ID first, then call reload (avoids nested lock)
     let id = match STATE.lock() {
-        Ok(s) => {
-            match find_driver_by_path(&s, &path_buf, path_len) {
-                Some(idx) => s.drivers[idx].as_ref().unwrap().id,
-                None => return ESP_ERR_NOT_FOUND,
-            }
-        }
+        Ok(s) => match find_driver_by_path(&s, &path_buf, path_len) {
+            Some(idx) => s.drivers[idx].as_ref().unwrap().id,
+            None => return ESP_ERR_NOT_FOUND,
+        },
         Err(_) => return ESP_ERR_INVALID_STATE,
     };
 
@@ -890,10 +899,7 @@ pub unsafe extern "C" fn rs_driver_reload_reload_by_path(path: *const c_char) ->
 /// # Safety
 /// `version` must be a valid null-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn rs_driver_reload_set_version(
-    id: u32,
-    version: *const c_char,
-) -> i32 {
+pub unsafe extern "C" fn rs_driver_reload_set_version(id: u32, version: *const c_char) -> i32 {
     if version.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -996,7 +1002,11 @@ mod tests {
             let id = register_test_driver(&path, &name, HAL_TYPE_DISPLAY);
             assert!(id > 0, "registration {} must succeed", i);
         }
-        let id = register_test_driver("/sdcard/drivers/overflow.drv.elf", "overflow", HAL_TYPE_DISPLAY);
+        let id = register_test_driver(
+            "/sdcard/drivers/overflow.drv.elf",
+            "overflow",
+            HAL_TYPE_DISPLAY,
+        );
         assert_eq!(id, ESP_ERR_NO_MEM, "registration beyond capacity must fail");
     }
 
@@ -1143,13 +1153,24 @@ mod tests {
         assert_eq!(rs_driver_reload_reload(id), ESP_OK);
         assert_eq!(rs_driver_reload_reload(id), ESP_OK);
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
         // load_count: 1 from initial register load_count=0 (register doesn't load),
         // +1 from first reload, +1 from second reload = 2
-        assert!(info.load_count >= 2, "load_count must reflect reloads, got {}", info.load_count);
+        assert!(
+            info.load_count >= 2,
+            "load_count must reflect reloads, got {}",
+            info.load_count
+        );
     }
 
     #[test]
@@ -1173,10 +1194,18 @@ mod tests {
     #[test]
     fn test_get_info_populates_all_fields() {
         init();
-        let id = register_test_driver("/sdcard/drivers/kbd.drv.elf", "keyboard", HAL_TYPE_INPUT) as u32;
+        let id =
+            register_test_driver("/sdcard/drivers/kbd.drv.elf", "keyboard", HAL_TYPE_INPUT) as u32;
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
         assert_eq!(info.id, id);
@@ -1197,8 +1226,15 @@ mod tests {
         let id1 = register_test_driver("/a.drv.elf", "alpha", HAL_TYPE_DISPLAY) as u32;
         let id2 = register_test_driver("/b.drv.elf", "beta", HAL_TYPE_INPUT) as u32;
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_at(0, &mut info) }, ESP_OK);
         assert_eq!(info.id, id1);
@@ -1210,10 +1246,20 @@ mod tests {
     fn test_get_at_out_of_range() {
         init();
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
-        assert_eq!(unsafe { rs_driver_reload_get_at(0, &mut info) }, ESP_ERR_INVALID_ARG);
+        assert_eq!(
+            unsafe { rs_driver_reload_get_at(0, &mut info) },
+            ESP_ERR_INVALID_ARG
+        );
     }
 
     #[test]
@@ -1234,7 +1280,10 @@ mod tests {
         let id = register_test_driver("/sdcard/drivers/gps.drv.elf", "gps", HAL_TYPE_GPS) as u32;
         assert_eq!(rs_driver_reload_start(id), ESP_OK);
         let path = CString::new("/sdcard/drivers/gps.drv.elf").unwrap();
-        assert_eq!(unsafe { rs_driver_reload_reload_by_path(path.as_ptr()) }, ESP_OK);
+        assert_eq!(
+            unsafe { rs_driver_reload_reload_by_path(path.as_ptr()) },
+            ESP_OK
+        );
         assert_eq!(rs_driver_reload_get_state(id), DriverState::Loaded as i32);
     }
 
@@ -1255,7 +1304,11 @@ mod tests {
         let id2 = register_test_driver("/test.drv.elf", "v2", HAL_TYPE_DISPLAY);
         // Same path returns the same ID (replacement)
         assert_eq!(id1, id2, "registering same path must return same ID");
-        assert_eq!(rs_driver_reload_get_count(), 1, "count must not increase on replace");
+        assert_eq!(
+            rs_driver_reload_get_count(),
+            1,
+            "count must not increase on replace"
+        );
     }
 
     // ─── Error handling tests ──────────────────────────────────────────
@@ -1284,8 +1337,15 @@ mod tests {
             s.drivers[idx].as_mut().unwrap().last_error = ESP_FAIL;
         }
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
         assert_eq!(info.state, DriverState::Error as u8);
@@ -1305,11 +1365,21 @@ mod tests {
         assert_eq!(rs_driver_reload_reload(id), ESP_OK);
         assert_eq!(rs_driver_reload_get_state(id), DriverState::Loaded as i32);
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
-        assert_eq!(info.last_error, 0, "last_error must be cleared after successful reload");
+        assert_eq!(
+            info.last_error, 0,
+            "last_error must be cleared after successful reload"
+        );
     }
 
     #[test]
@@ -1334,7 +1404,10 @@ mod tests {
         init();
         let id = register_test_driver("/test.drv.elf", "test", HAL_TYPE_DISPLAY) as u32;
         let ver = CString::new("1.2.3").unwrap();
-        assert_eq!(unsafe { rs_driver_reload_set_version(id, ver.as_ptr()) }, ESP_OK);
+        assert_eq!(
+            unsafe { rs_driver_reload_set_version(id, ver.as_ptr()) },
+            ESP_OK
+        );
     }
 
     #[test]
@@ -1342,7 +1415,10 @@ mod tests {
         init();
         let id = register_test_driver("/test.drv.elf", "test", HAL_TYPE_DISPLAY) as u32;
         let ver = CString::new("2.0.1").unwrap();
-        assert_eq!(unsafe { rs_driver_reload_set_version(id, ver.as_ptr()) }, ESP_OK);
+        assert_eq!(
+            unsafe { rs_driver_reload_set_version(id, ver.as_ptr()) },
+            ESP_OK
+        );
         // Verify via internal state since CDriverReloadInfo doesn't carry version
         let s = STATE.lock().unwrap();
         let idx = find_driver_index(&s, id).unwrap();
@@ -1367,8 +1443,11 @@ mod tests {
     fn test_stats_empty() {
         init();
         let mut stats = CDriverReloadStats {
-            driver_count: 0, running_count: 0, stopped_count: 0,
-            error_count: 0, total_reloads: 0,
+            driver_count: 0,
+            running_count: 0,
+            stopped_count: 0,
+            error_count: 0,
+            total_reloads: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_stats(&mut stats) }, ESP_OK);
         assert_eq!(stats.driver_count, 0);
@@ -1394,8 +1473,11 @@ mod tests {
         assert_eq!(rs_driver_reload_reload(id1), ESP_OK);
 
         let mut stats = CDriverReloadStats {
-            driver_count: 0, running_count: 0, stopped_count: 0,
-            error_count: 0, total_reloads: 0,
+            driver_count: 0,
+            running_count: 0,
+            stopped_count: 0,
+            error_count: 0,
+            total_reloads: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_stats(&mut stats) }, ESP_OK);
         assert_eq!(stats.driver_count, 3);
@@ -1449,8 +1531,15 @@ mod tests {
         let id = register_test_driver(&long_path, "test", HAL_TYPE_DISPLAY) as u32;
         assert!(id > 0, "long path must still register (truncated)");
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
         assert!(info.path_len <= 127, "path must be truncated to fit buffer");
@@ -1463,8 +1552,15 @@ mod tests {
         let id = register_test_driver("/test.drv.elf", &long_name, HAL_TYPE_DISPLAY) as u32;
         assert!(id > 0, "long name must still register (truncated)");
         let mut info = CDriverReloadInfo {
-            id: 0, path: [0; 128], path_len: 0, name: [0; 32], name_len: 0,
-            hal_type: 0, state: 0, load_count: 0, last_error: 0,
+            id: 0,
+            path: [0; 128],
+            path_len: 0,
+            name: [0; 32],
+            name_len: 0,
+            hal_type: 0,
+            state: 0,
+            load_count: 0,
+            last_error: 0,
         };
         assert_eq!(unsafe { rs_driver_reload_get_info(id, &mut info) }, ESP_OK);
         assert!(info.name_len <= 31, "name must be truncated to fit buffer");
@@ -1554,7 +1650,8 @@ mod tests {
     #[test]
     fn test_full_lifecycle() {
         init();
-        let id = register_test_driver("/sdcard/drivers/kbd.drv.elf", "keyboard", HAL_TYPE_INPUT) as u32;
+        let id =
+            register_test_driver("/sdcard/drivers/kbd.drv.elf", "keyboard", HAL_TYPE_INPUT) as u32;
         assert_eq!(rs_driver_reload_get_state(id), DriverState::Loaded as i32);
 
         assert_eq!(rs_driver_reload_start(id), ESP_OK);

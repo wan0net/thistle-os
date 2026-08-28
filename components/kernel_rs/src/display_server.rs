@@ -94,10 +94,22 @@ unsafe impl Send for Surface {}
 impl Surface {
     const fn empty() -> Self {
         Surface {
-            info: SurfaceInfo { x: 0, y: 0, width: 0, height: 0, role: 0, visible: false },
+            info: SurfaceInfo {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+                role: 0,
+                visible: false,
+            },
             buffer: Vec::new(),
             dirty: false,
-            dirty_area: HalArea { x1: 0, y1: 0, x2: 0, y2: 0 },
+            dirty_area: HalArea {
+                x1: 0,
+                y1: 0,
+                x2: 0,
+                y2: 0,
+            },
             input_cb: None,
             input_user_data: std::ptr::null_mut(),
             allocated: false,
@@ -162,7 +174,9 @@ pub extern "C" fn display_server_init() -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn display_server_register_wm(wm: *const WmVtable) -> i32 {
-    if wm.is_null() { return ESP_ERR_INVALID_ARG; }
+    if wm.is_null() {
+        return ESP_ERR_INVALID_ARG;
+    }
     let mut lock = match DS.lock() {
         Ok(l) => l,
         Err(_) => return ESP_ERR_INVALID_STATE,
@@ -212,7 +226,9 @@ pub extern "C" fn display_server_get_wm_name() -> *const c_char {
 
 #[no_mangle]
 pub unsafe extern "C" fn display_server_create_surface(info: *const SurfaceInfo) -> u32 {
-    if info.is_null() { return 0; }
+    if info.is_null() {
+        return 0;
+    }
     let info = *info;
     let mut lock = match DS.lock() {
         Ok(l) => l,
@@ -230,7 +246,12 @@ pub unsafe extern "C" fn display_server_create_surface(info: *const SurfaceInfo)
                 info,
                 buffer: vec![0u8; buf_size],
                 dirty: false,
-                dirty_area: HalArea { x1: 0, y1: 0, x2: 0, y2: 0 },
+                dirty_area: HalArea {
+                    x1: 0,
+                    y1: 0,
+                    x2: 0,
+                    y2: 0,
+                },
                 input_cb: None,
                 input_user_data: std::ptr::null_mut(),
                 allocated: true,
@@ -290,7 +311,9 @@ pub unsafe extern "C" fn display_server_get_info(id: u32) -> *const SurfaceInfo 
 
 #[no_mangle]
 pub unsafe extern "C" fn display_server_mark_dirty(id: u32, area: *const HalArea) {
-    if area.is_null() { return; }
+    if area.is_null() {
+        return;
+    }
     let mut lock = match DS.lock() {
         Ok(l) => l,
         Err(_) => return,
@@ -301,10 +324,18 @@ pub unsafe extern "C" fn display_server_mark_dirty(id: u32, area: *const HalArea
                 s.dirty_area = *area;
                 s.dirty = true;
             } else {
-                if (*area).x1 < s.dirty_area.x1 { s.dirty_area.x1 = (*area).x1; }
-                if (*area).y1 < s.dirty_area.y1 { s.dirty_area.y1 = (*area).y1; }
-                if (*area).x2 > s.dirty_area.x2 { s.dirty_area.x2 = (*area).x2; }
-                if (*area).y2 > s.dirty_area.y2 { s.dirty_area.y2 = (*area).y2; }
+                if (*area).x1 < s.dirty_area.x1 {
+                    s.dirty_area.x1 = (*area).x1;
+                }
+                if (*area).y1 < s.dirty_area.y1 {
+                    s.dirty_area.y1 = (*area).y1;
+                }
+                if (*area).x2 > s.dirty_area.x2 {
+                    s.dirty_area.x2 = (*area).x2;
+                }
+                if (*area).y2 > s.dirty_area.y2 {
+                    s.dirty_area.y2 = (*area).y2;
+                }
             }
         }
     }
@@ -320,7 +351,8 @@ pub unsafe extern "C" fn display_server_mark_dirty_full(id: u32) {
         if let Some(s) = ds.surfaces.get_mut((id.wrapping_sub(1)) as usize) {
             s.dirty = true;
             s.dirty_area = HalArea {
-                x1: 0, y1: 0,
+                x1: 0,
+                y1: 0,
                 x2: s.info.width.saturating_sub(1),
                 y2: s.info.height.saturating_sub(1),
             };
@@ -348,13 +380,19 @@ pub extern "C" fn display_server_composite() -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn display_server_get_width() -> u16 { get_display_width() }
+pub extern "C" fn display_server_get_width() -> u16 {
+    get_display_width()
+}
 
 #[no_mangle]
-pub extern "C" fn display_server_get_height() -> u16 { get_display_height() }
+pub extern "C" fn display_server_get_height() -> u16 {
+    get_display_height()
+}
 
 #[no_mangle]
-pub extern "C" fn display_server_get_display_type() -> u32 { DISPLAY_TYPE_LCD }
+pub extern "C" fn display_server_get_display_type() -> u32 {
+    DISPLAY_TYPE_LCD
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn display_server_surface_input_cb(
@@ -415,7 +453,14 @@ mod tests {
 
     // Helper to create a test surface info
     fn test_surface(w: u16, h: u16, role: SurfaceRole) -> SurfaceInfo {
-        SurfaceInfo { x: 0, y: 0, width: w, height: h, role: role as u32, visible: true }
+        SurfaceInfo {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+            role: role as u32,
+            visible: true,
+        }
     }
 
     #[test]
@@ -424,8 +469,15 @@ mod tests {
         let lock = DS.lock().unwrap();
         assert!(lock.is_some(), "DS should be initialized");
         let ds = lock.as_ref().unwrap();
-        assert!(ds.initialized, "DisplayServer should have initialized flag set");
-        assert_eq!(ds.surfaces.len(), MAX_SURFACES, "Should have MAX_SURFACES empty slots");
+        assert!(
+            ds.initialized,
+            "DisplayServer should have initialized flag set"
+        );
+        assert_eq!(
+            ds.surfaces.len(),
+            MAX_SURFACES,
+            "Should have MAX_SURFACES empty slots"
+        );
         assert_eq!(ds.next_id, 1, "next_id should start at 1");
     }
 
@@ -449,7 +501,11 @@ mod tests {
         let ds = lock.as_ref().unwrap();
         let surface = &ds.surfaces[0];
         let expected_size = 50 * 40 * 2; // width * height * 2 bytes (16-bit color)
-        assert_eq!(surface.buffer.len(), expected_size, "buffer should be width*height*2 bytes");
+        assert_eq!(
+            surface.buffer.len(),
+            expected_size,
+            "buffer should be width*height*2 bytes"
+        );
         assert!(surface.allocated, "surface should be marked as allocated");
     }
 
@@ -465,7 +521,9 @@ mod tests {
             assert!(lock.as_ref().unwrap().surfaces[0].allocated);
         }
 
-        unsafe { display_server_destroy_surface(id); }
+        unsafe {
+            display_server_destroy_surface(id);
+        }
 
         let lock = DS.lock().unwrap();
         let surface = &lock.as_ref().unwrap().surfaces[0];
@@ -481,8 +539,10 @@ mod tests {
         // Create MAX_SURFACES surfaces
         for i in 0..MAX_SURFACES {
             let info = SurfaceInfo {
-                x: 0, y: 0,
-                width: 10 + i as u16, height: 10,
+                x: 0,
+                y: 0,
+                width: 10 + i as u16,
+                height: 10,
                 role: SurfaceRole::AppContent as u32,
                 visible: true,
             };
@@ -494,7 +554,10 @@ mod tests {
         // Try to create one more — should fail
         let info = test_surface(100, 100, SurfaceRole::AppContent);
         let id = unsafe { display_server_create_surface(&info) };
-        assert_eq!(id, 0, "create_surface should return 0 when MAX_SURFACES exceeded");
+        assert_eq!(
+            id, 0,
+            "create_surface should return 0 when MAX_SURFACES exceeded"
+        );
     }
 
     #[test]
@@ -511,14 +574,18 @@ mod tests {
         }
 
         // Set invisible
-        unsafe { display_server_set_visible(id, false); }
+        unsafe {
+            display_server_set_visible(id, false);
+        }
         {
             let lock = DS.lock().unwrap();
             assert!(!lock.as_ref().unwrap().surfaces[0].info.visible);
         }
 
         // Set visible again
-        unsafe { display_server_set_visible(id, true); }
+        unsafe {
+            display_server_set_visible(id, true);
+        }
         {
             let lock = DS.lock().unwrap();
             assert!(lock.as_ref().unwrap().surfaces[0].info.visible);
@@ -533,8 +600,15 @@ mod tests {
         assert_ne!(id, 0);
 
         // Mark dirty with area (10, 10, 50, 50)
-        let area1 = HalArea { x1: 10, y1: 10, x2: 50, y2: 50 };
-        unsafe { display_server_mark_dirty(id, &area1); }
+        let area1 = HalArea {
+            x1: 10,
+            y1: 10,
+            x2: 50,
+            y2: 50,
+        };
+        unsafe {
+            display_server_mark_dirty(id, &area1);
+        }
 
         {
             let lock = DS.lock().unwrap();
@@ -547,8 +621,15 @@ mod tests {
         }
 
         // Mark dirty with overlapping area (30, 30, 80, 80)
-        let area2 = HalArea { x1: 30, y1: 30, x2: 80, y2: 80 };
-        unsafe { display_server_mark_dirty(id, &area2); }
+        let area2 = HalArea {
+            x1: 30,
+            y1: 30,
+            x2: 80,
+            y2: 80,
+        };
+        unsafe {
+            display_server_mark_dirty(id, &area2);
+        }
 
         // Result should be merged to (10, 10, 80, 80)
         {
@@ -569,7 +650,9 @@ mod tests {
         let id = unsafe { display_server_create_surface(&info) };
         assert_ne!(id, 0);
 
-        unsafe { display_server_mark_dirty_full(id); }
+        unsafe {
+            display_server_mark_dirty_full(id);
+        }
 
         let lock = DS.lock().unwrap();
         let surface = &lock.as_ref().unwrap().surfaces[0];
@@ -596,8 +679,10 @@ mod tests {
 
         for i in 0..5 {
             let info = SurfaceInfo {
-                x: 0, y: 0,
-                width: 100, height: 100,
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100,
                 role: (i % 5) as u32,
                 visible: true,
             };
@@ -646,7 +731,10 @@ mod tests {
     fn test_get_buffer_returns_null_for_unallocated() {
         display_server_init();
         let buf = unsafe { display_server_get_buffer(1) };
-        assert!(buf.is_null(), "get_buffer should return null for unallocated surface");
+        assert!(
+            buf.is_null(),
+            "get_buffer should return null for unallocated surface"
+        );
     }
 
     #[test]
@@ -657,15 +745,20 @@ mod tests {
         assert_ne!(id, 0);
 
         let buf = unsafe { display_server_get_buffer(id) };
-        assert!(!buf.is_null(), "get_buffer should return non-null for allocated surface");
+        assert!(
+            !buf.is_null(),
+            "get_buffer should return non-null for allocated surface"
+        );
     }
 
     #[test]
     fn test_get_info_returns_surface_info() {
         display_server_init();
         let info = SurfaceInfo {
-            x: 10, y: 20,
-            width: 150, height: 200,
+            x: 10,
+            y: 20,
+            width: 150,
+            height: 200,
             role: SurfaceRole::StatusBar as u32,
             visible: true,
         };
@@ -686,9 +779,16 @@ mod tests {
     #[test]
     fn test_mark_dirty_invalid_surface() {
         display_server_init();
-        let area = HalArea { x1: 0, y1: 0, x2: 100, y2: 100 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 100,
+            y2: 100,
+        };
         // Try to mark dirty on non-existent surface — should not panic
-        unsafe { display_server_mark_dirty(999, &area); }
+        unsafe {
+            display_server_mark_dirty(999, &area);
+        }
         // Test passes if no panic
     }
 
@@ -701,7 +801,9 @@ mod tests {
         let id1 = unsafe { display_server_create_surface(&info) };
         assert_eq!(id1, 1);
 
-        unsafe { display_server_destroy_surface(id1); }
+        unsafe {
+            display_server_destroy_surface(id1);
+        }
 
         let id2 = unsafe { display_server_create_surface(&info) };
         assert_eq!(id2, 2, "new surface should get next ID, not reuse 1");

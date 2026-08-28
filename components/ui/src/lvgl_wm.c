@@ -5,9 +5,10 @@
  * lvgl_wm.c — Shared LVGL widget API for ThistleOS window managers
  *
  * Contains the widget implementation functions used by both the e-paper
- * and LCD WM variants. Widget handles are LVGL object pointers cast to
- * uint32_t. All functions are non-static so the WM variant files can
- * reference them in their vtables.
+ * and LCD WM variants. Widget handles are stable 32-bit indices, never raw
+ * pointers: the simulator is 64-bit even though ESP targets are 32-bit.
+ * All functions are non-static so the WM variant files can reference them in
+ * their vtables.
  */
 
 #include "thistle/display_server.h"
@@ -18,10 +19,43 @@
 #include <string.h>
 #include <stdint.h>
 
-/* ── Handle conversion ───────────────────────────────────────────────── */
+/* ── Handle registry ─────────────────────────────────────────────────── */
 
-static inline lv_obj_t *h2obj(uint32_t h) { return (lv_obj_t *)(uintptr_t)h; }
-static inline uint32_t obj2h(lv_obj_t *o) { return (uint32_t)(uintptr_t)o; }
+#define LVGL_WIDGET_HANDLE_MAX 256
+static lv_obj_t *s_widget_handles[LVGL_WIDGET_HANDLE_MAX];
+
+static lv_obj_t *h2obj(uint32_t handle)
+{
+    if (handle == 0 || handle >= LVGL_WIDGET_HANDLE_MAX) return NULL;
+    lv_obj_t *object = s_widget_handles[handle];
+    if (object && !lv_obj_is_valid(object)) {
+        s_widget_handles[handle] = NULL;
+        return NULL;
+    }
+    return object;
+}
+
+static uint32_t obj2h(lv_obj_t *object)
+{
+    if (!object) return 0;
+    for (uint32_t handle = 1; handle < LVGL_WIDGET_HANDLE_MAX; handle++) {
+        if (s_widget_handles[handle] == object) return handle;
+    }
+    for (uint32_t handle = 1; handle < LVGL_WIDGET_HANDLE_MAX; handle++) {
+        if (!s_widget_handles[handle]) {
+            s_widget_handles[handle] = object;
+            return handle;
+        }
+    }
+    ESP_LOGE("lvgl_widget", "widget handle registry exhausted");
+    return 0;
+}
+
+static lv_obj_t *parent_object(uint32_t parent)
+{
+    lv_obj_t *object = h2obj(parent);
+    return object ? object : ui_manager_get_app_area();
+}
 
 /* ── Widget API: creation ────────────────────────────────────────────── */
 
@@ -32,7 +66,7 @@ uint32_t lvgl_wm_widget_get_app_root(void)
 
 uint32_t lvgl_wm_widget_create_container(uint32_t parent)
 {
-    lv_obj_t *p = parent ? h2obj(parent) : ui_manager_get_app_area();
+    lv_obj_t *p = parent_object(parent);
     lv_obj_t *c = lv_obj_create(p);
     lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
@@ -43,7 +77,7 @@ uint32_t lvgl_wm_widget_create_container(uint32_t parent)
 
 uint32_t lvgl_wm_widget_create_label(uint32_t parent, const char *text)
 {
-    lv_obj_t *p = parent ? h2obj(parent) : ui_manager_get_app_area();
+    lv_obj_t *p = parent_object(parent);
     lv_obj_t *lbl = lv_label_create(p);
     if (text) lv_label_set_text(lbl, text);
     return obj2h(lbl);
@@ -51,7 +85,7 @@ uint32_t lvgl_wm_widget_create_label(uint32_t parent, const char *text)
 
 uint32_t lvgl_wm_widget_create_button(uint32_t parent, const char *text)
 {
-    lv_obj_t *p = parent ? h2obj(parent) : ui_manager_get_app_area();
+    lv_obj_t *p = parent_object(parent);
     lv_obj_t *btn = lv_button_create(p);
     if (text) {
         lv_obj_t *lbl = lv_label_create(btn);
@@ -63,7 +97,7 @@ uint32_t lvgl_wm_widget_create_button(uint32_t parent, const char *text)
 
 uint32_t lvgl_wm_widget_create_text_input(uint32_t parent, const char *placeholder)
 {
-    lv_obj_t *p = parent ? h2obj(parent) : ui_manager_get_app_area();
+    lv_obj_t *p = parent_object(parent);
     lv_obj_t *ta = lv_textarea_create(p);
     lv_textarea_set_one_line(ta, true);
     if (placeholder) lv_textarea_set_placeholder_text(ta, placeholder);
@@ -72,7 +106,10 @@ uint32_t lvgl_wm_widget_create_text_input(uint32_t parent, const char *placehold
 
 void lvgl_wm_widget_destroy(uint32_t widget)
 {
-    if (widget) lv_obj_delete(h2obj(widget));
+    lv_obj_t *object = h2obj(widget);
+    if (!object) return;
+    s_widget_handles[widget] = NULL;
+    lv_obj_delete(object);
 }
 
 /* ── Widget API: properties ──────────────────────────────────────────── */
@@ -148,7 +185,17 @@ void lvgl_wm_widget_set_text_color(uint32_t widget, uint32_t color)
     uint8_t r = (color >> 16) & 0xFF;
     uint8_t g = (color >> 8) & 0xFF;
     uint8_t b = color & 0xFF;
-    lv_obj_set_style_text_color(h2obj(widget), lv_color_make(r, g, b), LV_PART_MAIN);
+    lv_obj_t *object = h2obj(widget);
+    if (!object) return;
+    lv_color_t text_color = lv_color_make(r, g, b);
+    lv_obj_set_style_text_color(object, text_color, LV_PART_MAIN);
+
+    /* Button text is rendered by its child label.  Set it explicitly so
+     * application styling behaves the same as thistle-tk. */
+    lv_obj_t *child = lv_obj_get_child(object, 0);
+    if (child && lv_obj_check_type(child, &lv_label_class)) {
+        lv_obj_set_style_text_color(child, text_color, LV_PART_MAIN);
+    }
 }
 
 void lvgl_wm_widget_set_font_size(uint32_t widget, int size)

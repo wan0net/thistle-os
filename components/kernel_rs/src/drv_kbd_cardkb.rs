@@ -16,8 +16,10 @@
 
 use std::os::raw::{c_char, c_void};
 
-use crate::hal_registry::{HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData,
-                          HalInputEventType, HalInputKeyData};
+use crate::hal_registry::{
+    HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData, HalInputEventType,
+    HalInputKeyData,
+};
 
 // ── ESP error codes ──────────────────────────────────────────────────────────
 
@@ -148,7 +150,9 @@ mod esp_ffi {
         0
     }
 
-    pub unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 { 0 }
+    pub unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 {
+        0
+    }
 
     pub unsafe fn i2c_master_transmit_receive(
         _handle: *mut c_void,
@@ -171,7 +175,9 @@ mod esp_ffi {
         0
     }
 
-    pub unsafe fn esp_timer_get_time() -> i64 { 0 }
+    pub unsafe fn esp_timer_get_time() -> i64 {
+        0
+    }
 }
 
 // ── Inject buffer (test/simulator only) ──────────────────────────────────────
@@ -643,10 +649,7 @@ mod tests {
             let cfg = test_config();
             cardkb_init(&cfg as *const KbdCardkbConfig as *const c_void);
 
-            unsafe extern "C" fn dummy_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {}
+            unsafe extern "C" fn dummy_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {}
             let sentinel = 0xDEAD_BEEFusize as *mut c_void;
             let ret = cardkb_register_callback(Some(dummy_cb), sentinel);
             assert_eq!(ret, ESP_OK);
@@ -668,10 +671,7 @@ mod tests {
             static LAST_KEY: AtomicU16 = AtomicU16::new(0);
             LAST_KEY.store(0, AtomicOrdering::Relaxed);
 
-            unsafe extern "C" fn capture_cb(
-                event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn capture_cb(event: *const HalInputEvent, _user_data: *mut c_void) {
                 let kd = (*event).data.key;
                 LAST_KEY.store(kd.keycode, AtomicOrdering::Relaxed);
             }
@@ -752,10 +752,7 @@ mod tests {
             static KEY_COUNT: AtomicU16 = AtomicU16::new(0);
             KEY_COUNT.store(0, AtomicOrdering::Relaxed);
 
-            unsafe extern "C" fn count_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn count_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {
                 KEY_COUNT.fetch_add(1, AtomicOrdering::Relaxed);
             }
             cardkb_register_callback(Some(count_cb), std::ptr::null_mut());

@@ -167,17 +167,29 @@ mod stubs {
     }
 
     // Mesh stubs
-    pub unsafe fn rs_mesh_init(_name: *const c_char, _node_type: u8) -> i32 { ESP_OK }
-    pub unsafe fn rs_mesh_deinit() -> i32 { ESP_OK }
-    pub unsafe fn rs_mesh_loop() -> i32 { ESP_OK }
-    pub unsafe fn rs_mesh_send(_dest_key: *const u8, _text: *const c_char) -> i32 { ESP_OK }
-    pub unsafe fn rs_mesh_send_advert() -> i32 { ESP_OK }
+    pub unsafe fn rs_mesh_init(_name: *const c_char, _node_type: u8) -> i32 {
+        ESP_OK
+    }
+    pub unsafe fn rs_mesh_deinit() -> i32 {
+        ESP_OK
+    }
+    pub unsafe fn rs_mesh_loop() -> i32 {
+        ESP_OK
+    }
+    pub unsafe fn rs_mesh_send(_dest_key: *const u8, _text: *const c_char) -> i32 {
+        ESP_OK
+    }
+    pub unsafe fn rs_mesh_send_advert() -> i32 {
+        ESP_OK
+    }
     pub unsafe fn rs_mesh_get_contact_count() -> i32 {
         STUB_CONTACT_COUNT.load(Ordering::SeqCst)
     }
     pub unsafe fn rs_mesh_get_contact(index: i32, out: *mut CMeshContact) -> i32 {
         let count = STUB_CONTACT_COUNT.load(Ordering::SeqCst);
-        if index < 0 || index >= count { return ESP_FAIL; }
+        if index < 0 || index >= count {
+            return ESP_FAIL;
+        }
         let c = out.as_mut().unwrap();
         c.name_len = 4;
         c.name[..4].copy_from_slice(b"Node");
@@ -192,7 +204,9 @@ mod stubs {
     }
     pub unsafe fn rs_mesh_get_inbox_message(index: i32, out: *mut CMeshMessage) -> i32 {
         let count = STUB_INBOX_COUNT.load(Ordering::SeqCst);
-        if index < 0 || index >= count { return ESP_FAIL; }
+        if index < 0 || index >= count {
+            return ESP_FAIL;
+        }
         let m = out.as_mut().unwrap();
         m.text_len = 5;
         m.text[..5].copy_from_slice(b"hello");
@@ -210,20 +224,45 @@ mod stubs {
     }
 
     // Widget stubs
-    pub unsafe fn tk_wm_widget_get_app_root() -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_container(_parent: u32) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_label(_parent: u32, _text: *const c_char) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_button(_parent: u32, _text: *const c_char) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_text_input(_parent: u32, _placeholder: *const c_char) -> u32 { next_id() }
+    pub unsafe fn tk_wm_widget_get_app_root() -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_container(_parent: u32) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_label(_parent: u32, _text: *const c_char) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_button(_parent: u32, _text: *const c_char) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_text_input(_parent: u32, _placeholder: *const c_char) -> u32 {
+        next_id()
+    }
     pub unsafe fn tk_wm_widget_create_list_item(
-        _parent: u32, _title: *const c_char, _subtitle: *const c_char,
-    ) -> u32 { next_id() }
+        _parent: u32,
+        _title: *const c_char,
+        _subtitle: *const c_char,
+    ) -> u32 {
+        next_id()
+    }
     pub unsafe fn tk_wm_widget_create_status_bar(
-        _parent: u32, _left: *const c_char, _center: *const c_char, _right: *const c_char,
-    ) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_divider(_parent: u32) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_spacer(_parent: u32) -> u32 { next_id() }
-    pub unsafe fn tk_wm_widget_create_progress_bar(_parent: u32, _value: i32) -> u32 { next_id() }
+        _parent: u32,
+        _left: *const c_char,
+        _center: *const c_char,
+        _right: *const c_char,
+    ) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_divider(_parent: u32) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_spacer(_parent: u32) -> u32 {
+        next_id()
+    }
+    pub unsafe fn tk_wm_widget_create_progress_bar(_parent: u32, _value: i32) -> u32 {
+        next_id()
+    }
     pub unsafe fn tk_wm_widget_set_text(_widget: u32, _text: *const c_char) {}
     pub unsafe fn tk_wm_widget_set_visible(_widget: u32, _visible: bool) {}
     pub unsafe fn tk_wm_widget_set_badge(_widget: u32, _badge: *const c_char) {}
@@ -253,7 +292,11 @@ fn mesh_contact_count() -> i32 {
 fn mesh_get_contact(index: i32) -> Option<CMeshContact> {
     let mut c = CMeshContact::default();
     let r = unsafe { rs_mesh_get_contact(index, &mut c as *mut _) };
-    if r == ESP_OK { Some(c) } else { None }
+    if r == ESP_OK {
+        Some(c)
+    } else {
+        None
+    }
 }
 
 fn mesh_inbox_count() -> i32 {
@@ -263,7 +306,11 @@ fn mesh_inbox_count() -> i32 {
 fn mesh_get_message(index: i32) -> Option<CMeshMessage> {
     let mut m = CMeshMessage::default();
     let r = unsafe { rs_mesh_get_inbox_message(index, &mut m as *mut _) };
-    if r == ESP_OK { Some(m) } else { None }
+    if r == ESP_OK {
+        Some(m)
+    } else {
+        None
+    }
 }
 
 fn mesh_send(dest_key: &[u8; 32], text: &str) -> i32 {
@@ -277,7 +324,11 @@ fn contact_name(c: &CMeshContact) -> String {
 }
 
 fn contact_subtitle(c: &CMeshContact) -> String {
-    let ntype = if c.node_type == 0 { "CLIENT" } else { "REPEATER" };
+    let ntype = if c.node_type == 0 {
+        "CLIENT"
+    } else {
+        "REPEATER"
+    };
     format!("{} | RSSI {} | hops {}", ntype, c.last_rssi, c.path_len)
 }
 
@@ -303,7 +354,9 @@ fn widget_get_text(widget: u32) -> String {
     if ptr.is_null() {
         return String::new();
     }
-    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +478,10 @@ fn refresh_status_bar(s: &MeshChatState) {
         Screen::Contacts => "Contacts",
         Screen::Chat => "Chat",
     };
-    widget_set_text(s.status_bar, &format!("{} | {} | {}", self_name, center, right));
+    widget_set_text(
+        s.status_bar,
+        &format!("{} | {} | {}", self_name, center, right),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -601,8 +657,11 @@ pub extern "C" fn rs_meshchat_on_key(key: u16) -> i32 {
                             let old = s.selected_idx as usize;
                             unsafe { tk_wm_widget_set_selected(s.contact_widgets[old], false) };
                         }
-                        s.selected_idx =
-                            if s.selected_idx <= 0 { max - 1 } else { s.selected_idx - 1 };
+                        s.selected_idx = if s.selected_idx <= 0 {
+                            max - 1
+                        } else {
+                            s.selected_idx - 1
+                        };
                         let new_idx = s.selected_idx as usize;
                         unsafe { tk_wm_widget_set_selected(s.contact_widgets[new_idx], true) };
                     }
@@ -613,12 +672,11 @@ pub extern "C" fn rs_meshchat_on_key(key: u16) -> i32 {
                             let old = s.selected_idx as usize;
                             unsafe { tk_wm_widget_set_selected(s.contact_widgets[old], false) };
                         }
-                        s.selected_idx =
-                            if s.selected_idx < 0 || s.selected_idx >= max - 1 {
-                                0
-                            } else {
-                                s.selected_idx + 1
-                            };
+                        s.selected_idx = if s.selected_idx < 0 || s.selected_idx >= max - 1 {
+                            0
+                        } else {
+                            s.selected_idx + 1
+                        };
                         let new_idx = s.selected_idx as usize;
                         unsafe { tk_wm_widget_set_selected(s.contact_widgets[new_idx], true) };
                     }
@@ -728,8 +786,8 @@ pub extern "C" fn rs_meshchat_back() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stubs::{NEXT_WIDGET_ID, STUB_CONTACT_COUNT, STUB_INBOX_COUNT};
     use std::sync::atomic::Ordering;
+    use stubs::{NEXT_WIDGET_ID, STUB_CONTACT_COUNT, STUB_INBOX_COUNT};
 
     fn reset() {
         let mut s = STATE.lock().unwrap();

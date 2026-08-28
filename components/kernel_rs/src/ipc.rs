@@ -30,7 +30,7 @@ const ESP_ERR_TIMEOUT: i32 = 0x107;
 #[derive(Clone, Copy, Debug)]
 pub struct CIpcMessage {
     pub src_app: u32,
-    pub dst_app: u32,  // 0 = broadcast
+    pub dst_app: u32, // 0 = broadcast
     pub msg_type: u32,
     pub data: [u8; IPC_MSG_MAX_DATA],
     pub data_len: usize,
@@ -126,7 +126,11 @@ pub fn ipc_send_impl(msg: CIpcMessage) -> i32 {
 
     // Dispatch to handlers while holding the lock so the handler list cannot
     // change under us. Handlers are expected to be short and non-blocking.
-    for entry in st.handlers.iter().filter(|e| e.active && e.msg_type == msg.msg_type) {
+    for entry in st
+        .handlers
+        .iter()
+        .filter(|e| e.active && e.msg_type == msg.msg_type)
+    {
         (entry.handler)(&msg as *const CIpcMessage, entry.user_data);
     }
 
@@ -286,7 +290,11 @@ mod tests {
 
     fn send_to(g: &IpcGlobal, msg: CIpcMessage) -> i32 {
         let mut st = g.state.lock().unwrap();
-        for entry in st.handlers.iter().filter(|e| e.active && e.msg_type == msg.msg_type) {
+        for entry in st
+            .handlers
+            .iter()
+            .filter(|e| e.active && e.msg_type == msg.msg_type)
+        {
             (entry.handler)(&msg as *const CIpcMessage, entry.user_data);
         }
         if st.queue.len() >= IPC_QUEUE_DEPTH {
@@ -429,7 +437,12 @@ mod tests {
         // Receive in FIFO order
         for i in 0..3u32 {
             let received = recv_from(&g, 50).expect("expected message");
-            assert_eq!(received.msg_type, i + 10, "FIFO order violated at position {}", i);
+            assert_eq!(
+                received.msg_type,
+                i + 10,
+                "FIFO order violated at position {}",
+                i
+            );
             assert_eq!(received.src_app, i);
         }
 
@@ -487,7 +500,8 @@ mod tests {
             assert_eq!(
                 received.data[i],
                 (i as u8) ^ 0xA5,
-                "data byte {} corrupted", i
+                "data byte {} corrupted",
+                i
             );
         }
     }
@@ -561,7 +575,11 @@ mod tests {
         msg.msg_type = 3;
         msg.data_len = 0;
 
-        assert_eq!(send_to(&g, msg), ESP_OK, "message with zero data_len must succeed");
+        assert_eq!(
+            send_to(&g, msg),
+            ESP_OK,
+            "message with zero data_len must succeed"
+        );
 
         let received = recv_from(&g, 50).expect("expected message");
         assert_eq!(received.data_len, 0, "data_len must be 0");

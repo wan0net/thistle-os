@@ -10,6 +10,8 @@ on:
       - 'driver_sdk/**'
       - '.github/workflows/apps.yml'
       - 'tools/sign_elf.py'
+      - 'tools/tap_package.py'
+      - 'tools/test_tap_package.py'
       - 'tools/build_catalog.py'
       - 'tools/test_build_catalog.py'
       - 'tools/test_package_workflow.py'
@@ -25,6 +27,8 @@ on:
       - 'driver_sdk/**'
       - '.github/workflows/apps.yml'
       - 'tools/sign_elf.py'
+      - 'tools/tap_package.py'
+      - 'tools/test_tap_package.py'
       - 'tools/build_catalog.py'
       - 'tools/test_build_catalog.py'
       - 'tools/test_package_workflow.py'
@@ -97,6 +101,10 @@ jobs:
               local destination="artifacts/$TARGET_ARCH/${package_type}s/$package_name"
               mkdir -p "$destination"
               cp "$elf" "$destination/$entry"
+              if [ "$package_type" = "app" ]; then
+                test -f "$package_dir/metadata.json"
+                cp "$package_dir/metadata.json" "$destination/metadata.json"
+              fi
               python3 -c '
           import json, pathlib, sys
           source, destination, target_arch = sys.argv[1:]
@@ -138,6 +146,31 @@ jobs:
               tools/sign_elf.py sign "$elf" --key "$SIGNING_KEY"
           done < <(find "artifacts/$TARGET_ARCH" -type f \
             \( -name '*.app.elf' -o -name '*.drv.elf' \) -print0)
+
+          while IFS= read -r -d '' manifest; do
+            app_dir=$(dirname "$manifest")
+            metadata="$app_dir/metadata.json"
+            test -f "$metadata"
+            entry=$(/tmp/thistle-package-signing-venv/bin/python -c \
+              'import json,sys; print(json.load(open(sys.argv[1]))["entry"])' "$manifest")
+            app_id=$(/tmp/thistle-package-signing-venv/bin/python -c \
+              'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$manifest")
+            version=$(/tmp/thistle-package-signing-venv/bin/python -c \
+              'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$manifest")
+            tap="$app_dir/$app_id-$version-$TARGET_ARCH.tap"
+            /tmp/thistle-package-signing-venv/bin/python tools/tap_package.py build \
+              --manifest "$manifest" \
+              --metadata "$metadata" \
+              --elf "$app_dir/$entry" \
+              --elf-signature "$app_dir/$entry.sig" \
+              --license LICENSE \
+              --arch "$TARGET_ARCH" \
+              --output "$tap"
+            /tmp/thistle-package-signing-venv/bin/python \
+              tools/sign_elf.py sign "$tap" --key "$SIGNING_KEY"
+            rm "$app_dir/$entry" "$app_dir/$entry.sig"
+          done < <(find "artifacts/$TARGET_ARCH/apps" -type f \
+            -name manifest.json -print0)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -181,6 +214,7 @@ jobs:
             --base-url "https://wan0net.github.io/thistle-apps/apps" \
             --output publish/catalog.json \
             --merge existing-app-catalog/catalog.json \
+            --publisher-key-id "thistle-official-apps-2026" \
             --require-signatures
           python3 tools/validate_package_matrix.py publish/catalog.json
 

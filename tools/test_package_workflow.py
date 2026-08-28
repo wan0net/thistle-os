@@ -18,6 +18,8 @@ class PackageWorkflowTests(unittest.TestCase):
         self.assertIn("standalone_drivers", self.workflow)
         self.assertIn("*.app.elf", self.workflow)
         self.assertIn("*.drv.elf", self.workflow)
+        self.assertIn("tools/tap_package.py build", self.workflow)
+        self.assertIn('rm "$app_dir/$entry" "$app_dir/$entry.sig"', self.workflow)
 
     def test_publication_is_strict_and_architecture_qualified(self):
         self.assertIn("--require-signatures", self.workflow)

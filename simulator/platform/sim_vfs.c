@@ -23,6 +23,18 @@ void sim_vfs_init(void)
 {
     if (s_initialized) return;
 
+    const char *override_path = getenv("THISTLE_SIM_SDCARD");
+    if (override_path && override_path[0]) {
+        char override_resolved[512];
+        if (!realpath(override_path, override_resolved)) {
+            fprintf(stderr, "[sim_vfs] ERROR: THISTLE_SIM_SDCARD does not exist: %s\n",
+                    override_path);
+            exit(2);
+        }
+        strncpy(s_sdcard_path, override_resolved, sizeof(s_sdcard_path) - 1);
+        goto mount_sdcard;
+    }
+
     /* Strategy: find the executable's directory, then navigate to ../sdcard
      * (since the exe is in simulator/build/ and sdcard is at simulator/sdcard/) */
 
@@ -66,6 +78,7 @@ void sim_vfs_init(void)
         }
     }
 
+mount_sdcard:
     /* Create symlink at /tmp/thistle_sdcard → our sdcard dir */
     unlink("/tmp/thistle_sdcard");
     if (symlink(s_sdcard_path, "/tmp/thistle_sdcard") == 0) {

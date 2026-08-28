@@ -61,8 +61,8 @@ extern "C" {
 
 #[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
 mod sim_loader {
-    use std::os::raw::{c_char, c_void, c_int};
     use std::ffi::CStr;
+    use std::os::raw::{c_char, c_int, c_void};
 
     extern "C" {
         fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
@@ -99,7 +99,8 @@ mod sim_loader {
             Some(p) => p,
             None => {
                 esp_log_write(
-                    ESP_LOG_ERROR, TAG.as_ptr(),
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
                     b"Cannot convert to host lib: %s\0".as_ptr(),
                     path.as_ptr(),
                 );
@@ -110,7 +111,8 @@ mod sim_loader {
         // Check if the host library exists
         if !std::path::Path::new(&lib_path).exists() {
             esp_log_write(
-                ESP_LOG_WARN, TAG.as_ptr(),
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
                 b"No host library found (skipping): %s\0".as_ptr(),
                 format!("{}\0", lib_path).as_ptr(),
             );
@@ -133,7 +135,8 @@ mod sim_loader {
                 CStr::from_ptr(err).to_str().unwrap_or("unknown error")
             };
             esp_log_write(
-                ESP_LOG_ERROR, TAG.as_ptr(),
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
                 b"dlopen failed: %s\0".as_ptr(),
                 format!("{}\0", err_str).as_ptr(),
             );
@@ -141,7 +144,8 @@ mod sim_loader {
         }
 
         esp_log_write(
-            ESP_LOG_INFO, TAG.as_ptr(),
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
             b"Loaded host library: %s\0".as_ptr(),
             c_lib_path.as_ptr(),
         );
@@ -150,7 +154,8 @@ mod sim_loader {
         let init_sym = libc::dlsym(handle, b"driver_init\0".as_ptr() as *const i8);
         if init_sym.is_null() {
             esp_log_write(
-                ESP_LOG_ERROR, TAG.as_ptr(),
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
                 b"driver_init not found in %s\0".as_ptr(),
                 c_lib_path.as_ptr(),
             );
@@ -166,7 +171,8 @@ mod sim_loader {
         let ret = driver_init(config);
 
         esp_log_write(
-            ESP_LOG_INFO, TAG.as_ptr(),
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
             b"driver_init() returned %d for %s\0".as_ptr(),
             ret as c_int,
             c_lib_path.as_ptr(),
@@ -175,7 +181,11 @@ mod sim_loader {
         // Don't dlclose — driver code is still running
         // Leak the handle intentionally (driver stays loaded)
 
-        if ret == 0 { 0 } else { -1 }
+        if ret == 0 {
+            0
+        } else {
+            -1
+        }
     }
 }
 
@@ -183,8 +193,8 @@ mod sim_loader {
 const MALLOC_CAP_SPIRAM: u32 = 1 << 9;
 
 // ESP log levels
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 const ESP_LOG_DEBUG: i32 = 4;
 
@@ -244,10 +254,14 @@ impl DriverLoaderState {
     fn ensure_drivers(&mut self) -> &mut [LoadedDriver; MAX_LOADED_DRVS] {
         if self.drivers.is_none() {
             self.drivers = Some(Box::new([
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
-                LoadedDriver::empty(), LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
+                LoadedDriver::empty(),
             ]));
         }
         self.drivers.as_mut().unwrap()
@@ -489,7 +503,8 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         if manifest_parse_file(
             manifest_path_buf.as_ptr() as *const c_char,
             manifest.as_mut_ptr(),
-        ) == ESP_OK {
+        ) == ESP_OK
+        {
             let manifest = manifest.assume_init();
             if !manifest_is_compatible_for_current_arch(&manifest) {
                 esp_log_write(
@@ -500,7 +515,12 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
                 );
                 return ESP_ERR_NOT_SUPPORTED;
             }
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver manifest OK: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Driver manifest OK: %s\0".as_ptr(),
+                path,
+            );
         }
     }
 
@@ -508,7 +528,12 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
     let size = file_data.len();
     let buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
     if buf.is_null() {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"PSRAM alloc failed for driver: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"PSRAM alloc failed for driver: %s\0".as_ptr(),
+            path,
+        );
         return ESP_ERR_NO_MEM;
     }
     std::ptr::copy_nonoverlapping(file_data.as_ptr(), buf as *mut u8, size);
@@ -520,14 +545,22 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
     let ret = {
         let mut state = match STATE.lock() {
             Ok(s) => s,
-            Err(_) => { free(buf); return ESP_FAIL; }
+            Err(_) => {
+                free(buf);
+                return ESP_FAIL;
+            }
         };
         let drv = &mut state.ensure_drivers()[slot_idx];
         let elf_ptr = drv.elf_storage.as_mut_ptr() as *mut c_void;
 
         let r = esp_elf_init(elf_ptr);
         if r != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_init failed: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_elf_init failed: %s\0".as_ptr(),
+                path,
+            );
             free(buf);
             return r;
         }
@@ -547,13 +580,23 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
         free(buf);
 
         if r != ESP_OK {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_relocate failed: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"esp_elf_relocate failed: %s\0".as_ptr(),
+                path,
+            );
             esp_elf_deinit(elf_ptr);
             return r;
         }
 
         // 6. Call driver_init() entry point
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Calling driver_init() for: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Calling driver_init() for: %s\0".as_ptr(),
+            path,
+        );
         let init_ret = esp_elf_request(elf_ptr, 0, 0, std::ptr::null_mut());
         if init_ret != 0 {
             esp_log_write(
@@ -579,7 +622,12 @@ pub unsafe extern "C" fn driver_loader_load(path: *const c_char) -> i32 {
     };
 
     if ret == ESP_OK {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Driver loaded successfully: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Driver loaded successfully: %s\0".as_ptr(),
+            path,
+        );
     }
 
     ret
@@ -616,9 +664,13 @@ pub unsafe extern "C" fn driver_loader_scan_and_load() -> c_int {
         #[cfg(all(not(target_os = "espidf"), feature = "sim-bus"))]
         let valid_ext = {
             #[cfg(target_os = "macos")]
-            { name_str.ends_with(".drv.dylib") || name_str.ends_with(".drv.elf") }
+            {
+                name_str.ends_with(".drv.dylib") || name_str.ends_with(".drv.elf")
+            }
             #[cfg(not(target_os = "macos"))]
-            { name_str.ends_with(".drv.so") || name_str.ends_with(".drv.elf") }
+            {
+                name_str.ends_with(".drv.so") || name_str.ends_with(".drv.elf")
+            }
         };
         #[cfg(not(all(not(target_os = "espidf"), feature = "sim-bus")))]
         let valid_ext = name_str.ends_with(".drv.elf");
@@ -734,7 +786,10 @@ mod tests {
     fn test_get_config_returns_default() {
         reset_state();
         let ptr = driver_loader_get_config();
-        assert!(!ptr.is_null(), "driver_loader_get_config() must not return NULL");
+        assert!(
+            !ptr.is_null(),
+            "driver_loader_get_config() must not return NULL"
+        );
         let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
         assert_eq!(s, "{}", "default config must be \"{{}}\"");
     }
@@ -835,7 +890,10 @@ mod tests {
         .expect("the trusted snapshot should pass verification");
 
         assert_eq!(*verified.borrow(), trusted);
-        assert_eq!(prepared.0, trusted, "relocation must receive verified bytes");
+        assert_eq!(
+            prepared.0, trusted,
+            "relocation must receive verified bytes"
+        );
         assert_ne!(
             prepared.0,
             *on_disk.borrow(),

@@ -127,7 +127,10 @@ mod esp_ffi {
 mod esp_ffi {
     use std::os::raw::c_void;
 
-    use super::{LTR553_EXPECTED_PART_ID, LTR553_REG_ALS_DATA_CH1_L, LTR553_REG_PART_ID, LTR553_REG_PS_DATA_L};
+    use super::{
+        LTR553_EXPECTED_PART_ID, LTR553_REG_ALS_DATA_CH1_L, LTR553_REG_PART_ID,
+        LTR553_REG_PS_DATA_L,
+    };
 
     #[repr(C)]
     pub struct I2cDeviceConfig {
@@ -359,7 +362,11 @@ pub unsafe extern "C" fn drv_ltr553_read(data: *mut Ltr553Data) -> i32 {
     }
 
     let mut als_buf = [0u8; 4];
-    let ret = ltr553_read_regs(LTR553_REG_ALS_DATA_CH1_L, als_buf.as_mut_ptr(), als_buf.len());
+    let ret = ltr553_read_regs(
+        LTR553_REG_ALS_DATA_CH1_L,
+        als_buf.as_mut_ptr(),
+        als_buf.len(),
+    );
     if ret != ESP_OK {
         return ret;
     }
@@ -477,7 +484,10 @@ mod tests {
     fn test_read_before_init_returns_invalid_state() {
         unsafe {
             reset_state();
-            let mut data = Ltr553Data { als_lux: 0, ps_proximity: 0 };
+            let mut data = Ltr553Data {
+                als_lux: 0,
+                ps_proximity: 0,
+            };
             assert_eq!(drv_ltr553_read(&mut data), ESP_ERR_INVALID_STATE);
         }
     }
@@ -501,7 +511,10 @@ mod tests {
             };
             assert_eq!(drv_ltr553_init(&cfg), ESP_OK);
 
-            let mut data = Ltr553Data { als_lux: 0, ps_proximity: 0 };
+            let mut data = Ltr553Data {
+                als_lux: 0,
+                ps_proximity: 0,
+            };
             assert_eq!(drv_ltr553_read(&mut data), ESP_OK);
             assert_eq!(data.als_lux, 74);
             assert_eq!(data.ps_proximity, 564);
@@ -510,7 +523,10 @@ mod tests {
 
     #[test]
     fn test_ltr553_data_fields_accessible() {
-        let d = Ltr553Data { als_lux: 100, ps_proximity: 2047 };
+        let d = Ltr553Data {
+            als_lux: 100,
+            ps_proximity: 2047,
+        };
         assert_eq!(d.als_lux, 100);
         assert_eq!(d.ps_proximity, 2047);
     }

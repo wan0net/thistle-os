@@ -142,6 +142,8 @@ set(SIM_SRCS
     # sim_wifi.c and sim_ble.c removed — Rust kernel provides wifi_manager + ble_manager
     board_simulator.c
     sim_assert.c
+    sim_app_loader.c
+    sim_host_app_api.c
 )
 
 add_executable(thistle_sim ${SIM_SRCS} ${THISTLE_SIM_SRCS} ${LVGL_SRCS})
@@ -162,6 +164,7 @@ target_include_directories(thistle_sim PRIVATE
     ${THISTLE_DIR}/components/kernel/include
     ${THISTLE_DIR}/components/ui/include
     ${THISTLE_DIR}/components/apps_builtin
+    ${THISTLE_DIR}/app_sdk/include
     # SDL2
     ${SDL2_INCLUDE_DIRS}
 )
@@ -208,12 +211,19 @@ else()
     set(RUST_HOST_TARGET "${HOST_ARCH}-unknown-linux-gnu")
 endif()
 set(RUST_HOST_LIB "${KERNEL_RS_DIR}/target/${RUST_HOST_TARGET}/release/libthistle_kernel.a")
+file(GLOB_RECURSE KERNEL_RS_SOURCES CONFIGURE_DEPENDS
+    "${KERNEL_RS_DIR}/src/*.rs"
+)
 
 add_custom_command(
     OUTPUT ${RUST_HOST_LIB}
     COMMAND ${CMAKE_COMMAND} -E env "PATH=$ENV{HOME}/.cargo/bin:$ENV{PATH}"
         cargo build --release --target ${RUST_HOST_TARGET} --features sim-bus
     WORKING_DIRECTORY ${KERNEL_RS_DIR}
+    DEPENDS
+        ${KERNEL_RS_SOURCES}
+        "${KERNEL_RS_DIR}/Cargo.toml"
+        "${KERNEL_RS_DIR}/Cargo.lock"
     COMMENT "Building Rust kernel for simulator (${RUST_HOST_TARGET})"
     VERBATIM
 )

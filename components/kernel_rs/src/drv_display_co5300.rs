@@ -218,7 +218,9 @@ mod platform {
         pub flags: u32,
     }
 
-    pub unsafe fn spi_bus_initialize(_host: i32, _cfg: *const SpiBusConfig, _dma_chan: i32) -> i32 { 0 }
+    pub unsafe fn spi_bus_initialize(_host: i32, _cfg: *const SpiBusConfig, _dma_chan: i32) -> i32 {
+        0
+    }
     pub unsafe fn esp_lcd_new_panel_io_spi(
         _bus: *mut c_void,
         _cfg: *const PanelIoSpiConfig,
@@ -227,21 +229,31 @@ mod platform {
         *out_io = 1usize as *mut c_void;
         0
     }
-    pub unsafe fn esp_lcd_panel_io_del(_io: *mut c_void) -> i32 { 0 }
+    pub unsafe fn esp_lcd_panel_io_del(_io: *mut c_void) -> i32 {
+        0
+    }
     pub unsafe fn esp_lcd_panel_io_tx_param(
         _io: *mut c_void,
         _lcd_cmd: i32,
         _param: *const c_void,
         _param_size: usize,
-    ) -> i32 { 0 }
+    ) -> i32 {
+        0
+    }
     pub unsafe fn esp_lcd_panel_io_tx_color(
         _io: *mut c_void,
         _lcd_cmd: i32,
         _color: *const c_void,
         _color_size: usize,
-    ) -> i32 { 0 }
-    pub unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 { 0 }
-    pub unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 { 0 }
+    ) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 {
+        0
+    }
+    pub unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 {
+        0
+    }
     pub unsafe fn vTaskDelay(_ticks: u32) {}
 }
 
@@ -267,12 +279,7 @@ unsafe fn tx_u8(cmd: u8, val: u8) -> i32 {
 }
 
 unsafe fn tx_u16_pair(cmd: u8, start: u16, end: u16) -> i32 {
-    let data = [
-        (start >> 8) as u8,
-        start as u8,
-        (end >> 8) as u8,
-        end as u8,
-    ];
+    let data = [(start >> 8) as u8, start as u8, (end >> 8) as u8, end as u8];
     platform::esp_lcd_panel_io_tx_param(
         state().io,
         cmd as i32,
@@ -311,10 +318,14 @@ unsafe fn hw_reset_or_sw_reset() -> i32 {
 
 unsafe fn co5300_init_sequence() -> i32 {
     let mut ret = hw_reset_or_sw_reset();
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     ret = tx_cmd(CO5300_SLPOUT);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
     delay_ms(120);
 
     for (cmd, val) in [
@@ -328,13 +339,19 @@ unsafe fn co5300_init_sequence() -> i32 {
         (CO5300_CE, 0x00),
     ] {
         ret = tx_u8(cmd, val);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
     }
 
     ret = tx_cmd(CO5300_DISPON);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
     ret = tx_cmd(CO5300_INVOFF);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
     delay_ms(10);
     ESP_OK
 }
@@ -349,9 +366,15 @@ unsafe extern "C" fn co5300_init(config: *const c_void) -> i32 {
     }
 
     s.cfg = *(config as *const DisplayCo5300Config);
-    if s.cfg.width == 0 { s.cfg.width = DEFAULT_WIDTH; }
-    if s.cfg.height == 0 { s.cfg.height = DEFAULT_HEIGHT; }
-    if s.cfg.spi_clock_hz <= 0 { s.cfg.spi_clock_hz = DEFAULT_SPI_CLOCK_HZ; }
+    if s.cfg.width == 0 {
+        s.cfg.width = DEFAULT_WIDTH;
+    }
+    if s.cfg.height == 0 {
+        s.cfg.height = DEFAULT_HEIGHT;
+    }
+    if s.cfg.spi_clock_hz <= 0 {
+        s.cfg.spi_clock_hz = DEFAULT_SPI_CLOCK_HZ;
+    }
 
     if s.cfg.pin_power != GPIO_NUM_NC {
         let gpio = platform::GpioConfig {
@@ -362,7 +385,9 @@ unsafe extern "C" fn co5300_init(config: *const c_void) -> i32 {
             intr_type: 0,
         };
         let ret = platform::gpio_config(&gpio);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         platform::gpio_set_level(s.cfg.pin_power, 1);
         delay_ms(20);
     }
@@ -446,9 +471,13 @@ unsafe extern "C" fn co5300_flush(area: *const HalArea, color_data: *const u8) -
     let y2 = a.y2.saturating_add(cfg.y_offset);
 
     let mut ret = tx_u16_pair(CO5300_CASET, x1, x2);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
     ret = tx_u16_pair(CO5300_PASET, y1, y2);
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     let pixels = ((a.x2 - a.x1 + 1) as usize) * ((a.y2 - a.y1 + 1) as usize);
     platform::esp_lcd_panel_io_tx_color(
@@ -460,7 +489,11 @@ unsafe extern "C" fn co5300_flush(area: *const HalArea, color_data: *const u8) -
 }
 
 unsafe extern "C" fn co5300_refresh() -> i32 {
-    if state().initialized { ESP_OK } else { ESP_ERR_INVALID_STATE }
+    if state().initialized {
+        ESP_OK
+    } else {
+        ESP_ERR_INVALID_STATE
+    }
 }
 
 unsafe extern "C" fn co5300_set_brightness(percent: u8) -> i32 {
@@ -478,12 +511,16 @@ unsafe extern "C" fn co5300_sleep(enter: bool) -> i32 {
     }
     let ret = if enter {
         let r = tx_cmd(CO5300_DISPOFF);
-        if r != ESP_OK { return r; }
+        if r != ESP_OK {
+            return r;
+        }
         tx_cmd(CO5300_SLPIN)
     } else {
         let r = tx_cmd(CO5300_SLPOUT);
         delay_ms(120);
-        if r != ESP_OK { return r; }
+        if r != ESP_OK {
+            return r;
+        }
         tx_cmd(CO5300_DISPON)
     };
     delay_ms(120);
@@ -491,7 +528,11 @@ unsafe extern "C" fn co5300_sleep(enter: bool) -> i32 {
 }
 
 unsafe extern "C" fn co5300_set_refresh_mode(_mode: HalDisplayRefreshMode) -> i32 {
-    if state().initialized { ESP_OK } else { ESP_FAIL }
+    if state().initialized {
+        ESP_OK
+    } else {
+        ESP_FAIL
+    }
 }
 
 static CO5300_DRIVER: HalDisplayDriver = HalDisplayDriver {

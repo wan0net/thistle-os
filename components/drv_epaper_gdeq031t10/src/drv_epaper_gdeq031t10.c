@@ -289,19 +289,11 @@ static esp_err_t gdeq031t10_flush(const hal_area_t *area, const uint8_t *color_d
     if (y2 >= EPD_HEIGHT) y2 = EPD_HEIGHT - 1;
     if (x1 > x2 || y1 > y2) return ESP_ERR_INVALID_ARG;
 
-    /* Fast path: full-width row-aligned blit. WM almost always sends the
-     * whole screen with x1=0, x2=239 — direct memcpy is ~50× faster than
-     * the per-pixel path. */
-    if (x1 == 0 && x2 == EPD_WIDTH - 1) {
-        size_t row_bytes = EPD_WIDTH / 8;
-        memcpy(s_epd.fb + (size_t)y1 * row_bytes,
-               color_data,
-               (size_t)(y2 - y1 + 1) * row_bytes);
-        return ESP_OK;
-    }
-
-    /* Slow path: arbitrary rectangle, bit-by-bit. */
-    epaper_blit_packed_rect(s_epd.fb, EPD_WIDTH, x1, y1, x2, y2, color_data);
+    /* The panel's row scan is vertically reversed, but its columns are not.
+     * Flip rows here so the WM and input stack retain ordinary portrait
+     * coordinates without horizontally mirroring text. */
+    epaper_blit_packed_rect_flip_y(s_epd.fb, EPD_WIDTH, EPD_HEIGHT,
+                                  x1, y1, x2, y2, color_data);
     return ESP_OK;
 }
 
@@ -329,10 +321,12 @@ static esp_err_t gdeq031t10_refresh(void)
         if (ret != ESP_OK) return ret;
     }
 
-    /* Send previous frame via 0x10 (used by partial/fast diff) */
+    /* Full refreshes load the new image into both controller planes, matching
+     * GxEPD2 writeImageForFullRefresh(). Fast differential refreshes use the
+     * actual previous frame in DTM1. */
     ret  = epaper_send_cmd(CMD_DTM1);
     if (ret != ESP_OK) return ret;
-    ret = epaper_send_data(s_epd.fb_old, EPD_FB_BYTES);
+    ret = epaper_send_data(fast ? s_epd.fb_old : s_epd.fb, EPD_FB_BYTES);
     if (ret != ESP_OK) return ret;
 
     /* Send current frame via 0x13 */

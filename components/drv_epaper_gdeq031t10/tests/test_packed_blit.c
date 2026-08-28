@@ -34,5 +34,20 @@ int main(void)
     epaper_blit_packed_rect(framebuffer, WIDTH, 0, 7, WIDTH - 1, 8, full_width);
     assert(memcmp(framebuffer + 7 * ROW_BYTES, full_width, sizeof(full_width)) == 0);
 
+    memset(framebuffer, 0, sizeof(framebuffer));
+    const uint8_t asymmetric[] = {0xA0}; /* logical pixels 101 at x=0..2 */
+    epaper_blit_packed_rect_flip_y(framebuffer, WIDTH, HEIGHT,
+                                  0, 0, 2, 0, asymmetric);
+    /* Columns remain left-to-right while logical row 0 maps to the last row. */
+    assert(framebuffer[(HEIGHT - 1) * ROW_BYTES] == 0xA0);
+
+    memset(framebuffer, 0, sizeof(framebuffer));
+    epaper_blit_packed_rect_flip_y(framebuffer, WIDTH, HEIGHT,
+                                  0, 7, WIDTH - 1, 8, full_width);
+    for (size_t i = 0; i < ROW_BYTES; i++) {
+        assert(framebuffer[2 * ROW_BYTES + i] == 0xA5);
+        assert(framebuffer[1 * ROW_BYTES + i] == 0x5A);
+    }
+
     return 0;
 }

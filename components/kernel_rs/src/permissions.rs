@@ -12,26 +12,26 @@ use std::sync::Mutex;
 // Permission flags — must match the C constants in permissions.h
 // ---------------------------------------------------------------------------
 
-pub const PERM_RADIO:   u32 = 1 << 0; // 0x01
-pub const PERM_GPS:     u32 = 1 << 1; // 0x02
+pub const PERM_RADIO: u32 = 1 << 0; // 0x01
+pub const PERM_GPS: u32 = 1 << 1; // 0x02
 pub const PERM_STORAGE: u32 = 1 << 2; // 0x04
 pub const PERM_NETWORK: u32 = 1 << 3; // 0x08
-pub const PERM_AUDIO:   u32 = 1 << 4; // 0x10
-pub const PERM_SYSTEM:  u32 = 1 << 5; // 0x20
-pub const PERM_IPC:     u32 = 1 << 6; // 0x40
-pub const PERM_ALL:     u32 = 0x7F;
+pub const PERM_AUDIO: u32 = 1 << 4; // 0x10
+pub const PERM_SYSTEM: u32 = 1 << 5; // 0x20
+pub const PERM_IPC: u32 = 1 << 6; // 0x40
+pub const PERM_ALL: u32 = 0x7F;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes
 // ---------------------------------------------------------------------------
 
-const ESP_OK:                i32 = 0x000;
-const ESP_ERR_NO_MEM:        i32 = 0x101;
-const ESP_ERR_INVALID_ARG:   i32 = 0x102;
-const ESP_ERR_NOT_FOUND:     i32 = 0x105;
+const ESP_OK: i32 = 0x000;
+const ESP_ERR_NO_MEM: i32 = 0x101;
+const ESP_ERR_INVALID_ARG: i32 = 0x102;
+const ESP_ERR_NOT_FOUND: i32 = 0x105;
 /// ESP_ERR_NOT_ALLOWED = ESP_ERR_INVALID_STATE (0x103) + 0x100
 #[allow(dead_code)]
-const ESP_ERR_NOT_ALLOWED:   i32 = 0x203;
+const ESP_ERR_NOT_ALLOWED: i32 = 0x203;
 
 // ---------------------------------------------------------------------------
 // Slot table
@@ -151,15 +151,13 @@ pub fn revoke(app_id: &str, perms: u32) -> i32 {
     }
     match PERM_TABLE.lock() {
         Err(_) => ESP_ERR_INVALID_ARG,
-        Ok(mut table) => {
-            match table.iter_mut().find(|s| s.matches(app_id)) {
-                Some(slot) => {
-                    slot.perms &= !perms;
-                    ESP_OK
-                }
-                None => ESP_ERR_NOT_FOUND,
+        Ok(mut table) => match table.iter_mut().find(|s| s.matches(app_id)) {
+            Some(slot) => {
+                slot.perms &= !perms;
+                ESP_OK
             }
-        }
+            None => ESP_ERR_NOT_FOUND,
+        },
     }
 }
 
@@ -170,13 +168,11 @@ pub fn check(app_id: &str, perm: u32) -> bool {
     }
     match PERM_TABLE.lock() {
         Err(_) => false,
-        Ok(table) => {
-            table
-                .iter()
-                .find(|s| s.matches(app_id))
-                .map(|s| s.perms & perm == perm)
-                .unwrap_or(false)
-        }
+        Ok(table) => table
+            .iter()
+            .find(|s| s.matches(app_id))
+            .map(|s| s.perms & perm == perm)
+            .unwrap_or(false),
     }
 }
 
@@ -187,13 +183,11 @@ pub fn get(app_id: &str) -> u32 {
     }
     match PERM_TABLE.lock() {
         Err(_) => 0,
-        Ok(table) => {
-            table
-                .iter()
-                .find(|s| s.matches(app_id))
-                .map(|s| s.perms)
-                .unwrap_or(0)
-        }
+        Ok(table) => table
+            .iter()
+            .find(|s| s.matches(app_id))
+            .map(|s| s.perms)
+            .unwrap_or(0),
     }
 }
 
@@ -206,15 +200,15 @@ pub fn parse(name: &str) -> u32 {
         .map(|tok| tok.trim())
         .fold(0u32, |acc, tok| {
             acc | match tok.to_ascii_lowercase().as_str() {
-                "radio"   => PERM_RADIO,
-                "gps"     => PERM_GPS,
+                "radio" => PERM_RADIO,
+                "gps" => PERM_GPS,
                 "storage" => PERM_STORAGE,
                 "network" => PERM_NETWORK,
-                "audio"   => PERM_AUDIO,
-                "system"  => PERM_SYSTEM,
-                "ipc"     => PERM_IPC,
-                "all"     => PERM_ALL,
-                _         => 0,
+                "audio" => PERM_AUDIO,
+                "system" => PERM_SYSTEM,
+                "ipc" => PERM_IPC,
+                "all" => PERM_ALL,
+                _ => 0,
             }
         })
 }
@@ -225,13 +219,13 @@ pub fn parse(name: &str) -> u32 {
 /// Example: `PERM_RADIO | PERM_GPS` → `"radio,gps"`.
 pub fn to_string(perms: u32) -> String {
     let flags: &[(&str, u32)] = &[
-        ("radio",   PERM_RADIO),
-        ("gps",     PERM_GPS),
+        ("radio", PERM_RADIO),
+        ("gps", PERM_GPS),
         ("storage", PERM_STORAGE),
         ("network", PERM_NETWORK),
-        ("audio",   PERM_AUDIO),
-        ("system",  PERM_SYSTEM),
-        ("ipc",     PERM_IPC),
+        ("audio", PERM_AUDIO),
+        ("system", PERM_SYSTEM),
+        ("ipc", PERM_IPC),
     ];
     flags
         .iter()
@@ -259,10 +253,7 @@ pub extern "C" fn permissions_init() -> i32 {
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn permissions_grant(
-    app_id: *const c_char,
-    perms: u32,
-) -> i32 {
+pub unsafe extern "C" fn permissions_grant(app_id: *const c_char, perms: u32) -> i32 {
     if app_id.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -277,10 +268,7 @@ pub unsafe extern "C" fn permissions_grant(
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn permissions_revoke(
-    app_id: *const c_char,
-    perms: u32,
-) -> i32 {
+pub unsafe extern "C" fn permissions_revoke(app_id: *const c_char, perms: u32) -> i32 {
     if app_id.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -297,10 +285,7 @@ pub unsafe extern "C" fn permissions_revoke(
 /// # Safety
 /// `app_id` must be a valid, null-terminated C string. May not be NULL.
 #[no_mangle]
-pub unsafe extern "C" fn permissions_check(
-    app_id: *const c_char,
-    perm: u32,
-) -> i32 {
+pub unsafe extern "C" fn permissions_check(app_id: *const c_char, perm: u32) -> i32 {
     if app_id.is_null() {
         return 0;
     }
@@ -339,14 +324,14 @@ pub unsafe extern "C" fn permissions_parse(name: *const c_char) -> u32 {
     }
     match CStr::from_ptr(name).to_str() {
         Ok(s) => match s.to_ascii_lowercase().as_str() {
-            "radio"   => PERM_RADIO,
-            "gps"     => PERM_GPS,
+            "radio" => PERM_RADIO,
+            "gps" => PERM_GPS,
             "storage" => PERM_STORAGE,
             "network" => PERM_NETWORK,
-            "audio"   => PERM_AUDIO,
-            "system"  => PERM_SYSTEM,
-            "ipc"     => PERM_IPC,
-            _         => 0,
+            "audio" => PERM_AUDIO,
+            "system" => PERM_SYSTEM,
+            "ipc" => PERM_IPC,
+            _ => 0,
         },
         Err(_) => 0,
     }
@@ -394,32 +379,44 @@ mod tests {
     fn test_grant_and_check() {
         reset();
         assert_eq!(grant("app.radio_gps", PERM_RADIO | PERM_GPS), ESP_OK);
-        assert!(check("app.radio_gps", PERM_RADIO), "RADIO should be granted");
-        assert!(check("app.radio_gps", PERM_GPS),   "GPS should be granted");
-        assert!(!check("app.radio_gps", PERM_AUDIO), "AUDIO should NOT be granted");
+        assert!(
+            check("app.radio_gps", PERM_RADIO),
+            "RADIO should be granted"
+        );
+        assert!(check("app.radio_gps", PERM_GPS), "GPS should be granted");
+        assert!(
+            !check("app.radio_gps", PERM_AUDIO),
+            "AUDIO should NOT be granted"
+        );
     }
 
     #[test]
     fn test_revoke() {
         reset();
         assert_eq!(grant("app.revoke", PERM_ALL), ESP_OK);
-        assert!(check("app.revoke", PERM_RADIO), "RADIO should be granted before revoke");
+        assert!(
+            check("app.revoke", PERM_RADIO),
+            "RADIO should be granted before revoke"
+        );
         assert_eq!(revoke("app.revoke", PERM_RADIO), ESP_OK);
         assert!(!check("app.revoke", PERM_RADIO), "RADIO should be revoked");
         // Other permissions must remain intact.
-        assert!(check("app.revoke", PERM_GPS),    "GPS should still be granted");
-        assert!(check("app.revoke", PERM_STORAGE), "STORAGE should still be granted");
+        assert!(check("app.revoke", PERM_GPS), "GPS should still be granted");
+        assert!(
+            check("app.revoke", PERM_STORAGE),
+            "STORAGE should still be granted"
+        );
     }
 
     #[test]
     fn test_parse() {
-        assert_eq!(parse("radio"),   PERM_RADIO);
-        assert_eq!(parse("gps"),     PERM_GPS);
+        assert_eq!(parse("radio"), PERM_RADIO);
+        assert_eq!(parse("gps"), PERM_GPS);
         assert_eq!(parse("unknown"), 0);
         assert_eq!(parse("radio,gps"), PERM_RADIO | PERM_GPS);
         // Case-insensitive
         assert_eq!(parse("RADIO"), PERM_RADIO);
-        assert_eq!(parse("all"),   PERM_ALL);
+        assert_eq!(parse("all"), PERM_ALL);
     }
 
     #[test]
@@ -445,14 +442,16 @@ mod tests {
             let result = grant(&id, PERM_RADIO);
             assert_eq!(
                 result, ESP_OK,
-                "slot {} should succeed (result=0x{:x})", i, result
+                "slot {} should succeed (result=0x{:x})",
+                i, result
             );
         }
         // The 17th app must be rejected.
         let result = grant("app.overflow", PERM_RADIO);
         assert_eq!(
             result, ESP_ERR_NO_MEM,
-            "17th app should fail with ESP_ERR_NO_MEM (got 0x{:x})", result
+            "17th app should fail with ESP_ERR_NO_MEM (got 0x{:x})",
+            result
         );
         // Granting to an existing app must still work (no new slot needed).
         assert_eq!(grant("app.slot0", PERM_GPS), ESP_OK);
@@ -477,7 +476,7 @@ mod tests {
     fn test_grant_accumulates() {
         reset();
         assert_eq!(grant("app.accum", PERM_RADIO), ESP_OK);
-        assert_eq!(grant("app.accum", PERM_GPS),   ESP_OK);
+        assert_eq!(grant("app.accum", PERM_GPS), ESP_OK);
         assert_eq!(get("app.accum"), PERM_RADIO | PERM_GPS);
     }
 
@@ -519,9 +518,16 @@ mod tests {
     #[test]
     fn test_get_bitmask() {
         reset();
-        assert_eq!(grant("app.getbm", PERM_RADIO | PERM_STORAGE | PERM_IPC), ESP_OK);
+        assert_eq!(
+            grant("app.getbm", PERM_RADIO | PERM_STORAGE | PERM_IPC),
+            ESP_OK
+        );
         let mask = get("app.getbm");
-        assert_eq!(mask, PERM_RADIO | PERM_STORAGE | PERM_IPC, "get() must return exact granted bitmask");
+        assert_eq!(
+            mask,
+            PERM_RADIO | PERM_STORAGE | PERM_IPC,
+            "get() must return exact granted bitmask"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -532,11 +538,11 @@ mod tests {
     #[test]
     fn test_to_string_contains_expected_names() {
         let s = to_string(PERM_RADIO | PERM_AUDIO | PERM_SYSTEM);
-        assert!(s.contains("radio"),  "to_string must include 'radio'");
-        assert!(s.contains("audio"),  "to_string must include 'audio'");
+        assert!(s.contains("radio"), "to_string must include 'radio'");
+        assert!(s.contains("audio"), "to_string must include 'audio'");
         assert!(s.contains("system"), "to_string must include 'system'");
-        assert!(!s.contains("gps"),   "to_string must NOT include 'gps'");
-        assert!(!s.contains("ipc"),   "to_string must NOT include 'ipc'");
+        assert!(!s.contains("gps"), "to_string must NOT include 'gps'");
+        assert!(!s.contains("ipc"), "to_string must NOT include 'ipc'");
     }
 
     // -----------------------------------------------------------------------
@@ -547,7 +553,11 @@ mod tests {
     #[test]
     fn test_get_unknown_app_returns_zero() {
         reset();
-        assert_eq!(get("app.nonexistent"), 0, "get() on unknown app must return 0");
+        assert_eq!(
+            get("app.nonexistent"),
+            0,
+            "get() on unknown app must return 0"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -559,7 +569,10 @@ mod tests {
     fn test_check_after_reinit() {
         reset();
         assert_eq!(grant("app.reinit", PERM_ALL), ESP_OK);
-        assert!(check("app.reinit", PERM_RADIO), "RADIO should be granted before reinit");
+        assert!(
+            check("app.reinit", PERM_RADIO),
+            "RADIO should be granted before reinit"
+        );
 
         // Reinitialise — clears all slots
         assert_eq!(init(), ESP_OK);

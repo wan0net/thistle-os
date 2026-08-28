@@ -39,11 +39,11 @@ pub const APP_HANDLE_INVALID: i32 = -1;
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
-    Unloaded    = 0,
-    Loading     = 1,
-    Running     = 2,
+    Unloaded = 0,
+    Loading = 1,
+    Running = 2,
     Backgrounded = 3,
-    Suspended   = 4,
+    Suspended = 4,
 }
 
 impl AppState {
@@ -94,9 +94,9 @@ extern "C" {
 #[repr(C)]
 struct CEvent {
     event_type: u32,
-    timestamp:  u32,
-    data:       *const c_void,
-    data_len:   usize,
+    timestamp: u32,
+    data: *const c_void,
+    data_len: usize,
 }
 
 // SAFETY: CEvent is a plain-data carrier. The `data` pointer is managed by
@@ -111,11 +111,11 @@ unsafe impl Sync for CEvent {}
 /// Mirrors C `app_manifest_t`. Owned by the C side (static storage).
 #[repr(C)]
 pub struct CAppManifest {
-    pub id:               *const c_char,
-    pub name:             *const c_char,
-    pub version:          *const c_char,
+    pub id: *const c_char,
+    pub name: *const c_char,
+    pub version: *const c_char,
     pub allow_background: bool,
-    pub min_memory_kb:    u32,
+    pub min_memory_kb: u32,
 }
 
 // SAFETY: Pointers are into C static storage; the C side guarantees their
@@ -126,12 +126,12 @@ unsafe impl Sync for CAppManifest {}
 /// Mirrors C `app_entry_t`. Owned by the C side (static storage).
 #[repr(C)]
 pub struct CAppEntry {
-    pub on_create:  Option<unsafe extern "C" fn() -> i32>,
-    pub on_start:   Option<unsafe extern "C" fn()>,
-    pub on_pause:   Option<unsafe extern "C" fn()>,
-    pub on_resume:  Option<unsafe extern "C" fn()>,
+    pub on_create: Option<unsafe extern "C" fn() -> i32>,
+    pub on_start: Option<unsafe extern "C" fn()>,
+    pub on_pause: Option<unsafe extern "C" fn()>,
+    pub on_resume: Option<unsafe extern "C" fn()>,
     pub on_destroy: Option<unsafe extern "C" fn()>,
-    pub manifest:   *const CAppManifest,
+    pub manifest: *const CAppManifest,
 }
 
 // SAFETY: Same rationale as CAppManifest — all pointers come from C static
@@ -145,18 +145,18 @@ unsafe impl Sync for CAppEntry {}
 
 struct AppSlot {
     /// Null pointer means this slot is empty.
-    entry:        *const CAppEntry,
-    state:        u32,
-    handle:       i32,
+    entry: *const CAppEntry,
+    state: u32,
+    handle: i32,
     last_used_ms: u32,
 }
 
 impl AppSlot {
     const fn empty() -> Self {
         Self {
-            entry:        std::ptr::null(),
-            state:        AppState::Unloaded as u32,
-            handle:       APP_HANDLE_INVALID,
+            entry: std::ptr::null(),
+            state: AppState::Unloaded as u32,
+            handle: APP_HANDLE_INVALID,
             last_used_ms: 0,
         }
     }
@@ -198,14 +198,18 @@ unsafe fn slot_app_id(slot: &AppSlot) -> &str {
     CStr::from_ptr(manifest.id).to_str().unwrap_or("")
 }
 
+fn is_launcher_id(app_id: &str) -> bool {
+    matches!(app_id, "com.thistle.launcher" | "com.thistle.tk_launcher")
+}
+
 // ---------------------------------------------------------------------------
 // AppManager
 // ---------------------------------------------------------------------------
 
 struct AppManager {
-    slots:       [AppSlot; APP_SLOTS_MAX],
-    slot_count:  usize,
-    foreground:  i32, // handle of the currently-foregrounded app, or -1
+    slots: [AppSlot; APP_SLOTS_MAX],
+    slot_count: usize,
+    foreground: i32, // handle of the currently-foregrounded app, or -1
     next_handle: i32,
     initialized: bool,
 }
@@ -217,14 +221,29 @@ impl AppManager {
         // array; APP_SLOTS_MAX = 20 so this is fully unrolled at compile time.
         Self {
             slots: [
-                AppSlot::empty(), AppSlot::empty(), AppSlot::empty(), AppSlot::empty(),
-                AppSlot::empty(), AppSlot::empty(), AppSlot::empty(), AppSlot::empty(),
-                AppSlot::empty(), AppSlot::empty(), AppSlot::empty(), AppSlot::empty(),
-                AppSlot::empty(), AppSlot::empty(), AppSlot::empty(), AppSlot::empty(),
-                AppSlot::empty(), AppSlot::empty(), AppSlot::empty(), AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
+                AppSlot::empty(),
             ],
-            slot_count:  0,
-            foreground:  APP_HANDLE_INVALID,
+            slot_count: 0,
+            foreground: APP_HANDLE_INVALID,
             next_handle: 0,
             initialized: false,
         }
@@ -289,7 +308,7 @@ impl AppManager {
 
         self.slots[self.slot_count] = AppSlot {
             entry,
-            state:        AppState::Unloaded as u32,
+            state: AppState::Unloaded as u32,
             handle,
             last_used_ms: 0,
         };
@@ -354,7 +373,7 @@ impl AppManager {
             }
             // Skip launcher.
             let id = unsafe { slot_app_id(slot) };
-            if id == "launcher" {
+            if is_launcher_id(id) {
                 continue;
             }
             // Only evict apps that are not running (backgrounded or suspended).
@@ -370,7 +389,7 @@ impl AppManager {
 
         let idx = match oldest_idx {
             Some(i) => i,
-            None    => return APP_HANDLE_INVALID,
+            None => return APP_HANDLE_INVALID,
         };
 
         // Call on_destroy if available.
@@ -410,7 +429,7 @@ impl AppManager {
     fn launch(&mut self, app_id: &str) -> i32 {
         let target_idx = match self.find_slot_by_id(app_id) {
             Some(i) => i,
-            None    => return ESP_ERR_NOT_FOUND,
+            None => return ESP_ERR_NOT_FOUND,
         };
 
         let target_handle = self.slots[target_idx].handle;
@@ -425,7 +444,7 @@ impl AppManager {
         let prev_handle = self.foreground;
         if let Some(fg_idx) = self.find_slot_by_handle(self.foreground) {
             if AppState::from_u32(self.slots[fg_idx].state) == AppState::Running {
-                let is_launcher = unsafe { slot_app_id(&self.slots[fg_idx]) } == "com.thistle.launcher";
+                let is_launcher = unsafe { is_launcher_id(slot_app_id(&self.slots[fg_idx])) };
 
                 if is_launcher {
                     // Just pause the launcher — don't destroy it.
@@ -479,7 +498,7 @@ impl AppManager {
                         let entry = &*entry_ptr;
                         match entry.on_create {
                             Some(on_create) => on_create(),
-                            None            => ESP_OK,
+                            None => ESP_OK,
                         }
                     };
                     if rc != ESP_OK {
@@ -553,11 +572,11 @@ impl AppManager {
         let app_id_owned: CString = {
             let idx = match self.find_slot_by_handle(handle) {
                 Some(i) => i,
-                None    => return ESP_ERR_NOT_FOUND,
+                None => return ESP_ERR_NOT_FOUND,
             };
             let raw = unsafe { slot_app_id(&self.slots[idx]) };
             match CString::new(raw) {
-                Ok(s)  => s,
+                Ok(s) => s,
                 Err(_) => return ESP_ERR_INVALID_ARG,
             }
         };
@@ -579,7 +598,7 @@ impl AppManager {
     fn get_state(&self, handle: i32) -> u32 {
         match self.find_slot_by_handle(handle) {
             Some(i) => self.slots[i].state,
-            None    => AppState::Unloaded as u32,
+            None => AppState::Unloaded as u32,
         }
     }
 
@@ -590,7 +609,7 @@ impl AppManager {
     fn suspend(&mut self, handle: i32) -> i32 {
         let idx = match self.find_slot_by_handle(handle) {
             Some(i) => i,
-            None    => return ESP_ERR_NOT_FOUND,
+            None => return ESP_ERR_NOT_FOUND,
         };
 
         let state = AppState::from_u32(self.slots[idx].state);
@@ -624,7 +643,7 @@ impl AppManager {
     fn kill(&mut self, handle: i32) -> i32 {
         let idx = match self.find_slot_by_handle(handle) {
             Some(i) => i,
-            None    => return ESP_ERR_NOT_FOUND,
+            None => return ESP_ERR_NOT_FOUND,
         };
 
         let state = AppState::from_u32(self.slots[idx].state);
@@ -702,7 +721,7 @@ impl AppManager {
             timestamp: unsafe { kernel_uptime_ms() },
             #[cfg(test)]
             timestamp: 0,
-            data:     handle_val as *const c_void,
+            data: handle_val as *const c_void,
             data_len: std::mem::size_of::<i32>(),
         };
         // SAFETY: `ev` is stack-allocated and fully initialised. The C event
@@ -736,7 +755,7 @@ static REGISTERED_MANIFESTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 pub fn init() -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.init(),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
 
@@ -748,7 +767,7 @@ pub fn init() -> i32 {
 pub unsafe fn register(entry: *const CAppEntry) -> i32 {
     let rc = match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.register(entry),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     };
     if rc == ESP_OK && !entry.is_null() {
         let manifest = (*entry).manifest;
@@ -768,7 +787,7 @@ pub unsafe fn register(entry: *const CAppEntry) -> i32 {
 pub fn launch(app_id: &str) -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.launch(app_id),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
 
@@ -776,7 +795,7 @@ pub fn launch(app_id: &str) -> i32 {
 pub fn switch_to(handle: i32) -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.switch_to(handle),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
 
@@ -784,7 +803,7 @@ pub fn switch_to(handle: i32) -> i32 {
 pub fn get_foreground() -> i32 {
     match APP_MANAGER.lock() {
         Ok(mgr) => mgr.get_foreground(),
-        Err(_)  => APP_HANDLE_INVALID,
+        Err(_) => APP_HANDLE_INVALID,
     }
 }
 
@@ -794,7 +813,7 @@ pub fn get_foreground() -> i32 {
 pub fn get_state(handle: i32) -> u32 {
     match APP_MANAGER.lock() {
         Ok(mgr) => mgr.get_state(handle),
-        Err(_)  => AppState::Unloaded as u32,
+        Err(_) => AppState::Unloaded as u32,
     }
 }
 
@@ -802,7 +821,7 @@ pub fn get_state(handle: i32) -> u32 {
 pub fn suspend(handle: i32) -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.suspend(handle),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
 
@@ -810,7 +829,7 @@ pub fn suspend(handle: i32) -> i32 {
 pub fn kill(handle: i32) -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.kill(handle),
-        Err(_)      => ESP_ERR_INVALID_STATE,
+        Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
 
@@ -818,7 +837,7 @@ pub fn kill(handle: i32) -> i32 {
 pub fn list_apps() -> Vec<*const CAppManifest> {
     match APP_MANAGER.lock() {
         Ok(mgr) => mgr.list_apps(),
-        Err(_)  => Vec::new(),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -827,7 +846,7 @@ pub fn list_apps() -> Vec<*const CAppManifest> {
 pub fn evict_lru() -> i32 {
     match APP_MANAGER.lock() {
         Ok(mut mgr) => mgr.evict_lru(),
-        Err(_)      => APP_HANDLE_INVALID,
+        Err(_) => APP_HANDLE_INVALID,
     }
 }
 
@@ -869,7 +888,7 @@ pub unsafe extern "C" fn app_manager_launch(app_id: *const c_char) -> i32 {
         return ESP_ERR_INVALID_ARG;
     }
     let id_str = match CStr::from_ptr(app_id).to_str() {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(_) => return ESP_ERR_INVALID_ARG,
     };
     launch(id_str)
@@ -983,20 +1002,20 @@ mod tests {
 
     fn make_test_manifest(id: &CStr) -> CAppManifest {
         CAppManifest {
-            id:               id.as_ptr(),
-            name:             id.as_ptr(),
-            version:          b"1.0.0\0".as_ptr() as *const c_char,
+            id: id.as_ptr(),
+            name: id.as_ptr(),
+            version: b"1.0.0\0".as_ptr() as *const c_char,
             allow_background: false,
-            min_memory_kb:    0,
+            min_memory_kb: 0,
         }
     }
 
     fn make_test_entry(manifest: *const CAppManifest) -> CAppEntry {
         CAppEntry {
-            on_create:  None,
-            on_start:   None,
-            on_pause:   None,
-            on_resume:  None,
+            on_create: None,
+            on_start: None,
+            on_pause: None,
+            on_resume: None,
             on_destroy: None,
             manifest,
         }
@@ -1040,7 +1059,10 @@ mod tests {
 
         // Verify slot count increased.
         let mgr = APP_MANAGER.lock().unwrap();
-        assert_eq!(mgr.slot_count, 1, "slot_count must be 1 after one registration");
+        assert_eq!(
+            mgr.slot_count, 1,
+            "slot_count must be 1 after one registration"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1107,7 +1129,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
-    static START_COUNT:  AtomicU32 = AtomicU32::new(0);
+    static START_COUNT: AtomicU32 = AtomicU32::new(0);
 
     unsafe extern "C" fn on_create_track() -> i32 {
         CREATE_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -1127,19 +1149,27 @@ mod tests {
         let id = std::ffi::CStr::from_bytes_with_nul(b"app.lifecycle\0").unwrap();
         let manifest = make_test_manifest(id);
         let entry = CAppEntry {
-            on_create:  Some(on_create_track),
-            on_start:   Some(on_start_track),
-            on_pause:   None,
-            on_resume:  None,
+            on_create: Some(on_create_track),
+            on_start: Some(on_start_track),
+            on_pause: None,
+            on_resume: None,
             on_destroy: None,
-            manifest:   &manifest as *const CAppManifest,
+            manifest: &manifest as *const CAppManifest,
         };
 
         unsafe { register(&entry as *const CAppEntry) };
         let rc = launch("app.lifecycle");
         assert_eq!(rc, ESP_OK, "launch must return ESP_OK");
-        assert_eq!(CREATE_COUNT.load(Ordering::SeqCst), 1, "on_create must be called once");
-        assert_eq!(START_COUNT.load(Ordering::SeqCst),  1, "on_start must be called once");
+        assert_eq!(
+            CREATE_COUNT.load(Ordering::SeqCst),
+            1,
+            "on_create must be called once"
+        );
+        assert_eq!(
+            START_COUNT.load(Ordering::SeqCst),
+            1,
+            "on_start must be called once"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1164,7 +1194,10 @@ mod tests {
         launch("app.fg_check");
 
         let fg = get_foreground();
-        assert_eq!(fg, handle, "get_foreground must return the handle of the launched app");
+        assert_eq!(
+            fg, handle,
+            "get_foreground must return the handle of the launched app"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1213,23 +1246,31 @@ mod tests {
         let id = std::ffi::CStr::from_bytes_with_nul(b"app.suspend\0").unwrap();
         let manifest = make_test_manifest(id);
         let entry = CAppEntry {
-            on_create:  None,
-            on_start:   None,
-            on_pause:   Some(on_pause_track),
-            on_resume:  None,
+            on_create: None,
+            on_start: None,
+            on_pause: Some(on_pause_track),
+            on_resume: None,
             on_destroy: None,
-            manifest:   &manifest as *const CAppManifest,
+            manifest: &manifest as *const CAppManifest,
         };
 
         unsafe { register(&entry as *const CAppEntry) };
         let handle = APP_MANAGER.lock().unwrap().slots[0].handle;
 
         launch("app.suspend");
-        assert_eq!(get_state(handle), AppState::Running as u32, "must be RUNNING before suspend");
+        assert_eq!(
+            get_state(handle),
+            AppState::Running as u32,
+            "must be RUNNING before suspend"
+        );
 
         let rc = suspend(handle);
         assert_eq!(rc, ESP_OK, "suspend must return ESP_OK");
-        assert_eq!(PAUSE_COUNT.load(Ordering::SeqCst), 1, "on_pause must be called once");
+        assert_eq!(
+            PAUSE_COUNT.load(Ordering::SeqCst),
+            1,
+            "on_pause must be called once"
+        );
         assert_eq!(
             get_state(handle),
             AppState::Suspended as u32,
@@ -1257,12 +1298,12 @@ mod tests {
         let id = std::ffi::CStr::from_bytes_with_nul(b"app.kill\0").unwrap();
         let manifest = make_test_manifest(id);
         let entry = CAppEntry {
-            on_create:  None,
-            on_start:   None,
-            on_pause:   None,
-            on_resume:  None,
+            on_create: None,
+            on_start: None,
+            on_pause: None,
+            on_resume: None,
             on_destroy: Some(on_destroy_track),
-            manifest:   &manifest as *const CAppManifest,
+            manifest: &manifest as *const CAppManifest,
         };
 
         unsafe { register(&entry as *const CAppEntry) };
@@ -1272,7 +1313,11 @@ mod tests {
 
         let rc = kill(handle);
         assert_eq!(rc, ESP_OK, "kill must return ESP_OK");
-        assert_eq!(DESTROY_COUNT.load(Ordering::SeqCst), 1, "on_destroy must be called once");
+        assert_eq!(
+            DESTROY_COUNT.load(Ordering::SeqCst),
+            1,
+            "on_destroy must be called once"
+        );
         assert_eq!(
             get_state(handle),
             AppState::Unloaded as u32,
@@ -1297,6 +1342,13 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_both_launcher_implementations_are_recognized() {
+        assert!(is_launcher_id("com.thistle.launcher"));
+        assert!(is_launcher_id("com.thistle.tk_launcher"));
+        assert!(!is_launcher_id("com.thistle.flashlight"));
+    }
+
     // -----------------------------------------------------------------------
     // test_double_register_is_idempotent
     // Mirrors test_app_manager.c: registering the same app ID twice succeeds
@@ -1318,7 +1370,10 @@ mod tests {
         let count_after_first = APP_MANAGER.lock().unwrap().slot_count;
 
         let rc2 = unsafe { register(&entry as *const CAppEntry) };
-        assert_eq!(rc2, ESP_OK, "duplicate registration must succeed (idempotent)");
+        assert_eq!(
+            rc2, ESP_OK,
+            "duplicate registration must succeed (idempotent)"
+        );
 
         let count_after_second = APP_MANAGER.lock().unwrap().slot_count;
         assert_eq!(
@@ -1347,10 +1402,18 @@ mod tests {
         let e2 = make_test_entry(&m2 as *const CAppManifest);
 
         unsafe { register(&e1 as *const CAppEntry) };
-        assert_eq!(list_apps().len(), 1, "list_apps must have 1 entry after one registration");
+        assert_eq!(
+            list_apps().len(),
+            1,
+            "list_apps must have 1 entry after one registration"
+        );
 
         unsafe { register(&e2 as *const CAppEntry) };
-        assert_eq!(list_apps().len(), 2, "list_apps must have 2 entries after two registrations");
+        assert_eq!(
+            list_apps().len(),
+            2,
+            "list_apps must have 2 entries after two registrations"
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -7,9 +7,12 @@ import argparse
 from datetime import date
 from pathlib import Path
 
+from tap_package import TapError, validate_package
+
 
 def scan_artifacts(artifact_dir: str, base_url: str,
-                   require_signatures: bool = False) -> list:
+                   require_signatures: bool = False,
+                   publisher_key_id: str = "") -> list:
     """Scan directory for .app.elf/.drv.elf + manifest.json pairs."""
     entries = []
     artifact_path = Path(artifact_dir).resolve()
@@ -21,6 +24,57 @@ def scan_artifacts(artifact_dir: str, base_url: str,
 
     for manifest_file in manifest_files:
         manifest = json.loads(manifest_file.read_text())
+        entry_type = manifest.get("type", "app")
+        permissions = manifest.get("permissions", [])
+        if isinstance(permissions, list):
+            permissions = ",".join(permissions)
+
+        if entry_type == "app":
+            tap_files = sorted(manifest_file.parent.glob("*.tap"))
+            if len(tap_files) != 1:
+                raise FileNotFoundError(
+                    f"Expected exactly one TAP package beside {manifest_file}"
+                )
+            tap_path = tap_files[0]
+            try:
+                tap_manifest = validate_package(tap_path)
+            except TapError as exc:
+                raise ValueError(f"Invalid TAP package {tap_path}: {exc}") from exc
+            for field in ("id", "version", "arch", "release_sequence"):
+                if tap_manifest.get(field) != manifest.get(field):
+                    raise ValueError(f"TAP {field} mismatch for {manifest_file}")
+            tap_sig = Path(f"{tap_path}.sig")
+            if require_signatures and not tap_sig.is_file():
+                raise FileNotFoundError(f"TAP signature not found for {tap_path}")
+            tap_rel = tap_path.resolve().relative_to(artifact_path)
+            package_url = f"{base_url.rstrip('/')}/{tap_rel.as_posix()}"
+            tap_data = tap_path.read_bytes()
+            entries.append({
+                "id": tap_manifest["id"],
+                "type": "app",
+                "name": tap_manifest["name"],
+                "version": tap_manifest["version"],
+                "release_sequence": tap_manifest["release_sequence"],
+                "author": tap_manifest["author"],
+                "description": tap_manifest["description"],
+                "category": manifest.get("category", "tools"),
+                "permissions": permissions,
+                "min_os_version": tap_manifest["min_os"],
+                "arch": tap_manifest["arch"],
+                "compatible_boards": tap_manifest.get("compatible_boards", []),
+                "package_url": package_url,
+                "package_sig_url": f"{package_url}.sig" if tap_sig.is_file() else "",
+                "package_sha256": hashlib.sha256(tap_data).hexdigest(),
+                "package_size_bytes": len(tap_data),
+                "publisher_key_id": publisher_key_id,
+                "is_signed": tap_sig.is_file(),
+                "updated": "",
+                "changelog": manifest.get("changelog", ""),
+                "rating": 0,
+                "rating_count": 0,
+                "downloads": 0,
+            })
+            continue
 
         # Find corresponding ELF
         elf_name = manifest.get("entry", "")
@@ -38,8 +92,7 @@ def scan_artifacts(artifact_dir: str, base_url: str,
                 f"ELF not found for {manifest_file}: {elf_name}"
             )
 
-        entry_type = manifest.get("type", "app")
-        expected_suffix = ".drv.elf" if entry_type == "driver" else ".app.elf"
+        expected_suffix = ".drv.elf" if entry_type == "driver" else ".wm.elf"
         if not elf_name.endswith(expected_suffix):
             raise ValueError(
                 f"{entry_type} manifest has invalid entry suffix: {manifest_file}"
@@ -61,10 +114,6 @@ def scan_artifacts(artifact_dir: str, base_url: str,
         sig_url = f"{elf_url}.sig" if has_sig else ""
 
         # Map manifest fields to catalog entry
-        permissions = manifest.get("permissions", [])
-        if isinstance(permissions, list):
-            permissions = ",".join(permissions)
-
         entry = {
             "id": manifest.get("id", ""),
             "type": entry_type,
@@ -105,7 +154,12 @@ def scan_artifacts(artifact_dir: str, base_url: str,
 
 
 def merge_catalog_entries(entries: list, existing_entries: list) -> list:
-    """Preserve existing packages and carry usage metadata onto rebuilt ones."""
+    """Carry usage metadata forward without retaining legacy app releases.
+
+    Applications are TAP-only. An app absent from the current artifact set must
+    be republished as a TAP before it can reappear in the catalog. Other
+    component types retain the existing incremental-publication behaviour.
+    """
     existing_map = {
         entry.get("id", ""): entry
         for entry in existing_entries
@@ -126,7 +180,7 @@ def merge_catalog_entries(entries: list, existing_entries: list) -> list:
 
     merged.extend(
         entry for entry in existing_entries
-        if entry.get("id") not in rebuilt_ids
+        if entry.get("id") not in rebuilt_ids and entry.get("type") != "app"
     )
     return merged
 
@@ -146,11 +200,16 @@ def main():
                              "(preserves ratings/downloads)")
     parser.add_argument("--require-signatures", action="store_true",
                         help="Fail if any catalogued ELF has no signature")
+    parser.add_argument("--publisher-key-id", default="",
+                        help="Publisher key identifier recorded for TAP packages")
 
     args = parser.parse_args()
 
-    entries = scan_artifacts(args.artifact_dir, args.base_url,
-                             require_signatures=args.require_signatures)
+    entries = scan_artifacts(
+        args.artifact_dir, args.base_url,
+        require_signatures=args.require_signatures,
+        publisher_key_id=args.publisher_key_id,
+    )
 
     # Set the publication date only on packages rebuilt in this run.
     today = date.today().isoformat()

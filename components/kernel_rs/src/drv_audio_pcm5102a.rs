@@ -82,9 +82,9 @@ struct I2sChanConfig {
 #[repr(C)]
 struct I2sStdClkConfig {
     sample_rate_hz: u32,
-    clk_src: u32,        // I2S_CLK_SRC_DEFAULT = 0
+    clk_src: u32, // I2S_CLK_SRC_DEFAULT = 0
     ext_clk_freq_hz: u32,
-    mclk_multiple: u32,  // I2S_MCLK_MULTIPLE_256 = 256
+    mclk_multiple: u32, // I2S_MCLK_MULTIPLE_256 = 256
 }
 
 // i2s_std_slot_config_t (driver/i2s_std.h) — Philips format
@@ -109,9 +109,9 @@ struct I2sStdClkConfig {
 #[repr(C)]
 struct I2sStdSlotConfig {
     data_bit_width: u32,
-    slot_bit_width: u32,  // I2S_SLOT_BIT_WIDTH_AUTO = 0
+    slot_bit_width: u32, // I2S_SLOT_BIT_WIDTH_AUTO = 0
     slot_mode: u32,
-    slot_mask: u32,       // I2S_STD_SLOT_BOTH = 3
+    slot_mask: u32, // I2S_STD_SLOT_BOTH = 3
     ws_width: u32,
     ws_pol: bool,
     _pad0: [u8; 3],
@@ -160,7 +160,11 @@ struct I2sStdConfig {
 #[cfg(target_os = "espidf")]
 extern "C" {
     /// Allocate a new I2S TX channel.
-    fn i2s_new_channel(cfg: *const I2sChanConfig, tx_handle: *mut *mut c_void, rx_handle: *mut *mut c_void) -> i32;
+    fn i2s_new_channel(
+        cfg: *const I2sChanConfig,
+        tx_handle: *mut *mut c_void,
+        rx_handle: *mut *mut c_void,
+    ) -> i32;
 
     /// Free a previously allocated I2S channel.
     fn i2s_del_channel(handle: *mut c_void) -> i32;
@@ -187,7 +191,8 @@ extern "C" {
     fn i2s_channel_reconfig_std_clock(handle: *mut c_void, clk_cfg: *const I2sStdClkConfig) -> i32;
 
     /// Reconfigure the slot format without recreating the channel.
-    fn i2s_channel_reconfig_std_slot(handle: *mut c_void, slot_cfg: *const I2sStdSlotConfig) -> i32;
+    fn i2s_channel_reconfig_std_slot(handle: *mut c_void, slot_cfg: *const I2sStdSlotConfig)
+        -> i32;
 }
 
 // ── Simulator / host stubs ───────────────────────────────────────────────────
@@ -324,9 +329,8 @@ pub fn apply_volume(data: &[u8], volume: u8) -> Vec<u8> {
     // (which would indicate malformed input) is simply truncated here,
     // matching the C behaviour of `len / sizeof(int16_t)`.
     let sample_count = data.len() / 2;
-    let samples: &[i16] = unsafe {
-        std::slice::from_raw_parts(data.as_ptr() as *const i16, sample_count)
-    };
+    let samples: &[i16] =
+        unsafe { std::slice::from_raw_parts(data.as_ptr() as *const i16, sample_count) };
 
     let scaled: Vec<i16> = samples
         .iter()
@@ -335,10 +339,7 @@ pub fn apply_volume(data: &[u8], volume: u8) -> Vec<u8> {
 
     // Convert the scaled i16 slice back to bytes.
     let byte_len = scaled.len() * 2;
-    unsafe {
-        std::slice::from_raw_parts(scaled.as_ptr() as *const u8, byte_len)
-    }
-    .to_vec()
+    unsafe { std::slice::from_raw_parts(scaled.as_ptr() as *const u8, byte_len) }.to_vec()
 }
 
 // ── vtable implementations ───────────────────────────────────────────────────
@@ -362,22 +363,22 @@ unsafe extern "C" fn pcm5102a_init(config: *const c_void) -> i32 {
     }
 
     let src = &*(config as *const AudioPcm5102aConfig);
-    audio.cfg.i2s_num  = src.i2s_num;
-    audio.cfg.pin_bck  = src.pin_bck;
-    audio.cfg.pin_ws   = src.pin_ws;
+    audio.cfg.i2s_num = src.i2s_num;
+    audio.cfg.pin_bck = src.pin_bck;
+    audio.cfg.pin_ws = src.pin_ws;
     audio.cfg.pin_data = src.pin_data;
-    audio.volume  = 100;
+    audio.volume = 100;
     audio.playing = false;
 
     // Allocate the I2S TX channel.
     #[cfg(target_os = "espidf")]
     {
         let chan_cfg = I2sChanConfig {
-            id:            audio.cfg.i2s_num,
-            role:          I2S_ROLE_MASTER,
-            dma_desc_num:  6,
+            id: audio.cfg.i2s_num,
+            role: I2S_ROLE_MASTER,
+            dma_desc_num: 6,
             dma_frame_num: 240,
-            auto_clear:    false,
+            auto_clear: false,
         };
         let ret = i2s_new_channel(
             &chan_cfg as *const I2sChanConfig,
@@ -390,11 +391,7 @@ unsafe extern "C" fn pcm5102a_init(config: *const c_void) -> i32 {
     }
     #[cfg(not(target_os = "espidf"))]
     {
-        let ret = i2s_new_channel(
-            std::ptr::null(),
-            &mut audio.tx_handle,
-            std::ptr::null_mut(),
-        );
+        let ret = i2s_new_channel(std::ptr::null(), &mut audio.tx_handle, std::ptr::null_mut());
         if ret != ESP_OK {
             return ret;
         }
@@ -406,40 +403,37 @@ unsafe extern "C" fn pcm5102a_init(config: *const c_void) -> i32 {
         let std_cfg = I2sStdConfig {
             clk_cfg: I2sStdClkConfig {
                 sample_rate_hz: 44100,
-                clk_src:        0,   // I2S_CLK_SRC_DEFAULT
+                clk_src: 0, // I2S_CLK_SRC_DEFAULT
                 ext_clk_freq_hz: 0,
-                mclk_multiple:  256, // I2S_MCLK_MULTIPLE_256
+                mclk_multiple: 256, // I2S_MCLK_MULTIPLE_256
             },
             slot_cfg: I2sStdSlotConfig {
                 data_bit_width: I2S_DATA_BIT_WIDTH_16BIT,
-                slot_bit_width: 0,                  // I2S_SLOT_BIT_WIDTH_AUTO
-                slot_mode:      I2S_SLOT_MODE_STEREO,
-                slot_mask:      3,                  // I2S_STD_SLOT_BOTH
-                ws_width:       I2S_DATA_BIT_WIDTH_16BIT,
-                ws_pol:         false,
-                _pad0:          [0u8; 3],
-                bit_shift:      true,               // Philips: 1-bit shift
-                _pad1:          [0u8; 3],
-                left_align:     false,
-                _pad2:          [0u8; 3],
-                big_endian:     false,
-                _pad3:          [0u8; 3],
-                bit_order_lsb:  false,
-                _pad4:          [0u8; 3],
+                slot_bit_width: 0, // I2S_SLOT_BIT_WIDTH_AUTO
+                slot_mode: I2S_SLOT_MODE_STEREO,
+                slot_mask: 3, // I2S_STD_SLOT_BOTH
+                ws_width: I2S_DATA_BIT_WIDTH_16BIT,
+                ws_pol: false,
+                _pad0: [0u8; 3],
+                bit_shift: true, // Philips: 1-bit shift
+                _pad1: [0u8; 3],
+                left_align: false,
+                _pad2: [0u8; 3],
+                big_endian: false,
+                _pad3: [0u8; 3],
+                bit_order_lsb: false,
+                _pad4: [0u8; 3],
             },
             gpio_cfg: I2sStdGpioConfig {
-                mclk:         I2S_GPIO_UNUSED, // PCM5102A derives MCLK from BCK
-                bclk:         audio.cfg.pin_bck,
-                ws:           audio.cfg.pin_ws,
-                dout:         audio.cfg.pin_data,
-                din:          I2S_GPIO_UNUSED,
+                mclk: I2S_GPIO_UNUSED, // PCM5102A derives MCLK from BCK
+                bclk: audio.cfg.pin_bck,
+                ws: audio.cfg.pin_ws,
+                dout: audio.cfg.pin_data,
+                din: I2S_GPIO_UNUSED,
                 invert_flags: 0,
             },
         };
-        let ret = i2s_channel_init_std_mode(
-            audio.tx_handle,
-            &std_cfg as *const I2sStdConfig,
-        );
+        let ret = i2s_channel_init_std_mode(audio.tx_handle, &std_cfg as *const I2sStdConfig);
         if ret != ESP_OK {
             i2s_del_channel(audio.tx_handle);
             audio.tx_handle = std::ptr::null_mut();
@@ -477,7 +471,7 @@ unsafe extern "C" fn pcm5102a_deinit() {
     }
 
     i2s_del_channel(audio.tx_handle);
-    audio.tx_handle  = std::ptr::null_mut();
+    audio.tx_handle = std::ptr::null_mut();
     audio.initialized = false;
 }
 
@@ -595,11 +589,11 @@ unsafe extern "C" fn pcm5102a_configure(cfg: *const HalAudioConfig) -> i32 {
     let src = &*cfg;
 
     let bit_width: u32 = match src.bits_per_sample {
-        8  => I2S_DATA_BIT_WIDTH_8BIT,
+        8 => I2S_DATA_BIT_WIDTH_8BIT,
         16 => I2S_DATA_BIT_WIDTH_16BIT,
         24 => I2S_DATA_BIT_WIDTH_24BIT,
         32 => I2S_DATA_BIT_WIDTH_32BIT,
-        _  => return ESP_ERR_INVALID_ARG,
+        _ => return ESP_ERR_INVALID_ARG,
     };
 
     let slot_mode: u32 = if src.channels == 1 {
@@ -611,40 +605,36 @@ unsafe extern "C" fn pcm5102a_configure(cfg: *const HalAudioConfig) -> i32 {
     #[cfg(target_os = "espidf")]
     {
         let clk_cfg = I2sStdClkConfig {
-            sample_rate_hz:  src.sample_rate,
-            clk_src:         0,   // I2S_CLK_SRC_DEFAULT
+            sample_rate_hz: src.sample_rate,
+            clk_src: 0, // I2S_CLK_SRC_DEFAULT
             ext_clk_freq_hz: 0,
-            mclk_multiple:   256, // I2S_MCLK_MULTIPLE_256
+            mclk_multiple: 256, // I2S_MCLK_MULTIPLE_256
         };
-        let ret = i2s_channel_reconfig_std_clock(
-            audio.tx_handle,
-            &clk_cfg as *const I2sStdClkConfig,
-        );
+        let ret =
+            i2s_channel_reconfig_std_clock(audio.tx_handle, &clk_cfg as *const I2sStdClkConfig);
         if ret != ESP_OK {
             return ret;
         }
 
         let slot_cfg = I2sStdSlotConfig {
             data_bit_width: bit_width,
-            slot_bit_width: 0,          // I2S_SLOT_BIT_WIDTH_AUTO
+            slot_bit_width: 0, // I2S_SLOT_BIT_WIDTH_AUTO
             slot_mode,
-            slot_mask:      3,          // I2S_STD_SLOT_BOTH
-            ws_width:       bit_width,
-            ws_pol:         false,
-            _pad0:          [0u8; 3],
-            bit_shift:      true,       // Philips format
-            _pad1:          [0u8; 3],
-            left_align:     false,
-            _pad2:          [0u8; 3],
-            big_endian:     false,
-            _pad3:          [0u8; 3],
-            bit_order_lsb:  false,
-            _pad4:          [0u8; 3],
+            slot_mask: 3, // I2S_STD_SLOT_BOTH
+            ws_width: bit_width,
+            ws_pol: false,
+            _pad0: [0u8; 3],
+            bit_shift: true, // Philips format
+            _pad1: [0u8; 3],
+            left_align: false,
+            _pad2: [0u8; 3],
+            big_endian: false,
+            _pad3: [0u8; 3],
+            bit_order_lsb: false,
+            _pad4: [0u8; 3],
         };
-        let ret = i2s_channel_reconfig_std_slot(
-            audio.tx_handle,
-            &slot_cfg as *const I2sStdSlotConfig,
-        );
+        let ret =
+            i2s_channel_reconfig_std_slot(audio.tx_handle, &slot_cfg as *const I2sStdSlotConfig);
         if ret != ESP_OK {
             return ret;
         }
@@ -671,13 +661,13 @@ unsafe extern "C" fn pcm5102a_configure(cfg: *const HalAudioConfig) -> i32 {
 ///
 /// Pass to `hal_audio_register()`.  Returned by `drv_audio_pcm5102a_get()`.
 static AUDIO_DRIVER: HalAudioDriver = HalAudioDriver {
-    init:       Some(pcm5102a_init),
-    deinit:     Some(pcm5102a_deinit),
-    play:       Some(pcm5102a_play),
-    stop:       Some(pcm5102a_stop),
+    init: Some(pcm5102a_init),
+    deinit: Some(pcm5102a_deinit),
+    play: Some(pcm5102a_play),
+    stop: Some(pcm5102a_stop),
     set_volume: Some(pcm5102a_set_volume),
-    configure:  Some(pcm5102a_configure),
-    name:       b"PCM5102A\0".as_ptr() as *const c_char,
+    configure: Some(pcm5102a_configure),
+    name: b"PCM5102A\0".as_ptr() as *const c_char,
 };
 
 /// Return the PCM5102A audio driver vtable.
@@ -708,10 +698,7 @@ mod tests {
     fn test_apply_volume_100_is_identity() {
         // At 100 % volume the samples must be returned bit-for-bit identical.
         let input: Vec<i16> = vec![0, 100, -100, i16::MAX, i16::MIN];
-        let bytes: Vec<u8> = input
-            .iter()
-            .flat_map(|&s| s.to_ne_bytes())
-            .collect();
+        let bytes: Vec<u8> = input.iter().flat_map(|&s| s.to_ne_bytes()).collect();
         let out = apply_volume(&bytes, 100);
         assert_eq!(out, bytes, "volume 100 must be an identity transform");
     }
@@ -790,13 +777,13 @@ mod tests {
     #[test]
     fn test_vtable_fields_populated() {
         let drv = unsafe { &*drv_audio_pcm5102a_get() };
-        assert!(drv.init.is_some(),       "init must be Some");
-        assert!(drv.deinit.is_some(),     "deinit must be Some");
-        assert!(drv.play.is_some(),       "play must be Some");
-        assert!(drv.stop.is_some(),       "stop must be Some");
+        assert!(drv.init.is_some(), "init must be Some");
+        assert!(drv.deinit.is_some(), "deinit must be Some");
+        assert!(drv.play.is_some(), "play must be Some");
+        assert!(drv.stop.is_some(), "stop must be Some");
         assert!(drv.set_volume.is_some(), "set_volume must be Some");
-        assert!(drv.configure.is_some(),  "configure must be Some");
-        assert!(!drv.name.is_null(),      "name must not be null");
+        assert!(drv.configure.is_some(), "configure must be Some");
+        assert!(!drv.name.is_null(), "name must not be null");
     }
 
     #[test]
@@ -843,7 +830,10 @@ mod tests {
         unsafe {
             reset_state();
             let cfg = AudioPcm5102aConfig {
-                i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42,
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
             };
             let p = &cfg as *const AudioPcm5102aConfig as *const c_void;
             assert_eq!(pcm5102a_init(p), ESP_OK);
@@ -868,7 +858,10 @@ mod tests {
         unsafe {
             reset_state();
             let buf = [0u8; 16];
-            assert_eq!(pcm5102a_play(buf.as_ptr(), buf.len()), ESP_ERR_INVALID_STATE);
+            assert_eq!(
+                pcm5102a_play(buf.as_ptr(), buf.len()),
+                ESP_ERR_INVALID_STATE
+            );
         }
     }
 
@@ -876,7 +869,12 @@ mod tests {
     fn test_play_null_data_returns_invalid_arg() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             assert_eq!(pcm5102a_play(std::ptr::null(), 16), ESP_ERR_INVALID_ARG);
             pcm5102a_deinit();
@@ -887,7 +885,12 @@ mod tests {
     fn test_play_zero_len_returns_invalid_arg() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             let buf = [0u8; 16];
             assert_eq!(pcm5102a_play(buf.as_ptr(), 0), ESP_ERR_INVALID_ARG);
@@ -899,7 +902,12 @@ mod tests {
     fn test_play_enables_channel_on_first_call() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             assert!(!(*(&raw const S_AUDIO)).playing);
 
@@ -924,7 +932,12 @@ mod tests {
     fn test_stop_when_not_playing_is_ok() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             assert_eq!(pcm5102a_stop(), ESP_OK); // not playing — no-op
             pcm5102a_deinit();
@@ -935,7 +948,12 @@ mod tests {
     fn test_play_then_stop_clears_playing_flag() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             let buf = [0u8; 16];
             pcm5102a_play(buf.as_ptr(), buf.len());
@@ -981,7 +999,12 @@ mod tests {
     fn test_configure_null_returns_invalid_arg() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             assert_eq!(pcm5102a_configure(std::ptr::null()), ESP_ERR_INVALID_ARG);
             pcm5102a_deinit();
@@ -992,7 +1015,11 @@ mod tests {
     fn test_configure_before_init_returns_invalid_state() {
         unsafe {
             reset_state();
-            let hal_cfg = HalAudioConfig { sample_rate: 48000, bits_per_sample: 16, channels: 2 };
+            let hal_cfg = HalAudioConfig {
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                channels: 2,
+            };
             assert_eq!(pcm5102a_configure(&hal_cfg), ESP_ERR_INVALID_STATE);
         }
     }
@@ -1001,9 +1028,18 @@ mod tests {
     fn test_configure_invalid_bits_per_sample() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
-            let hal_cfg = HalAudioConfig { sample_rate: 44100, bits_per_sample: 7, channels: 2 };
+            let hal_cfg = HalAudioConfig {
+                sample_rate: 44100,
+                bits_per_sample: 7,
+                channels: 2,
+            };
             assert_eq!(pcm5102a_configure(&hal_cfg), ESP_ERR_INVALID_ARG);
             pcm5102a_deinit();
         }
@@ -1013,15 +1049,20 @@ mod tests {
     fn test_configure_valid_params_returns_ok() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
             for &(rate, bits, ch) in &[
                 (44100u32, 16u8, 2u8),
-                (48000,    16,   2),
-                (22050,    16,   1),
-                (44100,     8,   2),
-                (44100,    24,   2),
-                (44100,    32,   2),
+                (48000, 16, 2),
+                (22050, 16, 1),
+                (44100, 8, 2),
+                (44100, 24, 2),
+                (44100, 32, 2),
             ] {
                 let hal_cfg = HalAudioConfig {
                     sample_rate: rate,
@@ -1042,14 +1083,23 @@ mod tests {
     fn test_configure_while_playing_disables_channel() {
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void);
 
             let buf = [0u8; 16];
             pcm5102a_play(buf.as_ptr(), buf.len());
             assert!((*(&raw const S_AUDIO)).playing);
 
-            let hal_cfg = HalAudioConfig { sample_rate: 48000, bits_per_sample: 16, channels: 2 };
+            let hal_cfg = HalAudioConfig {
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                channels: 2,
+            };
             assert_eq!(pcm5102a_configure(&hal_cfg), ESP_OK);
             // configure must have stopped the channel.
             assert!(!(*(&raw const S_AUDIO)).playing);
@@ -1064,7 +1114,12 @@ mod tests {
         // init → set_volume → play → stop → configure → play → deinit
         unsafe {
             reset_state();
-            let cfg = AudioPcm5102aConfig { i2s_num: 0, pin_bck: 41, pin_ws: 45, pin_data: 42 };
+            let cfg = AudioPcm5102aConfig {
+                i2s_num: 0,
+                pin_bck: 41,
+                pin_ws: 45,
+                pin_data: 42,
+            };
             assert_eq!(
                 pcm5102a_init(&cfg as *const AudioPcm5102aConfig as *const c_void),
                 ESP_OK
@@ -1075,7 +1130,11 @@ mod tests {
             assert_eq!(pcm5102a_play(buf.as_ptr(), buf.len()), ESP_OK);
             assert_eq!(pcm5102a_stop(), ESP_OK);
 
-            let hal_cfg = HalAudioConfig { sample_rate: 48000, bits_per_sample: 16, channels: 1 };
+            let hal_cfg = HalAudioConfig {
+                sample_rate: 48000,
+                bits_per_sample: 16,
+                channels: 1,
+            };
             assert_eq!(pcm5102a_configure(&hal_cfg), ESP_OK);
 
             assert_eq!(pcm5102a_play(buf.as_ptr(), buf.len()), ESP_OK);

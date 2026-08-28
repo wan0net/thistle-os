@@ -61,8 +61,8 @@ extern "C" {
 // Layout constants
 // ---------------------------------------------------------------------------
 
-const LAYOUT_COLUMN: i32 = 0;
-const LAYOUT_ROW: i32 = 1;
+const LAYOUT_COLUMN: i32 = 1;
+const LAYOUT_ROW: i32 = 2;
 const ALIGN_CENTER: i32 = 1;
 const ALIGN_START: i32 = 0;
 const ALIGN_SPACE_BETWEEN: i32 = 3;

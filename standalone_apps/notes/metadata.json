@@ -1,0 +1,23 @@
+{
+  "schema": "thistle.app.metadata/v1",
+  "id": "com.thistle.notes",
+  "category": "productivity",
+  "summary": "Fast, local notes for colour and e-paper devices.",
+  "description": "Create and edit portable plain-text notes stored in the app's private ThistleOS data area.",
+  "license": "BSD-3-Clause",
+  "homepage": "https://github.com/wan0net/thistle-os",
+  "source": "https://github.com/wan0net/thistle-os/tree/main/standalone_apps/notes",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "release_sequence": 1,
+      "released": "2026-08-29",
+      "changes": [
+        "Moved Notes out of the firmware image",
+        "Added native thistle-tk and LCD widget rendering",
+        "Added private sandboxed storage with transactional saves"
+      ],
+      "min_os": "0.3.0"
+    }
+  ]
+}

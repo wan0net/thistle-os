@@ -145,7 +145,9 @@ extern "C" {
 #[no_mangle]
 pub extern "C" fn hal_storage_get_total_bytes() -> u64 {
     let reg = unsafe { hal_get_registry() };
-    if reg.is_null() { return 0; }
+    if reg.is_null() {
+        return 0;
+    }
     let r = unsafe { &*reg };
     for i in 0..r.storage_count as usize {
         if !r.storage[i].is_null() {
@@ -163,7 +165,9 @@ pub extern "C" fn hal_storage_get_total_bytes() -> u64 {
 #[no_mangle]
 pub extern "C" fn hal_storage_get_free_bytes() -> u64 {
     let reg = unsafe { hal_get_registry() };
-    if reg.is_null() { return 0; }
+    if reg.is_null() {
+        return 0;
+    }
     let r = unsafe { &*reg };
     for i in 0..r.storage_count as usize {
         if !r.storage[i].is_null() {
@@ -179,12 +183,16 @@ pub extern "C" fn hal_storage_get_free_bytes() -> u64 {
 /// Stub for wifi scan start — placeholder until async scan is implemented.
 #[cfg(not(test))]
 #[no_mangle]
-pub extern "C" fn wifi_manager_scan_start() -> i32 { -1 }
+pub extern "C" fn wifi_manager_scan_start() -> i32 {
+    -1
+}
 
 /// Stub for wifi scan count — placeholder until async scan is implemented.
 #[cfg(not(test))]
 #[no_mangle]
-pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
+pub extern "C" fn wifi_manager_scan_get_count() -> i32 {
+    0
+}
 
 // Test stubs — provide linkable C symbols for functions not already defined
 // in the Rust crate. Functions like wifi_manager_get_state, app_manager_launch,
@@ -193,17 +201,39 @@ pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
 mod test_stubs {
     use std::os::raw::c_char;
 
-    #[no_mangle] pub extern "C" fn esp_get_free_heap_size() -> u32 { 65536 }
-    #[no_mangle] pub extern "C" fn heap_caps_get_free_size(_caps: u32) -> usize { 0 }
-    #[no_mangle] pub extern "C" fn esp_restart() {}
+    #[no_mangle]
+    pub extern "C" fn esp_get_free_heap_size() -> u32 {
+        65536
+    }
+    #[no_mangle]
+    pub extern "C" fn heap_caps_get_free_size(_caps: u32) -> usize {
+        0
+    }
+    #[no_mangle]
+    pub extern "C" fn esp_restart() {}
     /* app_manager_get_count is now in app_manager.rs — no test stub needed */
-    #[no_mangle] pub extern "C" fn wifi_manager_scan_start() -> i32 { 0 }
-    #[no_mangle] pub extern "C" fn wifi_manager_scan_get_count() -> i32 { 0 }
-    #[no_mangle] pub extern "C" fn hal_storage_get_total_bytes() -> u64 { 10 * 1024 * 1024 }
-    #[no_mangle] pub extern "C" fn hal_storage_get_free_bytes() -> u64 { 5 * 1024 * 1024 }
+    #[no_mangle]
+    pub extern "C" fn wifi_manager_scan_start() -> i32 {
+        0
+    }
+    #[no_mangle]
+    pub extern "C" fn wifi_manager_scan_get_count() -> i32 {
+        0
+    }
+    #[no_mangle]
+    pub extern "C" fn hal_storage_get_total_bytes() -> u64 {
+        10 * 1024 * 1024
+    }
+    #[no_mangle]
+    pub extern "C" fn hal_storage_get_free_bytes() -> u64 {
+        5 * 1024 * 1024
+    }
     /* driver_loader_get_count is in driver_loader.rs — no test stub needed */
     // Transitive dependency: kernel_uptime_ms (kernel_boot.rs) calls esp_timer_get_time
-    #[no_mangle] pub extern "C" fn esp_timer_get_time() -> i64 { 0 }
+    #[no_mangle]
+    pub extern "C" fn esp_timer_get_time() -> i64 {
+        0
+    }
 }
 
 // MALLOC_CAP_SPIRAM
@@ -424,20 +454,20 @@ fn cmd_hexdump(args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
                 // ASCII portion
                 let ascii: String = chunk
                     .iter()
-                    .map(|&b| if (0x20..=0x7e).contains(&b) { b as char } else { '.' })
+                    .map(|&b| {
+                        if (0x20..=0x7e).contains(&b) {
+                            b as char
+                        } else {
+                            '.'
+                        }
+                    })
                     .collect();
 
                 sprint!(print, ctx, "{:08x}  {:<48} |{}|", offset, hex, ascii);
                 offset += 16;
             }
             if data.len() > limit {
-                sprint!(
-                    print,
-                    ctx,
-                    "... showing {} of {} bytes",
-                    limit,
-                    data.len()
-                );
+                sprint!(print, ctx, "... showing {} of {} bytes", limit, data.len());
             }
             0
         }
@@ -504,7 +534,12 @@ fn cmd_reboot(_args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
 
 fn cmd_apps(_args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
     let count = unsafe { app_manager_get_count() };
-    sprint!(print, ctx, "{} app(s) registered. Use the launcher to browse.", count);
+    sprint!(
+        print,
+        ctx,
+        "{} app(s) registered. Use the launcher to browse.",
+        count
+    );
     0
 }
 
@@ -553,9 +588,7 @@ fn cmd_wifi(args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
             if state == 2 {
                 let ip_ptr = unsafe { wifi_manager_get_ip() };
                 if !ip_ptr.is_null() {
-                    let ip = unsafe { CStr::from_ptr(ip_ptr) }
-                        .to_str()
-                        .unwrap_or("?");
+                    let ip = unsafe { CStr::from_ptr(ip_ptr) }.to_str().unwrap_or("?");
                     sprint!(print, ctx, "IP:   {}", ip);
                 }
                 let rssi = unsafe { wifi_manager_get_rssi() };
@@ -595,9 +628,7 @@ fn cmd_ble(args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
             if state == 2 {
                 let name_ptr = unsafe { ble_manager_get_peer_name() };
                 if !name_ptr.is_null() {
-                    let name = unsafe { CStr::from_ptr(name_ptr) }
-                        .to_str()
-                        .unwrap_or("?");
+                    let name = unsafe { CStr::from_ptr(name_ptr) }.to_str().unwrap_or("?");
                     sprint!(print, ctx, "Peer: {}", name);
                 }
             }
@@ -636,28 +667,116 @@ fn cmd_help(_args: &[&str], print: PrintFn, ctx: *mut c_void) -> i32 {
 // ---------------------------------------------------------------------------
 
 static COMMANDS: &[ShellCmd] = &[
-    ShellCmd { name: "ls",      help: "List directory contents",    func: cmd_ls },
-    ShellCmd { name: "cd",      help: "Change directory",           func: cmd_cd },
-    ShellCmd { name: "pwd",     help: "Print working directory",    func: cmd_pwd },
-    ShellCmd { name: "cat",     help: "Print file contents",        func: cmd_cat },
-    ShellCmd { name: "mkdir",   help: "Create directory",           func: cmd_mkdir },
-    ShellCmd { name: "rm",      help: "Remove file",                func: cmd_rm },
-    ShellCmd { name: "rmdir",   help: "Remove directory",           func: cmd_rmdir },
-    ShellCmd { name: "cp",      help: "Copy file",                  func: cmd_cp },
-    ShellCmd { name: "mv",      help: "Move/rename file",           func: cmd_mv },
-    ShellCmd { name: "df",      help: "Disk free space",            func: cmd_df },
-    ShellCmd { name: "hexdump", help: "Hex dump file [limit]",      func: cmd_hexdump },
-    ShellCmd { name: "heap",    help: "Free memory",                func: cmd_heap },
-    ShellCmd { name: "uptime",  help: "Kernel uptime",              func: cmd_uptime },
-    ShellCmd { name: "version", help: "OS version",                 func: cmd_version },
-    ShellCmd { name: "reboot",  help: "Restart device",             func: cmd_reboot },
-    ShellCmd { name: "apps",    help: "List registered apps",       func: cmd_apps },
-    ShellCmd { name: "launch",  help: "Launch app by ID",           func: cmd_launch },
-    ShellCmd { name: "clear",   help: "Clear terminal",             func: cmd_clear },
-    ShellCmd { name: "wifi",    help: "WiFi status/scan",           func: cmd_wifi },
-    ShellCmd { name: "ble",     help: "BLE status",                 func: cmd_ble },
-    ShellCmd { name: "help",    help: "Show this list",             func: cmd_help },
-    ShellCmd { name: "echo",    help: "Print text",                 func: cmd_echo },
+    ShellCmd {
+        name: "ls",
+        help: "List directory contents",
+        func: cmd_ls,
+    },
+    ShellCmd {
+        name: "cd",
+        help: "Change directory",
+        func: cmd_cd,
+    },
+    ShellCmd {
+        name: "pwd",
+        help: "Print working directory",
+        func: cmd_pwd,
+    },
+    ShellCmd {
+        name: "cat",
+        help: "Print file contents",
+        func: cmd_cat,
+    },
+    ShellCmd {
+        name: "mkdir",
+        help: "Create directory",
+        func: cmd_mkdir,
+    },
+    ShellCmd {
+        name: "rm",
+        help: "Remove file",
+        func: cmd_rm,
+    },
+    ShellCmd {
+        name: "rmdir",
+        help: "Remove directory",
+        func: cmd_rmdir,
+    },
+    ShellCmd {
+        name: "cp",
+        help: "Copy file",
+        func: cmd_cp,
+    },
+    ShellCmd {
+        name: "mv",
+        help: "Move/rename file",
+        func: cmd_mv,
+    },
+    ShellCmd {
+        name: "df",
+        help: "Disk free space",
+        func: cmd_df,
+    },
+    ShellCmd {
+        name: "hexdump",
+        help: "Hex dump file [limit]",
+        func: cmd_hexdump,
+    },
+    ShellCmd {
+        name: "heap",
+        help: "Free memory",
+        func: cmd_heap,
+    },
+    ShellCmd {
+        name: "uptime",
+        help: "Kernel uptime",
+        func: cmd_uptime,
+    },
+    ShellCmd {
+        name: "version",
+        help: "OS version",
+        func: cmd_version,
+    },
+    ShellCmd {
+        name: "reboot",
+        help: "Restart device",
+        func: cmd_reboot,
+    },
+    ShellCmd {
+        name: "apps",
+        help: "List registered apps",
+        func: cmd_apps,
+    },
+    ShellCmd {
+        name: "launch",
+        help: "Launch app by ID",
+        func: cmd_launch,
+    },
+    ShellCmd {
+        name: "clear",
+        help: "Clear terminal",
+        func: cmd_clear,
+    },
+    ShellCmd {
+        name: "wifi",
+        help: "WiFi status/scan",
+        func: cmd_wifi,
+    },
+    ShellCmd {
+        name: "ble",
+        help: "BLE status",
+        func: cmd_ble,
+    },
+    ShellCmd {
+        name: "help",
+        help: "Show this list",
+        func: cmd_help,
+    },
+    ShellCmd {
+        name: "echo",
+        help: "Print text",
+        func: cmd_echo,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -745,19 +864,13 @@ mod tests {
     #[test]
     fn test_resolve_path_relative() {
         set_cwd("/tmp/thistle_sdcard");
-        assert_eq!(
-            resolve_path("config"),
-            "/tmp/thistle_sdcard/config"
-        );
+        assert_eq!(resolve_path("config"), "/tmp/thistle_sdcard/config");
     }
 
     #[test]
     fn test_resolve_path_relative_trailing_slash() {
         set_cwd("/tmp/thistle_sdcard/");
-        assert_eq!(
-            resolve_path("config"),
-            "/tmp/thistle_sdcard/config"
-        );
+        assert_eq!(resolve_path("config"), "/tmp/thistle_sdcard/config");
     }
 
     #[test]
@@ -814,13 +927,7 @@ mod tests {
 
     #[test]
     fn test_null_input() {
-        let ret = unsafe {
-            thistle_shell_exec(
-                std::ptr::null(),
-                test_print,
-                std::ptr::null_mut(),
-            )
-        };
+        let ret = unsafe { thistle_shell_exec(std::ptr::null(), test_print, std::ptr::null_mut()) };
         assert_eq!(ret, -1);
     }
 

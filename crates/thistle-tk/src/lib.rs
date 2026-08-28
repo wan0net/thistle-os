@@ -14,15 +14,15 @@
 extern crate alloc;
 
 pub mod color;
-pub mod theme;
-pub mod widget;
+pub mod input;
 pub mod layout;
 pub mod render;
-pub mod input;
+pub mod theme;
 pub mod tree;
+pub mod widget;
 
 pub use color::Color;
-pub use theme::Theme;
-pub use widget::{Widget, WidgetId};
-pub use tree::UiTree;
 pub use render::{render, render_dirty, ColorMapper, MonoMapper, RgbMapper};
+pub use theme::Theme;
+pub use tree::UiTree;
+pub use widget::{Widget, WidgetId};

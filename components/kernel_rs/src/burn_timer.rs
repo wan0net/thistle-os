@@ -423,11 +423,7 @@ pub extern "C" fn rs_burn_timer_cancel_conversation(conv_id: u8) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn rs_burn_timer_set_policy(
-    conv_id: u8,
-    enabled: bool,
-    burn_after_ms: u64,
-) -> i32 {
+pub extern "C" fn rs_burn_timer_set_policy(conv_id: u8, enabled: bool, burn_after_ms: u64) -> i32 {
     match BURN_STATE.lock() {
         Ok(mut s) => s.set_policy(conv_id, enabled, burn_after_ms),
         Err(_) => ESP_ERR_INVALID_STATE,
@@ -1177,10 +1173,7 @@ mod tests {
         reset();
         init();
         assert_eq!(rs_burn_timer_cancel(5, 0), ESP_ERR_INVALID_ARG);
-        assert_eq!(
-            rs_burn_timer_cancel_conversation(10),
-            ESP_ERR_INVALID_ARG
-        );
+        assert_eq!(rs_burn_timer_cancel_conversation(10), ESP_ERR_INVALID_ARG);
     }
 
     #[test]

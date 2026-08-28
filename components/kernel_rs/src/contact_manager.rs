@@ -34,8 +34,7 @@ pub const STORAGE_PATH: &str = "/sdcard/data/contacts.json";
 // Base64 encode/decode (minimal, standard alphabet with padding)
 // ---------------------------------------------------------------------------
 
-const B64_CHARS: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -262,9 +261,7 @@ impl Contact {
         // Encode device_id, ble_addr, emergency in NOTE field
         vc.push_str(&format!(
             "NOTE:device_id={};ble_addr={};emergency={}\r\n",
-            self.device_id,
-            self.ble_addr,
-            self.is_emergency,
+            self.device_id, self.ble_addr, self.is_emergency,
         ));
         if self.public_key != [0u8; 32] {
             vc.push_str(&format!(
@@ -631,11 +628,15 @@ impl ContactManager {
     }
 
     fn find_by_device_id(&self, device_id: u32) -> Option<&Contact> {
-        self.contacts.iter().find(|c| c.device_id == device_id && c.device_id != 0)
+        self.contacts
+            .iter()
+            .find(|c| c.device_id == device_id && c.device_id != 0)
     }
 
     fn find_by_phone(&self, phone: &str) -> Option<&Contact> {
-        self.contacts.iter().find(|c| c.phone == phone && !c.phone.is_empty())
+        self.contacts
+            .iter()
+            .find(|c| c.phone == phone && !c.phone.is_empty())
     }
 
     fn search(&self, query: &str) -> Vec<&Contact> {
@@ -643,8 +644,7 @@ impl ContactManager {
         self.contacts
             .iter()
             .filter(|c| {
-                c.name.to_lowercase().contains(&q)
-                    || c.callsign.to_lowercase().contains(&q)
+                c.name.to_lowercase().contains(&q) || c.callsign.to_lowercase().contains(&q)
             })
             .collect()
     }
@@ -986,10 +986,7 @@ pub unsafe extern "C" fn rs_contact_search(
 ///
 /// `results` must point to an array of at least `max` CContactInfo structs.
 #[no_mangle]
-pub unsafe extern "C" fn rs_contact_get_emergency(
-    results: *mut CContactInfo,
-    max: u32,
-) -> i32 {
+pub unsafe extern "C" fn rs_contact_get_emergency(results: *mut CContactInfo, max: u32) -> i32 {
     if results.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1045,11 +1042,7 @@ pub extern "C" fn rs_contact_save() -> i32 {
 ///
 /// `buf` must point to a writable buffer of at least `buf_len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn rs_contact_export_vcard(
-    id: u32,
-    buf: *mut u8,
-    buf_len: usize,
-) -> i32 {
+pub unsafe extern "C" fn rs_contact_export_vcard(id: u32, buf: *mut u8, buf_len: usize) -> i32 {
     if buf.is_null() || buf_len == 0 {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1077,10 +1070,7 @@ pub unsafe extern "C" fn rs_contact_export_vcard(
 ///
 /// `data` must point to `data_len` bytes of valid UTF-8 vCard text.
 #[no_mangle]
-pub unsafe extern "C" fn rs_contact_import_vcard(
-    data: *const u8,
-    data_len: usize,
-) -> i32 {
+pub unsafe extern "C" fn rs_contact_import_vcard(data: *const u8, data_len: usize) -> i32 {
     if data.is_null() || data_len == 0 {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1141,9 +1131,7 @@ mod tests {
         let name = CString::new("Ewan").unwrap();
         let callsign = CString::new("CAIRN-1").unwrap();
         let phone = CString::new("+447700900123").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), callsign.as_ptr(), 42567, phone.as_ptr())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), callsign.as_ptr(), 42567, phone.as_ptr()) };
         assert!(id > 0, "add must return positive ID, got {}", id);
     }
 
@@ -1152,12 +1140,8 @@ mod tests {
         reset();
         let n1 = CString::new("Alice").unwrap();
         let n2 = CString::new("Bob").unwrap();
-        let id1 = unsafe {
-            rs_contact_add(n1.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
-        let id2 = unsafe {
-            rs_contact_add(n2.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id1 = unsafe { rs_contact_add(n1.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
+        let id2 = unsafe { rs_contact_add(n2.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert!(id1 > 0);
         assert!(id2 > 0);
         assert!(id2 > id1, "IDs must increment");
@@ -1168,9 +1152,8 @@ mod tests {
         reset();
         for i in 0..10 {
             let name = CString::new(format!("Contact{}", i)).unwrap();
-            let id = unsafe {
-                rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-            };
+            let id =
+                unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
             assert!(id > 0, "add #{} failed", i);
         }
         assert_eq!(rs_contact_count(), 10);
@@ -1181,16 +1164,13 @@ mod tests {
         reset();
         for i in 0..MAX_CONTACTS {
             let name = CString::new(format!("C{}", i)).unwrap();
-            let id = unsafe {
-                rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-            };
+            let id =
+                unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
             assert!(id > 0, "add #{} failed unexpectedly", i);
         }
         // 129th contact must fail
         let name = CString::new("Overflow").unwrap();
-        let rc = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let rc = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_NO_MEM, "add beyond capacity must return NO_MEM");
     }
 
@@ -1198,18 +1178,14 @@ mod tests {
     fn test_add_empty_name_rejected() {
         reset();
         let name = CString::new("").unwrap();
-        let rc = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let rc = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "empty name must be rejected");
     }
 
     #[test]
     fn test_add_null_name_rejected() {
         reset();
-        let rc = unsafe {
-            rs_contact_add(std::ptr::null(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let rc = unsafe { rs_contact_add(std::ptr::null(), std::ptr::null(), 0, std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "null name must be rejected");
     }
 
@@ -1221,9 +1197,7 @@ mod tests {
     fn test_remove_existing() {
         reset();
         let name = CString::new("Remove Me").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert!(id > 0);
         let rc = rs_contact_remove(id as u32);
         assert_eq!(rc, ESP_OK);
@@ -1247,9 +1221,7 @@ mod tests {
         let name = CString::new("Thorn").unwrap();
         let callsign = CString::new("THN").unwrap();
         let phone = CString::new("+1555").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), callsign.as_ptr(), 100, phone.as_ptr())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), callsign.as_ptr(), 100, phone.as_ptr()) };
         assert!(id > 0);
 
         let mut out = CContactInfo {
@@ -1334,7 +1306,10 @@ mod tests {
             is_emergency: false,
         };
         let rc = unsafe { rs_contact_get_at(0, &mut out) };
-        assert_eq!(rc, ESP_ERR_NOT_FOUND, "get_at on empty list must return NOT_FOUND");
+        assert_eq!(
+            rc, ESP_ERR_NOT_FOUND,
+            "get_at on empty list must return NOT_FOUND"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1345,9 +1320,7 @@ mod tests {
     fn test_update_existing() {
         reset();
         let name = CString::new("Old Name").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert!(id > 0);
 
         let mut info = CContactInfo {
@@ -1418,9 +1391,8 @@ mod tests {
     fn test_find_by_device_id() {
         reset();
         let name = CString::new("DeviceUser").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 42567, std::ptr::null())
-        };
+        let id =
+            unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 42567, std::ptr::null()) };
         assert!(id > 0);
 
         let mut out = CContactInfo {
@@ -1526,9 +1498,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 10];
-        let count = unsafe {
-            rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10)
-        };
+        let count = unsafe { rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10) };
         assert_eq!(count, 2, "should match two MacLeods");
     }
 
@@ -1551,9 +1521,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 10];
-        let count = unsafe {
-            rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10)
-        };
+        let count = unsafe { rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10) };
         assert_eq!(count, 1, "search should be case-insensitive");
     }
 
@@ -1577,9 +1545,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 10];
-        let count = unsafe {
-            rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10)
-        };
+        let count = unsafe { rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10) };
         assert_eq!(count, 1, "should match by callsign");
     }
 
@@ -1602,9 +1568,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 10];
-        let count = unsafe {
-            rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10)
-        };
+        let count = unsafe { rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 10) };
         assert_eq!(count, 0);
     }
 
@@ -1621,9 +1585,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 1];
-        let rc = unsafe {
-            rs_contact_search(std::ptr::null(), results.as_mut_ptr(), 1)
-        };
+        let rc = unsafe { rs_contact_search(std::ptr::null(), results.as_mut_ptr(), 1) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1638,15 +1600,9 @@ mod tests {
         let n1 = CString::new("Normal1").unwrap();
         let n2 = CString::new("Normal2").unwrap();
         let n3 = CString::new("Emergency1").unwrap();
-        let id1 = unsafe {
-            rs_contact_add(n1.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
-        let _id2 = unsafe {
-            rs_contact_add(n2.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
-        let id3 = unsafe {
-            rs_contact_add(n3.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id1 = unsafe { rs_contact_add(n1.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
+        let _id2 = unsafe { rs_contact_add(n2.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
+        let id3 = unsafe { rs_contact_add(n3.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
 
         // Mark id1 and id3 as emergency via update
         let mut info = CContactInfo {
@@ -1660,12 +1616,16 @@ mod tests {
             is_emergency: true,
         };
         copy_str_to_buf("Emergency1", &mut info.name);
-        unsafe { rs_contact_update(&info); }
+        unsafe {
+            rs_contact_update(&info);
+        }
 
         info.id = id1 as u32;
         copy_str_to_buf("Normal1", &mut info.name);
         info.is_emergency = true;
-        unsafe { rs_contact_update(&info); }
+        unsafe {
+            rs_contact_update(&info);
+        }
 
         let mut results = [CContactInfo {
             id: 0,
@@ -1711,9 +1671,7 @@ mod tests {
     fn test_set_and_get_pubkey() {
         reset();
         let name = CString::new("KeyUser").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
         assert!(id > 0);
 
         let mut key = [0u8; 32];
@@ -1870,15 +1828,11 @@ mod tests {
         let name = CString::new("Ewan MacLeod").unwrap();
         let callsign = CString::new("CAIRN-1").unwrap();
         let phone = CString::new("+447700900123").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), callsign.as_ptr(), 42567, phone.as_ptr())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), callsign.as_ptr(), 42567, phone.as_ptr()) };
         assert!(id > 0);
 
         let mut buf = [0u8; 512];
-        let len = unsafe {
-            rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len())
-        };
+        let len = unsafe { rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len()) };
         assert!(len > 0, "export must return positive length");
         let vcard = std::str::from_utf8(&buf[..len as usize]).unwrap();
         assert!(vcard.contains("BEGIN:VCARD"));
@@ -1894,9 +1848,7 @@ mod tests {
     fn test_export_vcard_nonexistent() {
         reset();
         let mut buf = [0u8; 512];
-        let rc = unsafe {
-            rs_contact_export_vcard(999, buf.as_mut_ptr(), buf.len())
-        };
+        let rc = unsafe { rs_contact_export_vcard(999, buf.as_mut_ptr(), buf.len()) };
         assert_eq!(rc, ESP_ERR_NOT_FOUND);
     }
 
@@ -1904,23 +1856,17 @@ mod tests {
     fn test_export_vcard_buffer_too_small() {
         reset();
         let name = CString::new("Ewan MacLeod").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), std::ptr::null(), 0, std::ptr::null()) };
 
         let mut buf = [0u8; 2]; // too small
-        let rc = unsafe {
-            rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len())
-        };
+        let rc = unsafe { rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len()) };
         assert_eq!(rc, ESP_ERR_NO_MEM, "too-small buffer must return NO_MEM");
     }
 
     #[test]
     fn test_export_vcard_null_buf() {
         reset();
-        let rc = unsafe {
-            rs_contact_export_vcard(1, std::ptr::null_mut(), 100)
-        };
+        let rc = unsafe { rs_contact_export_vcard(1, std::ptr::null_mut(), 100) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1928,9 +1874,7 @@ mod tests {
     fn test_export_vcard_zero_len() {
         reset();
         let mut buf = [0u8; 1];
-        let rc = unsafe {
-            rs_contact_export_vcard(1, buf.as_mut_ptr(), 0)
-        };
+        let rc = unsafe { rs_contact_export_vcard(1, buf.as_mut_ptr(), 0) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1939,9 +1883,7 @@ mod tests {
         reset();
         let vcard = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Fiona Ross\r\nNICKNAME:FR-1\r\nTEL:+441234\r\nNOTE:device_id=555;ble_addr=AA:BB;emergency=true\r\nEND:VCARD\r\n";
         let data = vcard.as_bytes();
-        let id = unsafe {
-            rs_contact_import_vcard(data.as_ptr(), data.len())
-        };
+        let id = unsafe { rs_contact_import_vcard(data.as_ptr(), data.len()) };
         assert!(id > 0, "import must return positive ID");
 
         let mut out = CContactInfo {
@@ -1969,9 +1911,7 @@ mod tests {
         reset();
         let vcard = "BEGIN:VCARD\r\nVERSION:3.0\r\nTEL:+1234\r\nEND:VCARD\r\n";
         let data = vcard.as_bytes();
-        let rc = unsafe {
-            rs_contact_import_vcard(data.as_ptr(), data.len())
-        };
+        let rc = unsafe { rs_contact_import_vcard(data.as_ptr(), data.len()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG, "vCard without FN must be rejected");
     }
 
@@ -1997,9 +1937,7 @@ mod tests {
         let name = CString::new("Roundtrip User").unwrap();
         let callsign = CString::new("RTU").unwrap();
         let phone = CString::new("+44999").unwrap();
-        let id = unsafe {
-            rs_contact_add(name.as_ptr(), callsign.as_ptr(), 12345, phone.as_ptr())
-        };
+        let id = unsafe { rs_contact_add(name.as_ptr(), callsign.as_ptr(), 12345, phone.as_ptr()) };
         assert!(id > 0);
 
         // Set a public key
@@ -2007,19 +1945,17 @@ mod tests {
         for i in 0..32 {
             key[i] = (i * 3 + 5) as u8;
         }
-        unsafe { rs_contact_set_pubkey(id as u32, key.as_ptr()); }
+        unsafe {
+            rs_contact_set_pubkey(id as u32, key.as_ptr());
+        }
 
         // Export to vCard
         let mut buf = [0u8; 1024];
-        let len = unsafe {
-            rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len())
-        };
+        let len = unsafe { rs_contact_export_vcard(id as u32, buf.as_mut_ptr(), buf.len()) };
         assert!(len > 0);
 
         // Import the vCard back
-        let id2 = unsafe {
-            rs_contact_import_vcard(buf.as_ptr(), len as usize)
-        };
+        let id2 = unsafe { rs_contact_import_vcard(buf.as_ptr(), len as usize) };
         assert!(id2 > 0);
 
         // Compare
@@ -2039,7 +1975,10 @@ mod tests {
         assert_eq!(buf_to_string(&out.callsign), "RTU");
         assert_eq!(out.device_id, 12345);
         assert_eq!(buf_to_string(&out.phone), "+44999");
-        assert_eq!(out.public_key, key, "public key must survive vCard round-trip");
+        assert_eq!(
+            out.public_key, key,
+            "public key must survive vCard round-trip"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -2049,10 +1988,9 @@ mod tests {
     #[test]
     fn test_base64_roundtrip() {
         let data: [u8; 32] = [
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-            0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-            0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+            0x1D, 0x1E, 0x1F, 0x20,
         ];
         let encoded = base64_encode(&data);
         let decoded = base64_decode(&encoded).expect("decode must succeed");
@@ -2165,9 +2103,7 @@ mod tests {
             public_key: [0u8; 32],
             is_emergency: false,
         }; 1];
-        let count = unsafe {
-            rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 0)
-        };
+        let count = unsafe { rs_contact_search(query.as_ptr(), results.as_mut_ptr(), 0) };
         assert_eq!(count, 0);
     }
 

@@ -85,8 +85,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 const ESP_LOG_DEBUG: i32 = 4;
 
@@ -155,22 +155,28 @@ struct ElfLoaderState {
 
 impl ElfLoaderState {
     const fn new() -> Self {
-        ElfLoaderState {
-            apps: None,
-        }
+        ElfLoaderState { apps: None }
     }
 
     fn ensure_apps(&mut self) -> &mut [ElfAppHandle; MAX_LOADED_APPS] {
         if self.apps.is_none() {
             self.apps = Some(Box::new([
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
-                ElfAppHandle::empty(), ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
+                ElfAppHandle::empty(),
             ]));
         }
         self.apps.as_mut().unwrap()
@@ -183,7 +189,11 @@ unsafe impl Send for ElfLoaderState {}
 static STATE: Mutex<ElfLoaderState> = Mutex::new(ElfLoaderState::new());
 
 fn effective_app_permissions(signed: bool, requested: u32) -> u32 {
-    if signed { requested } else { PERM_IPC }
+    if signed {
+        requested
+    } else {
+        PERM_IPC
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,10 +291,7 @@ pub extern "C" fn elf_loader_init() -> i32 {
 /// `path` must be a valid null-terminated C string.
 /// `handle` must point to a valid `*mut ElfAppHandle` location.
 #[no_mangle]
-pub unsafe extern "C" fn elf_app_load(
-    path: *const c_char,
-    handle: *mut *mut ElfAppHandle,
-) -> i32 {
+pub unsafe extern "C" fn elf_app_load(path: *const c_char, handle: *mut *mut ElfAppHandle) -> i32 {
     if path.is_null() || handle.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -319,7 +326,12 @@ pub unsafe extern "C" fn elf_app_load(
     let file_data = match std::fs::read(path_str) {
         Ok(d) => d,
         Err(_) => {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"Cannot open ELF: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"Cannot open ELF: %s\0".as_ptr(),
+                path,
+            );
             return ESP_ERR_NOT_FOUND;
         }
     };
@@ -347,7 +359,10 @@ pub unsafe extern "C" fn elf_app_load(
     {
         let mut state = match STATE.lock() {
             Ok(s) => s,
-            Err(_) => { free(buf); return ESP_FAIL; }
+            Err(_) => {
+                free(buf);
+                return ESP_FAIL;
+            }
         };
         let app = &mut state.ensure_apps()[slot_idx];
         app.load_addr = buf as usize;
@@ -360,15 +375,25 @@ pub unsafe extern "C" fn elf_app_load(
     let mut requested_permissions = 0u32;
     {
         let mut manifest_path_buf = [0u8; 280];
-        manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
+        manifest_path_from_elf(
+            path,
+            manifest_path_buf.as_mut_ptr() as *mut c_char,
+            manifest_path_buf.len(),
+        );
         let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
         if manifest_parse_file(
             manifest_path_buf.as_ptr() as *const c_char,
             manifest.as_mut_ptr(),
-        ) == ESP_OK {
+        ) == ESP_OK
+        {
             let manifest = manifest.assume_init();
             requested_permissions = manifest.permissions;
-            let id_len = manifest.id.iter().position(|&b| b == 0).unwrap_or(63).min(63);
+            let id_len = manifest
+                .id
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(63)
+                .min(63);
             if id_len > 0 {
                 app_id_buf[..id_len].copy_from_slice(&manifest.id[..id_len]);
                 has_manifest_id = true;
@@ -395,23 +420,43 @@ pub unsafe extern "C" fn elf_app_load(
         }
     };
     let signed = if sig_ret == ESP_OK {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF signature verified: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"ELF signature verified: %s\0".as_ptr(),
+            path,
+        );
         true
     } else if sig_ret == ESP_ERR_NOT_FOUND {
         // Unsigned ELF — refuse in production; debug builds receive IPC only.
         #[cfg(not(debug_assertions))]
         {
-            esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF unsigned: %s (REFUSED - production)\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_ERROR,
+                TAG.as_ptr(),
+                b"ELF unsigned: %s (REFUSED - production)\0".as_ptr(),
+                path,
+            );
             free(buf);
             return sig_ret;
         }
         #[cfg(debug_assertions)]
         {
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF unsigned: %s (dev mode, IPC only)\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"ELF unsigned: %s (dev mode, IPC only)\0".as_ptr(),
+                path,
+            );
             false
         }
     } else {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ELF signature INVALID: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"ELF signature INVALID: %s\0".as_ptr(),
+            path,
+        );
         free(buf);
         return sig_ret;
     };
@@ -421,7 +466,10 @@ pub unsafe extern "C" fn elf_app_load(
     // 4. Init esp_elf context
     let mut state = match STATE.lock() {
         Ok(s) => s,
-        Err(_) => { free(buf); return ESP_FAIL; }
+        Err(_) => {
+            free(buf);
+            return ESP_FAIL;
+        }
     };
 
     let app = &mut state.ensure_apps()[slot_idx];
@@ -429,7 +477,12 @@ pub unsafe extern "C" fn elf_app_load(
 
     let ret = esp_elf_init(elf_ptr);
     if ret != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_init failed: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"esp_elf_init failed: %s\0".as_ptr(),
+            path,
+        );
         free(buf);
         return ret;
     }
@@ -472,7 +525,12 @@ pub unsafe extern "C" fn elf_app_load(
     free(buf);
 
     if ret != ESP_OK {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_elf_relocate failed: %s\0".as_ptr(), path);
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"esp_elf_relocate failed: %s\0".as_ptr(),
+            path,
+        );
         let _ = permissions_revoke(perm_id, granted_permissions);
         esp_elf_deinit(elf_ptr);
         return ret;
@@ -481,21 +539,36 @@ pub unsafe extern "C" fn elf_app_load(
     // 6. Parse manifest alongside ELF
     {
         let mut manifest_path_buf = [0u8; 280];
-        manifest_path_from_elf(path, manifest_path_buf.as_mut_ptr() as *mut c_char, manifest_path_buf.len());
+        manifest_path_from_elf(
+            path,
+            manifest_path_buf.as_mut_ptr() as *mut c_char,
+            manifest_path_buf.len(),
+        );
 
         let mut manifest = std::mem::MaybeUninit::<CManifest>::uninit();
         if manifest_parse_file(
             manifest_path_buf.as_ptr() as *const c_char,
             manifest.as_mut_ptr(),
-        ) == ESP_OK {
+        ) == ESP_OK
+        {
             let manifest = manifest.assume_init();
             if !manifest_is_compatible_for_current_arch(&manifest) {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"App incompatible: %s\0".as_ptr(), path);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"App incompatible: %s\0".as_ptr(),
+                    path,
+                );
                 let _ = permissions_revoke(perm_id, granted_permissions);
                 esp_elf_deinit(elf_ptr);
                 return ESP_ERR_NOT_SUPPORTED;
             }
-            esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Manifest OK: %s\0".as_ptr(), path);
+            esp_log_write(
+                ESP_LOG_INFO,
+                TAG.as_ptr(),
+                b"Manifest OK: %s\0".as_ptr(),
+                path,
+            );
         }
     }
 
@@ -509,14 +582,19 @@ pub unsafe extern "C" fn elf_app_load(
     app.app_id[..identity_len].copy_from_slice(&identity_bytes[..identity_len]);
     app.app_id[identity_len] = 0;
     app.granted_permissions = granted_permissions;
-    app.loaded  = true;
+    app.loaded = true;
     app.running = false;
-    app.task    = std::ptr::null_mut();
-    app.slot    = slot_idx;
+    app.task = std::ptr::null_mut();
+    app.slot = slot_idx;
 
     *handle = app as *mut ElfAppHandle;
 
-    esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF loaded: %s\0".as_ptr(), path);
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"ELF loaded: %s\0".as_ptr(),
+        path,
+    );
     ESP_OK
 }
 
@@ -535,7 +613,11 @@ pub unsafe extern "C" fn elf_app_start(handle: *mut ElfAppHandle) -> i32 {
         return ESP_ERR_INVALID_STATE;
     }
     if app.running {
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"ELF app already running\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"ELF app already running\0".as_ptr(),
+        );
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -546,16 +628,25 @@ pub unsafe extern "C" fn elf_app_start(handle: *mut ElfAppHandle) -> i32 {
         handle as *mut c_void,
         ELF_APP_TASK_PRIO,
         &mut app.task,
-        -1,  // tskNO_AFFINITY
+        -1, // tskNO_AFFINITY
     );
 
     if rc != PD_PASS {
-        esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"xTaskCreate failed for ELF app\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_ERROR,
+            TAG.as_ptr(),
+            b"xTaskCreate failed for ELF app\0".as_ptr(),
+        );
         return ESP_ERR_NO_MEM;
     }
 
     app.running = true;
-    esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"ELF app task started: %s\0".as_ptr(), app.path.as_ptr());
+    esp_log_write(
+        ESP_LOG_INFO,
+        TAG.as_ptr(),
+        b"ELF app task started: %s\0".as_ptr(),
+        app.path.as_ptr(),
+    );
     ESP_OK
 }
 
@@ -574,7 +665,7 @@ pub unsafe extern "C" fn elf_app_unload(handle: *mut ElfAppHandle) -> i32 {
     // Kill task if running
     if app.running && !app.task.is_null() {
         vTaskDelete(app.task);
-        app.task    = std::ptr::null_mut();
+        app.task = std::ptr::null_mut();
         app.running = false;
     }
 
@@ -646,19 +737,19 @@ impl ElfAppRegistration {
     const fn empty() -> Self {
         ElfAppRegistration {
             manifest: CAppManifest {
-                id:               std::ptr::null(),
-                name:             std::ptr::null(),
-                version:          b"0.0.0\0".as_ptr() as *const c_char,
+                id: std::ptr::null(),
+                name: std::ptr::null(),
+                version: b"0.0.0\0".as_ptr() as *const c_char,
                 allow_background: false,
-                min_memory_kb:    0,
+                min_memory_kb: 0,
             },
             entry: CAppEntry {
-                on_create:  None,
-                on_start:   None,
-                on_pause:   None,
-                on_resume:  None,
+                on_create: None,
+                on_start: None,
+                on_pause: None,
+                on_resume: None,
                 on_destroy: None,
-                manifest:   std::ptr::null(),
+                manifest: std::ptr::null(),
             },
             handle: std::ptr::null_mut(),
             used: false,
@@ -671,17 +762,27 @@ unsafe impl Send for ElfAppRegistration {}
 
 static REG_MUTEX: Mutex<Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>> = Mutex::new(None);
 
-fn ensure_regs(guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>) -> &mut [ElfAppRegistration; MAX_LOADED_APPS] {
+fn ensure_regs(
+    guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>,
+) -> &mut [ElfAppRegistration; MAX_LOADED_APPS] {
     if guard.is_none() {
         *guard = Some(Box::new([
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
-            ElfAppRegistration::empty(), ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
+            ElfAppRegistration::empty(),
         ]));
     }
     guard.as_mut().unwrap()
@@ -690,14 +791,14 @@ fn ensure_regs(guard: &mut Option<Box<[ElfAppRegistration; MAX_LOADED_APPS]>>) -
 /// Static string storage for manifest id/name fields.
 /// Each registration slot gets its own id and name buffer that lives forever.
 struct RegStrings {
-    id:   [u8; 64],
+    id: [u8; 64],
     name: [u8; 32],
 }
 
 impl RegStrings {
     const fn empty() -> Self {
         RegStrings {
-            id:   [0u8; 64],
+            id: [0u8; 64],
             name: [0u8; 32],
         }
     }
@@ -708,17 +809,27 @@ unsafe impl Send for RegStrings {}
 
 static REG_STR_MUTEX: Mutex<Option<Box<[RegStrings; MAX_LOADED_APPS]>>> = Mutex::new(None);
 
-fn ensure_reg_strings(guard: &mut Option<Box<[RegStrings; MAX_LOADED_APPS]>>) -> &mut [RegStrings; MAX_LOADED_APPS] {
+fn ensure_reg_strings(
+    guard: &mut Option<Box<[RegStrings; MAX_LOADED_APPS]>>,
+) -> &mut [RegStrings; MAX_LOADED_APPS] {
     if guard.is_none() {
         *guard = Some(Box::new([
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
-            RegStrings::empty(), RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
+            RegStrings::empty(),
         ]));
     }
     guard.as_mut().unwrap()
@@ -731,12 +842,10 @@ macro_rules! make_on_create {
         unsafe extern "C" fn $fn_name() -> i32 {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => {
-                        match regs.as_ref() {
-                            Some(r) => r[$slot].handle,
-                            None => return ESP_ERR_INVALID_STATE,
-                        }
-                    }
+                    Ok(regs) => match regs.as_ref() {
+                        Some(r) => r[$slot].handle,
+                        None => return ESP_ERR_INVALID_STATE,
+                    },
                     Err(_) => return ESP_FAIL,
                 }
             };
@@ -748,16 +857,16 @@ macro_rules! make_on_create {
     };
 }
 
-make_on_create!(on_create_slot_0,  0);
-make_on_create!(on_create_slot_1,  1);
-make_on_create!(on_create_slot_2,  2);
-make_on_create!(on_create_slot_3,  3);
-make_on_create!(on_create_slot_4,  4);
-make_on_create!(on_create_slot_5,  5);
-make_on_create!(on_create_slot_6,  6);
-make_on_create!(on_create_slot_7,  7);
-make_on_create!(on_create_slot_8,  8);
-make_on_create!(on_create_slot_9,  9);
+make_on_create!(on_create_slot_0, 0);
+make_on_create!(on_create_slot_1, 1);
+make_on_create!(on_create_slot_2, 2);
+make_on_create!(on_create_slot_3, 3);
+make_on_create!(on_create_slot_4, 4);
+make_on_create!(on_create_slot_5, 5);
+make_on_create!(on_create_slot_6, 6);
+make_on_create!(on_create_slot_7, 7);
+make_on_create!(on_create_slot_8, 8);
+make_on_create!(on_create_slot_9, 9);
 make_on_create!(on_create_slot_10, 10);
 make_on_create!(on_create_slot_11, 11);
 make_on_create!(on_create_slot_12, 12);
@@ -771,12 +880,10 @@ macro_rules! make_on_destroy {
         unsafe extern "C" fn $fn_name() {
             let handle = {
                 match REG_MUTEX.lock() {
-                    Ok(regs) => {
-                        match regs.as_ref() {
-                            Some(r) => r[$slot].handle,
-                            None => return,
-                        }
-                    }
+                    Ok(regs) => match regs.as_ref() {
+                        Some(r) => r[$slot].handle,
+                        None => return,
+                    },
                     Err(_) => return,
                 }
             };
@@ -787,16 +894,16 @@ macro_rules! make_on_destroy {
     };
 }
 
-make_on_destroy!(on_destroy_slot_0,  0);
-make_on_destroy!(on_destroy_slot_1,  1);
-make_on_destroy!(on_destroy_slot_2,  2);
-make_on_destroy!(on_destroy_slot_3,  3);
-make_on_destroy!(on_destroy_slot_4,  4);
-make_on_destroy!(on_destroy_slot_5,  5);
-make_on_destroy!(on_destroy_slot_6,  6);
-make_on_destroy!(on_destroy_slot_7,  7);
-make_on_destroy!(on_destroy_slot_8,  8);
-make_on_destroy!(on_destroy_slot_9,  9);
+make_on_destroy!(on_destroy_slot_0, 0);
+make_on_destroy!(on_destroy_slot_1, 1);
+make_on_destroy!(on_destroy_slot_2, 2);
+make_on_destroy!(on_destroy_slot_3, 3);
+make_on_destroy!(on_destroy_slot_4, 4);
+make_on_destroy!(on_destroy_slot_5, 5);
+make_on_destroy!(on_destroy_slot_6, 6);
+make_on_destroy!(on_destroy_slot_7, 7);
+make_on_destroy!(on_destroy_slot_8, 8);
+make_on_destroy!(on_destroy_slot_9, 9);
 make_on_destroy!(on_destroy_slot_10, 10);
 make_on_destroy!(on_destroy_slot_11, 11);
 make_on_destroy!(on_destroy_slot_12, 12);
@@ -805,17 +912,41 @@ make_on_destroy!(on_destroy_slot_14, 14);
 make_on_destroy!(on_destroy_slot_15, 15);
 
 const ON_CREATE_TABLE: [unsafe extern "C" fn() -> i32; MAX_LOADED_APPS] = [
-    on_create_slot_0,  on_create_slot_1,  on_create_slot_2,  on_create_slot_3,
-    on_create_slot_4,  on_create_slot_5,  on_create_slot_6,  on_create_slot_7,
-    on_create_slot_8,  on_create_slot_9,  on_create_slot_10, on_create_slot_11,
-    on_create_slot_12, on_create_slot_13, on_create_slot_14, on_create_slot_15,
+    on_create_slot_0,
+    on_create_slot_1,
+    on_create_slot_2,
+    on_create_slot_3,
+    on_create_slot_4,
+    on_create_slot_5,
+    on_create_slot_6,
+    on_create_slot_7,
+    on_create_slot_8,
+    on_create_slot_9,
+    on_create_slot_10,
+    on_create_slot_11,
+    on_create_slot_12,
+    on_create_slot_13,
+    on_create_slot_14,
+    on_create_slot_15,
 ];
 
 const ON_DESTROY_TABLE: [unsafe extern "C" fn(); MAX_LOADED_APPS] = [
-    on_destroy_slot_0,  on_destroy_slot_1,  on_destroy_slot_2,  on_destroy_slot_3,
-    on_destroy_slot_4,  on_destroy_slot_5,  on_destroy_slot_6,  on_destroy_slot_7,
-    on_destroy_slot_8,  on_destroy_slot_9,  on_destroy_slot_10, on_destroy_slot_11,
-    on_destroy_slot_12, on_destroy_slot_13, on_destroy_slot_14, on_destroy_slot_15,
+    on_destroy_slot_0,
+    on_destroy_slot_1,
+    on_destroy_slot_2,
+    on_destroy_slot_3,
+    on_destroy_slot_4,
+    on_destroy_slot_5,
+    on_destroy_slot_6,
+    on_destroy_slot_7,
+    on_destroy_slot_8,
+    on_destroy_slot_9,
+    on_destroy_slot_10,
+    on_destroy_slot_11,
+    on_destroy_slot_12,
+    on_destroy_slot_13,
+    on_destroy_slot_14,
+    on_destroy_slot_15,
 ];
 
 /// Scan `/spiffs/apps/` and `/sdcard/apps/` for `*.app.elf` files, load each
@@ -883,10 +1014,8 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             );
 
             let mut c_manifest = std::mem::zeroed::<CManifest>();
-            let manifest_ret = manifest_parse_file(
-                manifest_path_buf.as_ptr() as *const c_char,
-                &mut c_manifest,
-            );
+            let manifest_ret =
+                manifest_parse_file(manifest_path_buf.as_ptr() as *const c_char, &mut c_manifest);
 
             if manifest_ret != ESP_OK {
                 esp_log_write(
@@ -900,8 +1029,16 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
             }
 
             // Extract id and name from the parsed manifest
-            let id_len = c_manifest.id.iter().position(|&b| b == 0).unwrap_or(c_manifest.id.len());
-            let name_len = c_manifest.name.iter().position(|&b| b == 0).unwrap_or(c_manifest.name.len());
+            let id_len = c_manifest
+                .id
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(c_manifest.id.len());
+            let name_len = c_manifest
+                .name
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(c_manifest.name.len());
 
             if id_len == 0 {
                 esp_log_write(
@@ -985,20 +1122,20 @@ pub unsafe extern "C" fn elf_app_scan_and_register() -> c_int {
                 let reg = &mut ensure_regs(&mut regs)[reg_slot];
 
                 reg.manifest = CAppManifest {
-                    id:               id_ptr,
-                    name:             name_ptr,
-                    version:          b"0.0.0\0".as_ptr() as *const c_char,
+                    id: id_ptr,
+                    name: name_ptr,
+                    version: b"0.0.0\0".as_ptr() as *const c_char,
                     allow_background: c_manifest.background,
-                    min_memory_kb:    c_manifest.min_memory_kb,
+                    min_memory_kb: c_manifest.min_memory_kb,
                 };
                 reg.handle = handle;
                 reg.entry = CAppEntry {
-                    on_create:  Some(ON_CREATE_TABLE[reg_slot]),
-                    on_start:   None,
-                    on_pause:   None,
-                    on_resume:  None,
+                    on_create: Some(ON_CREATE_TABLE[reg_slot]),
+                    on_start: None,
+                    on_pause: None,
+                    on_resume: None,
                     on_destroy: Some(ON_DESTROY_TABLE[reg_slot]),
-                    manifest:   &reg.manifest as *const CAppManifest,
+                    manifest: &reg.manifest as *const CAppManifest,
                 };
                 reg.used = true;
             }

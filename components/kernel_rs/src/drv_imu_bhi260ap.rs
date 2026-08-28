@@ -84,9 +84,9 @@ unsafe extern "C" fn bhi260ap_init(config: *const c_void) -> i32 {
     if !config.is_null() {
         let src = &*(config as *const ImuBhi260apConfig);
         let imu = &mut *(&raw mut S_IMU);
-        imu.cfg.i2c_bus  = src.i2c_bus;
+        imu.cfg.i2c_bus = src.i2c_bus;
         imu.cfg.i2c_addr = src.i2c_addr;
-        imu.cfg.pin_int  = src.pin_int;
+        imu.cfg.pin_int = src.pin_int;
     }
     ESP_ERR_NOT_SUPPORTED
 }
@@ -100,10 +100,10 @@ unsafe extern "C" fn bhi260ap_init(config: *const c_void) -> i32 {
 unsafe extern "C" fn bhi260ap_deinit() {
     // TODO: Remove ISR, remove I2C device, clear state.
     let imu = &mut *(&raw mut S_IMU);
-    imu.cfg.i2c_bus  = std::ptr::null_mut();
+    imu.cfg.i2c_bus = std::ptr::null_mut();
     imu.cfg.i2c_addr = 0x28;
-    imu.cfg.pin_int  = -1;
-    imu.cb      = None;
+    imu.cfg.pin_int = -1;
+    imu.cb = None;
     imu.cb_data = std::ptr::null_mut();
 }
 
@@ -129,7 +129,7 @@ unsafe extern "C" fn bhi260ap_get_data(_data: *mut HalImuData) -> i32 {
 /// `cb` must remain valid until replaced or the driver is de-initialised.
 unsafe extern "C" fn bhi260ap_register_callback(cb: HalImuCb, user_data: *mut c_void) -> i32 {
     let imu = &mut *(&raw mut S_IMU);
-    imu.cb      = cb;
+    imu.cb = cb;
     imu.cb_data = user_data;
     ESP_OK
 }
@@ -162,13 +162,13 @@ unsafe extern "C" fn bhi260ap_sleep(_enter: bool) -> i32 {
 ///
 /// Pass to `hal_imu_register()`.  Returned by `drv_imu_bhi260ap_get()`.
 static IMU_DRIVER: HalImuDriver = HalImuDriver {
-    init:              Some(bhi260ap_init),
-    deinit:            Some(bhi260ap_deinit),
-    get_data:          Some(bhi260ap_get_data),
+    init: Some(bhi260ap_init),
+    deinit: Some(bhi260ap_deinit),
+    get_data: Some(bhi260ap_get_data),
     register_callback: Some(bhi260ap_register_callback),
-    set_sample_rate:   Some(bhi260ap_set_sample_rate),
-    sleep:             Some(bhi260ap_sleep),
-    name:              b"BHI260AP\0".as_ptr() as *const c_char,
+    set_sample_rate: Some(bhi260ap_set_sample_rate),
+    sleep: Some(bhi260ap_sleep),
+    name: b"BHI260AP\0".as_ptr() as *const c_char,
 };
 
 /// Return the BHI260AP IMU driver vtable.
@@ -256,15 +256,15 @@ mod tests {
             reset_state();
             let bus_sentinel = 0xDEAD_BEEFusize as *mut c_void;
             let cfg = ImuBhi260apConfig {
-                i2c_bus:  bus_sentinel,
+                i2c_bus: bus_sentinel,
                 i2c_addr: 0x29,
-                pin_int:  42,
+                pin_int: 42,
             };
             bhi260ap_init(&cfg as *const ImuBhi260apConfig as *const c_void);
             let imu = &*(&raw const S_IMU);
-            assert_eq!(imu.cfg.i2c_bus,  bus_sentinel);
+            assert_eq!(imu.cfg.i2c_bus, bus_sentinel);
             assert_eq!(imu.cfg.i2c_addr, 0x29);
-            assert_eq!(imu.cfg.pin_int,  42);
+            assert_eq!(imu.cfg.pin_int, 42);
         }
     }
 
@@ -275,9 +275,15 @@ mod tests {
         unsafe {
             reset_state();
             let mut data = HalImuData {
-                accel_x: 0.0, accel_y: 0.0, accel_z: 0.0,
-                gyro_x:  0.0, gyro_y:  0.0, gyro_z:  0.0,
-                mag_x:   0.0, mag_y:   0.0, mag_z:   0.0,
+                accel_x: 0.0,
+                accel_y: 0.0,
+                accel_z: 0.0,
+                gyro_x: 0.0,
+                gyro_y: 0.0,
+                gyro_z: 0.0,
+                mag_x: 0.0,
+                mag_y: 0.0,
+                mag_z: 0.0,
             };
             assert_eq!(
                 bhi260ap_get_data(&mut data as *mut HalImuData),
@@ -331,7 +337,7 @@ mod tests {
         unsafe {
             reset_state();
             assert_eq!(bhi260ap_set_sample_rate(100), ESP_ERR_NOT_SUPPORTED);
-            assert_eq!(bhi260ap_set_sample_rate(0),   ESP_ERR_NOT_SUPPORTED);
+            assert_eq!(bhi260ap_set_sample_rate(0), ESP_ERR_NOT_SUPPORTED);
         }
     }
 
@@ -341,7 +347,7 @@ mod tests {
     fn test_sleep_returns_not_supported() {
         unsafe {
             reset_state();
-            assert_eq!(bhi260ap_sleep(true),  ESP_ERR_NOT_SUPPORTED);
+            assert_eq!(bhi260ap_sleep(true), ESP_ERR_NOT_SUPPORTED);
             assert_eq!(bhi260ap_sleep(false), ESP_ERR_NOT_SUPPORTED);
         }
     }
@@ -353,9 +359,9 @@ mod tests {
         unsafe {
             reset_state();
             let cfg = ImuBhi260apConfig {
-                i2c_bus:  0x1usize as *mut c_void,
+                i2c_bus: 0x1usize as *mut c_void,
                 i2c_addr: 0x28,
-                pin_int:  5,
+                pin_int: 5,
             };
             bhi260ap_init(&cfg as *const ImuBhi260apConfig as *const c_void);
             bhi260ap_deinit();

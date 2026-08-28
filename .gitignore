@@ -27,6 +27,10 @@ tools/*_private.key
 components/kernel_rs/target/
 recovery/target/
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Claude Code
 .claude/
 simulator/build/

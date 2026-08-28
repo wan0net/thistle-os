@@ -249,10 +249,7 @@ fn derive_v2_envelope_key_with<F>(
     derive: F,
 ) -> Result<[u8; MASTER_KEY_LEN], i32>
 where
-    F: FnOnce(
-        &[u8; MASTER_KEY_LEN],
-        &[u8; V2_SALT_LEN],
-    ) -> Result<[u8; MASTER_KEY_LEN], i32>,
+    F: FnOnce(&[u8; MASTER_KEY_LEN], &[u8; V2_SALT_LEN]) -> Result<[u8; MASTER_KEY_LEN], i32>,
 {
     if input.len() < V2_OVERHEAD {
         return Err(ESP_ERR_INVALID_SIZE);
@@ -462,10 +459,7 @@ pub unsafe extern "C" fn rs_msg_crypto_establish(
     passphrase: *const u8,
     passphrase_len: usize,
 ) -> i32 {
-    if passphrase.is_null()
-        || passphrase_len == 0
-        || passphrase_len > MAX_PASSPHRASE_LEN
-    {
+    if passphrase.is_null() || passphrase_len == 0 || passphrase_len > MAX_PASSPHRASE_LEN {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -666,10 +660,7 @@ pub unsafe extern "C" fn rs_msg_crypto_channel_count() -> i32 {
 
 /// Get information about a channel by contact ID.
 #[no_mangle]
-pub unsafe extern "C" fn rs_msg_crypto_get_channel(
-    contact_id: u32,
-    out: *mut CChannelInfo,
-) -> i32 {
+pub unsafe extern "C" fn rs_msg_crypto_get_channel(contact_id: u32, out: *mut CChannelInfo) -> i32 {
     if out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -722,11 +713,7 @@ pub unsafe extern "C" fn rs_msg_crypto_derive_key(
     pw_len: usize,
     key_out: *mut u8,
 ) -> i32 {
-    if passphrase.is_null()
-        || key_out.is_null()
-        || pw_len == 0
-        || pw_len > MAX_PASSPHRASE_LEN
-    {
+    if passphrase.is_null() || key_out.is_null() || pw_len == 0 || pw_len > MAX_PASSPHRASE_LEN {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -909,7 +896,10 @@ mod tests {
             let ret = unsafe { rs_msg_crypto_establish(i, pw.as_ptr(), pw.len()) };
             assert_eq!(ret, ESP_OK);
         }
-        assert_eq!(unsafe { rs_msg_crypto_channel_count() }, MAX_CHANNELS as i32);
+        assert_eq!(
+            unsafe { rs_msg_crypto_channel_count() },
+            MAX_CHANNELS as i32
+        );
         // One more should fail
         let ret = unsafe { rs_msg_crypto_establish(999, pw.as_ptr(), pw.len()) };
         assert_eq!(ret, ESP_ERR_NO_MEM);
@@ -1069,27 +1059,20 @@ mod tests {
     fn test_malformed_v2_envelope_is_rejected_before_kdf() {
         let password_material = prehash_passphrase(b"shared passphrase");
         let mut derive_calls = 0;
-        let result = derive_v2_envelope_key_with(
-            &password_material,
-            &[VERSION; V2_OVERHEAD - 1],
-            |_, _| {
+        let result =
+            derive_v2_envelope_key_with(&password_material, &[VERSION; V2_OVERHEAD - 1], |_, _| {
                 derive_calls += 1;
                 Ok([0u8; MASTER_KEY_LEN])
-            },
-        );
+            });
         assert_eq!(result, Err(ESP_ERR_INVALID_SIZE));
         assert_eq!(derive_calls, 0);
 
         let mut wrong_version = [0u8; V2_OVERHEAD];
         wrong_version[0] = 0xFF;
-        let result = derive_v2_envelope_key_with(
-            &password_material,
-            &wrong_version,
-            |_, _| {
-                derive_calls += 1;
-                Ok([0u8; MASTER_KEY_LEN])
-            },
-        );
+        let result = derive_v2_envelope_key_with(&password_material, &wrong_version, |_, _| {
+            derive_calls += 1;
+            Ok([0u8; MASTER_KEY_LEN])
+        });
         assert_eq!(result, Err(ESP_ERR_NOT_SUPPORTED));
         assert_eq!(derive_calls, 0);
     }
@@ -1171,8 +1154,7 @@ mod tests {
             assert_eq!(enc_len, size + OVERHEAD);
 
             let mut decrypted = vec![0u8; size];
-            let pt_len =
-                decrypt_message(&key, &encrypted[..enc_len], &mut decrypted).unwrap();
+            let pt_len = decrypt_message(&key, &encrypted[..enc_len], &mut decrypted).unwrap();
             assert_eq!(pt_len, size);
             assert_eq!(&decrypted[..pt_len], &plaintext[..]);
         }
@@ -1189,7 +1171,13 @@ mod tests {
         let mut ct = [0u8; 100];
         // Contact 2 has no channel
         let ret = unsafe {
-            rs_msg_crypto_encrypt(2, plaintext.as_ptr(), plaintext.len(), ct.as_mut_ptr(), ct.len())
+            rs_msg_crypto_encrypt(
+                2,
+                plaintext.as_ptr(),
+                plaintext.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+            )
         };
         assert_eq!(ret, ESP_ERR_NOT_FOUND);
     }
@@ -1324,7 +1312,13 @@ mod tests {
         let plaintext = b"test msg";
         let mut ct = [0u8; 128];
         let enc_len = unsafe {
-            rs_msg_crypto_encrypt(1, plaintext.as_ptr(), plaintext.len(), ct.as_mut_ptr(), ct.len())
+            rs_msg_crypto_encrypt(
+                1,
+                plaintext.as_ptr(),
+                plaintext.len(),
+                ct.as_mut_ptr(),
+                ct.len(),
+            )
         };
         assert!(enc_len > 0);
 
@@ -1440,22 +1434,19 @@ mod tests {
         let pw = b"p";
         unsafe { rs_msg_crypto_establish(1, pw.as_ptr(), pw.len()) };
         let pt = b"hello";
-        let ret = unsafe {
-            rs_msg_crypto_encrypt(1, pt.as_ptr(), pt.len(), std::ptr::null_mut(), 100)
-        };
+        let ret =
+            unsafe { rs_msg_crypto_encrypt(1, pt.as_ptr(), pt.len(), std::ptr::null_mut(), 100) };
         assert_eq!(ret, ESP_ERR_INVALID_ARG);
 
         // Null plaintext input (with non-zero length)
         let mut ct = [0u8; 128];
-        let ret = unsafe {
-            rs_msg_crypto_encrypt(1, std::ptr::null(), 5, ct.as_mut_ptr(), ct.len())
-        };
+        let ret =
+            unsafe { rs_msg_crypto_encrypt(1, std::ptr::null(), 5, ct.as_mut_ptr(), ct.len()) };
         assert_eq!(ret, ESP_ERR_INVALID_ARG);
 
         // Null decrypt inputs
-        let ret = unsafe {
-            rs_msg_crypto_decrypt(1, std::ptr::null(), 10, ct.as_mut_ptr(), ct.len())
-        };
+        let ret =
+            unsafe { rs_msg_crypto_decrypt(1, std::ptr::null(), 10, ct.as_mut_ptr(), ct.len()) };
         assert_eq!(ret, ESP_ERR_INVALID_ARG);
 
         // Null stats output
@@ -1479,9 +1470,8 @@ mod tests {
         unsafe { rs_msg_crypto_establish(1, pw.as_ptr(), pw.len()) };
 
         let mut ct = [0u8; V2_OVERHEAD + 16]; // extra space
-        let enc_len = unsafe {
-            rs_msg_crypto_encrypt(1, [].as_ptr(), 0, ct.as_mut_ptr(), ct.len())
-        };
+        let enc_len =
+            unsafe { rs_msg_crypto_encrypt(1, [].as_ptr(), 0, ct.as_mut_ptr(), ct.len()) };
         assert_eq!(enc_len, V2_OVERHEAD as i32);
 
         let mut pt = [0u8; 16];
@@ -1522,7 +1512,11 @@ mod tests {
         let mut key2 = [0u8; 32];
         let ret = unsafe {
             rs_msg_crypto_derive_key_v2(
-                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), key1.as_mut_ptr()
+                pw.as_ptr(),
+                pw.len(),
+                salt.as_ptr(),
+                salt.len(),
+                key1.as_mut_ptr(),
             )
         };
         assert_eq!(ret, ESP_OK);
@@ -1531,7 +1525,11 @@ mod tests {
         // Same passphrase produces same key
         unsafe {
             rs_msg_crypto_derive_key_v2(
-                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), key2.as_mut_ptr()
+                pw.as_ptr(),
+                pw.len(),
+                salt.as_ptr(),
+                salt.len(),
+                key2.as_mut_ptr(),
             );
         }
         assert_eq!(key1, key2);
@@ -1545,7 +1543,11 @@ mod tests {
         let mut ffi_key = [0u8; 32];
         unsafe {
             rs_msg_crypto_derive_key_v2(
-                pw.as_ptr(), pw.len(), salt.as_ptr(), salt.len(), ffi_key.as_mut_ptr()
+                pw.as_ptr(),
+                pw.len(),
+                salt.as_ptr(),
+                salt.len(),
+                ffi_key.as_mut_ptr(),
             );
         }
         assert_eq!(ffi_key, internal);

@@ -319,9 +319,10 @@ impl BleScanner {
             let prefix = &self.filter_name[..self.filter_name_len];
             let dev_name = &new_dev.name[..self.filter_name_len];
             // Case-insensitive prefix match
-            let matches = prefix.iter().zip(dev_name.iter()).all(|(&a, &b)| {
-                a.to_ascii_lowercase() == b.to_ascii_lowercase()
-            });
+            let matches = prefix
+                .iter()
+                .zip(dev_name.iter())
+                .all(|(&a, &b)| a.to_ascii_lowercase() == b.to_ascii_lowercase());
             if !matches {
                 return;
             }
@@ -414,9 +415,7 @@ impl BleScanner {
             None => return,
         };
         // Collect populated indices
-        let mut indices: Vec<usize> = (0..MAX_DEVICES)
-            .filter(|&i| devices[i].is_some())
-            .collect();
+        let mut indices: Vec<usize> = (0..MAX_DEVICES).filter(|&i| devices[i].is_some()).collect();
         // Sort indices by RSSI descending
         indices.sort_by(|&a, &b| {
             let rssi_a = devices[a].as_ref().map(|d| d.rssi).unwrap_or(-127);
@@ -424,7 +423,8 @@ impl BleScanner {
             rssi_b.cmp(&rssi_a)
         });
         // Rebuild array in sorted order
-        let mut sorted: Vec<Option<BleDevice>> = indices.iter().map(|&i| devices[i].take()).collect();
+        let mut sorted: Vec<Option<BleDevice>> =
+            indices.iter().map(|&i| devices[i].take()).collect();
         // Clear remaining slots
         for slot in devices.iter_mut() {
             *slot = None;
@@ -515,7 +515,8 @@ fn parse_adv_data(raw: &[u8], device: &mut BleDevice) {
                 let name_len = data_len.min(MAX_NAME_LEN);
                 // Only update name if this is a complete name or longer
                 if ad_type == AD_TYPE_COMPLETE_NAME || name_len > device.name_len {
-                    device.name[..name_len].copy_from_slice(&raw[data_start..data_start + name_len]);
+                    device.name[..name_len]
+                        .copy_from_slice(&raw[data_start..data_start + name_len]);
                     if name_len < MAX_NAME_LEN {
                         device.name[name_len] = 0;
                     }
@@ -528,8 +529,9 @@ fn parse_adv_data(raw: &[u8], device: &mut BleDevice) {
                         (raw[data_start] as u16) | ((raw[data_start + 1] as u16) << 8);
                     let mfg_payload_len = (data_len - 2).min(MAX_ADV_LEN);
                     if mfg_payload_len > 0 {
-                        device.mfg_data[..mfg_payload_len]
-                            .copy_from_slice(&raw[data_start + 2..data_start + 2 + mfg_payload_len]);
+                        device.mfg_data[..mfg_payload_len].copy_from_slice(
+                            &raw[data_start + 2..data_start + 2 + mfg_payload_len],
+                        );
                     }
                     device.mfg_len = mfg_payload_len;
                 } else if data_len == 1 {
@@ -722,11 +724,7 @@ pub extern "C" fn rs_ble_scanner_stop() -> i32 {
 
             #[cfg(not(test))]
             unsafe {
-                esp_log_write(
-                    ESP_LOG_INFO,
-                    TAG.as_ptr(),
-                    b"BLE scan stopped\0".as_ptr(),
-                );
+                esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"BLE scan stopped\0".as_ptr());
             }
             ESP_OK
         }
@@ -757,23 +755,18 @@ pub extern "C" fn rs_ble_scanner_get_count() -> i32 {
 /// # Safety
 /// `out` must point to a valid `CBleDeviceInfo` struct.
 #[no_mangle]
-pub unsafe extern "C" fn rs_ble_scanner_get_device(
-    index: u32,
-    out: *mut CBleDeviceInfo,
-) -> i32 {
+pub unsafe extern "C" fn rs_ble_scanner_get_device(index: u32, out: *mut CBleDeviceInfo) -> i32 {
     if out.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
     match SCANNER.lock() {
-        Ok(s) => {
-            match s.get_device_by_index(index as usize) {
-                Some(dev) => {
-                    *out = device_to_c(dev);
-                    ESP_OK
-                }
-                None => ESP_ERR_NOT_FOUND,
+        Ok(s) => match s.get_device_by_index(index as usize) {
+            Some(dev) => {
+                *out = device_to_c(dev);
+                ESP_OK
             }
-        }
+            None => ESP_ERR_NOT_FOUND,
+        },
         Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
@@ -795,20 +788,18 @@ pub unsafe extern "C" fn rs_ble_scanner_find_by_addr(
     addr_buf.copy_from_slice(std::slice::from_raw_parts(addr, 6));
 
     match SCANNER.lock() {
-        Ok(s) => {
-            match s.find_by_addr(&addr_buf) {
-                Some(idx) => {
-                    if let Some(ref devices) = s.devices {
-                        if let Some(ref dev) = devices[idx] {
-                            *out = device_to_c(dev);
-                            return ESP_OK;
-                        }
+        Ok(s) => match s.find_by_addr(&addr_buf) {
+            Some(idx) => {
+                if let Some(ref devices) = s.devices {
+                    if let Some(ref dev) = devices[idx] {
+                        *out = device_to_c(dev);
+                        return ESP_OK;
                     }
-                    ESP_ERR_NOT_FOUND
                 }
-                None => ESP_ERR_NOT_FOUND,
+                ESP_ERR_NOT_FOUND
             }
-        }
+            None => ESP_ERR_NOT_FOUND,
+        },
         Err(_) => ESP_ERR_INVALID_STATE,
     }
 }
@@ -1132,7 +1123,8 @@ mod tests {
         assert_eq!(rs_ble_scanner_get_count(), 1);
         // Check updated fields
         if let Ok(s) = SCANNER.lock() {
-            let d = s.find_by_addr(&addr)
+            let d = s
+                .find_by_addr(&addr)
                 .and_then(|i| s.devices.as_ref().and_then(|devs| devs[i].as_ref()))
                 .unwrap();
             assert_eq!(d.rssi, -45);
@@ -1290,9 +1282,7 @@ mod tests {
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
         // find_by_name with null name
         let mut results = [CBleDeviceInfo::zeroed(); 1];
-        let rc = unsafe {
-            rs_ble_scanner_find_by_name(std::ptr::null(), results.as_mut_ptr(), 1)
-        };
+        let rc = unsafe { rs_ble_scanner_find_by_name(std::ptr::null(), results.as_mut_ptr(), 1) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
         // get_stats with null out
         let rc = unsafe { rs_ble_scanner_get_stats(std::ptr::null_mut()) };
@@ -1325,7 +1315,17 @@ mod tests {
     #[test]
     fn test_parse_adv_complete_name() {
         let mut dev = BleDevice::new();
-        let data = [8, AD_TYPE_COMPLETE_NAME, b'T', b'h', b'i', b's', b't', b'l', b'e'];
+        let data = [
+            8,
+            AD_TYPE_COMPLETE_NAME,
+            b'T',
+            b'h',
+            b'i',
+            b's',
+            b't',
+            b'l',
+            b'e',
+        ];
         parse_adv_data(&data, &mut dev);
         assert_eq!(dev.name_len, 7);
         assert_eq!(&dev.name[..7], b"Thistle");
@@ -1358,8 +1358,8 @@ mod tests {
     fn test_parse_adv_128bit_uuid() {
         let mut dev = BleDevice::new();
         let uuid: [u8; 16] = [
-            0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
-            0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E,
+            0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00,
+            0x40, 0x6E,
         ];
         let mut data = vec![17, AD_TYPE_UUID128_COMPLETE];
         data.extend_from_slice(&uuid);

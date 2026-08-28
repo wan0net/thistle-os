@@ -136,10 +136,10 @@ unsafe fn vTaskDelay(_ticks: u32) {}
 #[repr(C)]
 struct UartConfig {
     baud_rate: i32,
-    data_bits: u32,  // UART_DATA_8_BITS = 3
-    parity: u32,     // UART_PARITY_DISABLE = 0
-    stop_bits: u32,  // UART_STOP_BITS_1 = 1
-    flow_ctrl: u32,  // UART_HW_FLOWCTRL_DISABLE = 0
+    data_bits: u32, // UART_DATA_8_BITS = 3
+    parity: u32,    // UART_PARITY_DISABLE = 0
+    stop_bits: u32, // UART_STOP_BITS_1 = 1
+    flow_ctrl: u32, // UART_HW_FLOWCTRL_DISABLE = 0
     rx_flow_ctrl_thresh: u8,
     source_clk: u32, // UART_SCLK_DEFAULT = 0
 }
@@ -241,10 +241,7 @@ pub fn nmea_verify_checksum(sentence: &[u8]) -> bool {
         return false;
     }
 
-    let received = match u8::from_str_radix(
-        core::str::from_utf8(&hex[..2]).unwrap_or("XX"),
-        16,
-    ) {
+    let received = match u8::from_str_radix(core::str::from_utf8(&hex[..2]).unwrap_or("XX"), 16) {
         Ok(v) => v,
         Err(_) => return false,
     };
@@ -295,18 +292,22 @@ pub fn nmea_to_timestamp(time_str: &str, date_str: &str) -> u32 {
     let db = date_str.as_bytes();
 
     let digit = |b: u8| -> u32 {
-        if b.is_ascii_digit() { (b - b'0') as u32 } else { 0 }
+        if b.is_ascii_digit() {
+            (b - b'0') as u32
+        } else {
+            0
+        }
     };
 
-    let hour  = digit(tb[0]) * 10 + digit(tb[1]);
-    let min   = digit(tb[2]) * 10 + digit(tb[3]);
-    let sec   = digit(tb[4]) * 10 + digit(tb[5]);
-    let mday  = digit(db[0]) * 10 + digit(db[1]);
+    let hour = digit(tb[0]) * 10 + digit(tb[1]);
+    let min = digit(tb[2]) * 10 + digit(tb[3]);
+    let sec = digit(tb[4]) * 10 + digit(tb[5]);
+    let mday = digit(db[0]) * 10 + digit(db[1]);
     let month = digit(db[2]) * 10 + digit(db[3]); // 1-based
-    let yy    = digit(db[4]) * 10 + digit(db[5]);
+    let yy = digit(db[4]) * 10 + digit(db[5]);
     // Match C mktime convention: yy is years since 1900, so yy ≥ 70 → 1970+,
     // yy < 70 → 2000+.  (Same rule as the C driver's `t.tm_year = yy + 100`.)
-    let year  = if yy >= 70 { 1900 + yy } else { 2000 + yy };
+    let year = if yy >= 70 { 1900 + yy } else { 2000 + yy };
 
     if mday == 0 || month == 0 || month > 12 {
         return 0;
@@ -370,10 +371,10 @@ unsafe fn process_gnrmc(fields: &[&str]) {
         return;
     }
 
-    let valid   = fields[2].starts_with('A');
-    let lat     = nmea_parse_coord(fields[3], fields[4]);
-    let lon     = nmea_parse_coord(fields[5], fields[6]);
-    let speed   = if !fields[7].is_empty() {
+    let valid = fields[2].starts_with('A');
+    let lat = nmea_parse_coord(fields[3], fields[4]);
+    let lon = nmea_parse_coord(fields[5], fields[6]);
+    let speed = if !fields[7].is_empty() {
         fields[7].parse::<f32>().unwrap_or(0.0) * KNOTS_TO_KMH
     } else {
         0.0
@@ -386,11 +387,11 @@ unsafe fn process_gnrmc(fields: &[&str]) {
     let ts = nmea_to_timestamp(fields[1], fields[9]);
 
     let gps = &mut *(&raw mut S_GPS);
-    gps.last_position.latitude    = lat;
-    gps.last_position.longitude   = lon;
-    gps.last_position.speed_kmh   = speed;
+    gps.last_position.latitude = lat;
+    gps.last_position.longitude = lon;
+    gps.last_position.speed_kmh = speed;
     gps.last_position.heading_deg = heading;
-    gps.last_position.fix_valid   = valid;
+    gps.last_position.fix_valid = valid;
     if ts != 0 {
         gps.last_position.timestamp = ts;
     }
@@ -419,9 +420,9 @@ unsafe fn process_gngga(fields: &[&str]) {
         return;
     }
 
-    let quality: i32    = fields[6].parse().unwrap_or(0);
+    let quality: i32 = fields[6].parse().unwrap_or(0);
     let satellites: i32 = fields[7].parse().unwrap_or(0);
-    let altitude: f32   = fields[9].parse().unwrap_or(0.0);
+    let altitude: f32 = fields[9].parse().unwrap_or(0.0);
 
     let gps = &mut *(&raw mut S_GPS);
     gps.last_position.satellites = satellites.max(0) as u8;
@@ -538,19 +539,23 @@ unsafe extern "C" fn mia_m10q_init(config: *const c_void) -> i32 {
     }
 
     let src = &*(config as *const GpsMiaM10qConfig);
-    gps.cfg.uart_num  = src.uart_num;
-    gps.cfg.pin_tx    = src.pin_tx;
-    gps.cfg.pin_rx    = src.pin_rx;
+    gps.cfg.uart_num = src.uart_num;
+    gps.cfg.pin_tx = src.pin_tx;
+    gps.cfg.pin_rx = src.pin_rx;
     gps.cfg.baud_rate = src.baud_rate;
 
-    let baud = if gps.cfg.baud_rate == 0 { 9600 } else { gps.cfg.baud_rate };
+    let baud = if gps.cfg.baud_rate == 0 {
+        9600
+    } else {
+        gps.cfg.baud_rate
+    };
 
     #[cfg(target_os = "espidf")]
     {
         let uart_cfg = UartConfig {
             baud_rate: baud as i32,
             data_bits: 3, // UART_DATA_8_BITS
-            parity:    0, // UART_PARITY_DISABLE
+            parity: 0,    // UART_PARITY_DISABLE
             stop_bits: 1, // UART_STOP_BITS_1
             flow_ctrl: 0, // UART_HW_FLOWCTRL_DISABLE
             rx_flow_ctrl_thresh: 0,
@@ -597,13 +602,18 @@ unsafe extern "C" fn mia_m10q_init(config: *const c_void) -> i32 {
     }
 
     gps.last_position = HalGpsPosition {
-        latitude: 0.0, longitude: 0.0, altitude_m: 0.0,
-        speed_kmh: 0.0, heading_deg: 0.0, satellites: 0,
-        fix_valid: false, timestamp: 0,
+        latitude: 0.0,
+        longitude: 0.0,
+        altitude_m: 0.0,
+        speed_kmh: 0.0,
+        heading_deg: 0.0,
+        satellites: 0,
+        fix_valid: false,
+        timestamp: 0,
     };
-    gps.nmea_idx    = 0;
-    gps.rx_task     = std::ptr::null_mut();
-    gps.enabled     = false;
+    gps.nmea_idx = 0;
+    gps.rx_task = std::ptr::null_mut();
+    gps.enabled = false;
     gps.initialized = true;
 
     ESP_OK
@@ -630,7 +640,7 @@ unsafe extern "C" fn mia_m10q_deinit() {
     uart_driver_delete(gps.cfg.uart_num);
 
     gps.initialized = false;
-    gps.enabled     = false;
+    gps.enabled = false;
 }
 
 /// Start the background UART RX task.
@@ -703,7 +713,11 @@ unsafe extern "C" fn mia_m10q_get_position(pos: *mut HalGpsPosition) -> i32 {
     let gps = &*(&raw const S_GPS);
     *pos = gps.last_position;
 
-    if (*pos).fix_valid { ESP_OK } else { ESP_ERR_INVALID_STATE }
+    if (*pos).fix_valid {
+        ESP_OK
+    } else {
+        ESP_ERR_INVALID_STATE
+    }
 }
 
 /// Register a callback invoked on each valid fix.
@@ -712,7 +726,7 @@ unsafe extern "C" fn mia_m10q_get_position(pos: *mut HalGpsPosition) -> i32 {
 /// `cb` must remain valid until it is replaced or the driver is de-initialised.
 unsafe extern "C" fn mia_m10q_register_callback(cb: HalGpsCb, user_data: *mut c_void) -> i32 {
     let gps = &mut *(&raw mut S_GPS);
-    gps.cb      = cb;
+    gps.cb = cb;
     gps.cb_data = user_data;
     ESP_OK
 }
@@ -756,14 +770,14 @@ unsafe extern "C" fn mia_m10q_sleep(enter: bool) -> i32 {
 ///
 /// Pass to `hal_gps_register()`. Returned by `drv_gps_mia_m10q_get()`.
 static GPS_DRIVER: HalGpsDriver = HalGpsDriver {
-    init:              Some(mia_m10q_init),
-    deinit:            Some(mia_m10q_deinit),
-    enable:            Some(mia_m10q_enable),
-    disable:           Some(mia_m10q_disable),
-    get_position:      Some(mia_m10q_get_position),
+    init: Some(mia_m10q_init),
+    deinit: Some(mia_m10q_deinit),
+    enable: Some(mia_m10q_enable),
+    disable: Some(mia_m10q_disable),
+    get_position: Some(mia_m10q_get_position),
     register_callback: Some(mia_m10q_register_callback),
-    sleep:             Some(mia_m10q_sleep),
-    name:              b"MIA-M10Q\0".as_ptr() as *const c_char,
+    sleep: Some(mia_m10q_sleep),
+    name: b"MIA-M10Q\0".as_ptr() as *const c_char,
 };
 
 /// Return the MIA-M10Q driver vtable.
@@ -907,7 +921,7 @@ mod tests {
     fn test_timestamp_sub_seconds_ignored() {
         // hhmmss.ss — only the first 6 bytes matter
         let ts1 = nmea_to_timestamp("092751.00", "280511");
-        let ts2 = nmea_to_timestamp("092751",    "280511");
+        let ts2 = nmea_to_timestamp("092751", "280511");
         assert_eq!(ts1, ts2);
     }
 
@@ -958,11 +972,11 @@ mod tests {
 
             let expected_lat = 53.0 + 21.6802 / 60.0;
             let expected_lon = -(6.0 + 30.3372 / 60.0);
-            assert!((pos.latitude  - expected_lat).abs() < 1e-5);
+            assert!((pos.latitude - expected_lat).abs() < 1e-5);
             assert!((pos.longitude - expected_lon).abs() < 1e-5);
 
             let expected_speed = 0.06_f32 * KNOTS_TO_KMH;
-            assert!((pos.speed_kmh   - expected_speed).abs() < 1e-4);
+            assert!((pos.speed_kmh - expected_speed).abs() < 1e-4);
             assert!((pos.heading_deg - 31.66).abs() < 1e-3);
         }
     }
@@ -974,8 +988,19 @@ mod tests {
             (*(&raw mut S_GPS)).last_position.fix_valid = true;
 
             let fields: Vec<&str> = vec![
-                "$GNRMC", "000000.000", "V", "0000.0000", "N",
-                "00000.0000", "E", "0.00", "0.00", "010170", "", "", "N",
+                "$GNRMC",
+                "000000.000",
+                "V",
+                "0000.0000",
+                "N",
+                "00000.0000",
+                "E",
+                "0.00",
+                "0.00",
+                "010170",
+                "",
+                "",
+                "N",
             ];
             process_gnrmc(&fields);
 
@@ -991,8 +1016,21 @@ mod tests {
             reset_state();
 
             let fields: Vec<&str> = vec![
-                "$GNGGA", "092751.000", "5321.6802", "N", "00630.3372", "W",
-                "1", "8", "1.03", "61.7", "M", "55.3", "M", "", "",
+                "$GNGGA",
+                "092751.000",
+                "5321.6802",
+                "N",
+                "00630.3372",
+                "W",
+                "1",
+                "8",
+                "1.03",
+                "61.7",
+                "M",
+                "55.3",
+                "M",
+                "",
+                "",
             ];
             process_gngga(&fields);
 
@@ -1009,8 +1047,21 @@ mod tests {
             (*(&raw mut S_GPS)).last_position.fix_valid = true;
 
             let fields: Vec<&str> = vec![
-                "$GNGGA", "000000.000", "0000.0000", "N", "00000.0000", "W",
-                "0", "0", "99.0", "0.0", "M", "0.0", "M", "", "",
+                "$GNGGA",
+                "000000.000",
+                "0000.0000",
+                "N",
+                "00000.0000",
+                "W",
+                "0",
+                "0",
+                "99.0",
+                "0.0",
+                "M",
+                "0.0",
+                "M",
+                "",
+                "",
             ];
             process_gngga(&fields);
 
@@ -1052,8 +1103,16 @@ mod tests {
     fn test_init_and_deinit_cycle() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
-            assert_eq!(mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void), ESP_OK);
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
+            assert_eq!(
+                mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void),
+                ESP_OK
+            );
             assert!((*(&raw const S_GPS)).initialized);
             mia_m10q_deinit();
             assert!(!(*(&raw const S_GPS)).initialized);
@@ -1064,7 +1123,12 @@ mod tests {
     fn test_double_init_returns_invalid_state() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
             let p = &cfg as *const GpsMiaM10qConfig as *const c_void;
             assert_eq!(mia_m10q_init(p), ESP_OK);
             assert_eq!(mia_m10q_init(p), ESP_ERR_INVALID_STATE);
@@ -1084,7 +1148,12 @@ mod tests {
     fn test_enable_disable_cycle() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
             mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void);
             assert_eq!(mia_m10q_enable(), ESP_OK);
             assert!((*(&raw const S_GPS)).enabled);
@@ -1098,7 +1167,12 @@ mod tests {
     fn test_double_enable_is_idempotent() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
             mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void);
             assert_eq!(mia_m10q_enable(), ESP_OK);
             assert_eq!(mia_m10q_enable(), ESP_OK);
@@ -1110,7 +1184,12 @@ mod tests {
     fn test_disable_before_enable_is_ok() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
             mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void);
             assert_eq!(mia_m10q_disable(), ESP_OK);
             mia_m10q_deinit();
@@ -1131,7 +1210,10 @@ mod tests {
     #[test]
     fn test_get_position_null_returns_invalid_arg() {
         unsafe {
-            assert_eq!(mia_m10q_get_position(std::ptr::null_mut()), ESP_ERR_INVALID_ARG);
+            assert_eq!(
+                mia_m10q_get_position(std::ptr::null_mut()),
+                ESP_ERR_INVALID_ARG
+            );
         }
     }
 
@@ -1140,9 +1222,14 @@ mod tests {
         unsafe {
             reset_state();
             let mut pos = HalGpsPosition {
-                latitude: 0.0, longitude: 0.0, altitude_m: 0.0,
-                speed_kmh: 0.0, heading_deg: 0.0, satellites: 0,
-                fix_valid: false, timestamp: 0,
+                latitude: 0.0,
+                longitude: 0.0,
+                altitude_m: 0.0,
+                speed_kmh: 0.0,
+                heading_deg: 0.0,
+                satellites: 0,
+                fix_valid: false,
+                timestamp: 0,
             };
             assert_eq!(
                 mia_m10q_get_position(&mut pos as *mut HalGpsPosition),
@@ -1156,14 +1243,22 @@ mod tests {
         unsafe {
             reset_state();
             (*(&raw mut S_GPS)).last_position.fix_valid = true;
-            (*(&raw mut S_GPS)).last_position.latitude  = 53.36;
+            (*(&raw mut S_GPS)).last_position.latitude = 53.36;
 
             let mut pos = HalGpsPosition {
-                latitude: 0.0, longitude: 0.0, altitude_m: 0.0,
-                speed_kmh: 0.0, heading_deg: 0.0, satellites: 0,
-                fix_valid: false, timestamp: 0,
+                latitude: 0.0,
+                longitude: 0.0,
+                altitude_m: 0.0,
+                speed_kmh: 0.0,
+                heading_deg: 0.0,
+                satellites: 0,
+                fix_valid: false,
+                timestamp: 0,
             };
-            assert_eq!(mia_m10q_get_position(&mut pos as *mut HalGpsPosition), ESP_OK);
+            assert_eq!(
+                mia_m10q_get_position(&mut pos as *mut HalGpsPosition),
+                ESP_OK
+            );
             assert!(pos.fix_valid);
             assert!((pos.latitude - 53.36).abs() < 1e-9);
         }
@@ -1191,7 +1286,7 @@ mod tests {
     fn test_sleep_before_init_returns_invalid_state() {
         unsafe {
             reset_state();
-            assert_eq!(mia_m10q_sleep(true),  ESP_ERR_INVALID_STATE);
+            assert_eq!(mia_m10q_sleep(true), ESP_ERR_INVALID_STATE);
             assert_eq!(mia_m10q_sleep(false), ESP_ERR_INVALID_STATE);
         }
     }
@@ -1200,10 +1295,15 @@ mod tests {
     fn test_sleep_enter_and_wake_after_init() {
         unsafe {
             reset_state();
-            let cfg = GpsMiaM10qConfig { uart_num: 1, pin_tx: 10, pin_rx: 9, baud_rate: 9600 };
+            let cfg = GpsMiaM10qConfig {
+                uart_num: 1,
+                pin_tx: 10,
+                pin_rx: 9,
+                baud_rate: 9600,
+            };
             mia_m10q_init(&cfg as *const GpsMiaM10qConfig as *const c_void);
             // Stub uart_write_bytes returns 0 (>= 0), so both succeed.
-            assert_eq!(mia_m10q_sleep(true),  ESP_OK);
+            assert_eq!(mia_m10q_sleep(true), ESP_OK);
             assert_eq!(mia_m10q_sleep(false), ESP_OK);
             mia_m10q_deinit();
         }

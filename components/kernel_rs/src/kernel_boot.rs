@@ -128,7 +128,9 @@ pub extern "C" fn kernel_init() -> i32 {
 
     // NVS flash — required by WiFi, BLE, and other ESP-IDF subsystems
     let ret = nvs_flash_init_safe();
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // Mount SPIFFS — apps, drivers, config, themes live here
     let ret = spiffs_mount();
@@ -138,22 +140,32 @@ pub extern "C" fn kernel_init() -> i32 {
 
     // Event bus (Rust)
     let ret = crate::event::event_bus_init();
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // IPC (Rust)
     let ret = crate::ipc::ipc_init();
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // Network manager (C)
     let ret = unsafe { net_manager_init() };
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // Syscall table (C for now)
     let ret = unsafe { syscall_table_init() };
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // Register mbedtls hardware-accelerated crypto driver (board-independent)
-    unsafe { hal_crypto_register(drv_crypto_mbedtls_get()); }
+    unsafe {
+        hal_crypto_register(drv_crypto_mbedtls_get());
+    }
 
     // Board config: reads board.json, inits buses, loads drivers
     let ret = unsafe { board_config_init(std::ptr::null()) };
@@ -173,6 +185,7 @@ pub extern "C" fn kernel_init() -> i32 {
     // Register the thistle-tk launcher (always register — main.c decides
     // whether to launch it based on the active WM)
     crate::tk_launcher::register();
+    crate::tk_appstore::tk_appstore_register();
 
     // Register the thistle-tk flashlight (first LVGL-to-tk migration).
     // The LVGL variant registers separately in main.c for the LVGL WM path.
@@ -185,37 +198,45 @@ pub extern "C" fn kernel_init() -> i32 {
     // Production key: generated 2026-03-28, private key in GitHub secret THISTLE_SIGNING_KEY
     #[cfg(not(debug_assertions))]
     let signing_key: [u8; 32] = [
-        0xeb, 0x7b, 0xc6, 0x5c, 0x1e, 0x3f, 0xfc, 0x49,
-        0x96, 0x1c, 0xa8, 0x15, 0xdb, 0x34, 0x37, 0x58,
-        0x34, 0x6d, 0xbe, 0x80, 0x50, 0x38, 0xbc, 0xd4,
-        0x49, 0x5a, 0x7a, 0x01, 0x66, 0x5e, 0x60, 0x89,
+        0xeb, 0x7b, 0xc6, 0x5c, 0x1e, 0x3f, 0xfc, 0x49, 0x96, 0x1c, 0xa8, 0x15, 0xdb, 0x34, 0x37,
+        0x58, 0x34, 0x6d, 0xbe, 0x80, 0x50, 0x38, 0xbc, 0xd4, 0x49, 0x5a, 0x7a, 0x01, 0x66, 0x5e,
+        0x60, 0x89,
     ];
     // Dev key — only used in debug builds. Distinct from production key
     // so dev-signed artifacts are rejected by release firmware and vice versa.
     // Generated: SHA-256("thistleos-dev-signing-key-2026")[0..32]
     #[cfg(debug_assertions)]
     let signing_key: [u8; 32] = [
-        0xa1, 0x3e, 0x7b, 0x54, 0x02, 0xd8, 0xf1, 0x6c,
-        0x89, 0x45, 0xbb, 0x0a, 0xe7, 0x33, 0x9d, 0x5f,
-        0x12, 0xc4, 0x68, 0xae, 0x7d, 0x01, 0xf5, 0x92,
-        0xb6, 0x3a, 0xde, 0x84, 0x50, 0xc7, 0x1b, 0xe9,
+        0xa1, 0x3e, 0x7b, 0x54, 0x02, 0xd8, 0xf1, 0x6c, 0x89, 0x45, 0xbb, 0x0a, 0xe7, 0x33, 0x9d,
+        0x5f, 0x12, 0xc4, 0x68, 0xae, 0x7d, 0x01, 0xf5, 0x92, 0xb6, 0x3a, 0xde, 0x84, 0x50, 0xc7,
+        0x1b, 0xe9,
     ];
-    unsafe { crate::signing::signing_init(signing_key.as_ptr()); }
+    unsafe {
+        crate::signing::signing_init(signing_key.as_ptr());
+    }
 
     // ELF loader (C)
     let ret = unsafe { elf_loader_init() };
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // OTA (C)
     let ret = unsafe { ota_init() };
-    if ret != ESP_OK { return ret; }
+    if ret != ESP_OK {
+        return ret;
+    }
 
     // WiFi (C, non-fatal)
     let ret = unsafe { wifi_manager_init() };
     if ret == ESP_OK {
-        unsafe { net_manager_register_wifi(); }
+        unsafe {
+            net_manager_register_wifi();
+        }
         // Auto-connect to saved WiFi credentials from system.json
-        unsafe { wifi_manager_auto_connect(); }
+        unsafe {
+            wifi_manager_auto_connect();
+        }
     }
 
     // Publish SYSTEM_BOOT event
@@ -234,7 +255,9 @@ pub extern "C" fn kernel_run() {
     // LVGL tick is driven by ui component. This is the kernel heartbeat.
     loop {
         #[cfg(target_os = "espidf")]
-        unsafe { vTaskDelay(1); } // 1 tick = 1ms at 1000Hz FreeRTOS
+        unsafe {
+            vTaskDelay(1);
+        } // 1 tick = 1ms at 1000Hz FreeRTOS
         #[cfg(not(target_os = "espidf"))]
         std::thread::sleep(std::time::Duration::from_millis(10));
     }

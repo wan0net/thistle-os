@@ -96,7 +96,13 @@ fn data_value_to_csv(v: &DataValue) -> String {
         DataValue::Int(n) => n.to_string(),
         DataValue::Float(f) => format!("{:.6}", f),
         DataValue::Text(s) => csv_escape(s),
-        DataValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+        DataValue::Bool(b) => {
+            if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
         DataValue::Null => String::new(),
     }
 }
@@ -356,10 +362,7 @@ pub unsafe extern "C" fn rs_data_logger_add_column(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rs_data_logger_begin_row(
-    logger: *mut DataLogger,
-    timestamp: u32,
-) -> i32 {
+pub unsafe extern "C" fn rs_data_logger_begin_row(logger: *mut DataLogger, timestamp: u32) -> i32 {
     if logger.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -516,9 +519,7 @@ mod tests {
     fn test_schema_locking() {
         let mut logger = DataLogger::new("test");
         logger.add_column("val", ColumnType::Int).unwrap();
-        logger
-            .log_row(1000, vec![DataValue::Int(42)])
-            .unwrap();
+        logger.log_row(1000, vec![DataValue::Int(42)]).unwrap();
 
         // Can't add columns after first row
         let result = logger.add_column("extra", ColumnType::Float);
@@ -579,9 +580,7 @@ mod tests {
     fn test_csv_export_with_header() {
         let mut logger = DataLogger::new("test");
         logger.add_column("value", ColumnType::Int).unwrap();
-        logger
-            .log_row(0, vec![DataValue::Int(42)])
-            .unwrap();
+        logger.log_row(0, vec![DataValue::Int(42)]).unwrap();
 
         let csv = logger.to_csv();
         let lines: Vec<&str> = csv.lines().collect();
@@ -625,9 +624,7 @@ mod tests {
         logger.add_column("v", ColumnType::Int).unwrap();
 
         // 2024-01-15 12:30:45 UTC = 1705321845
-        logger
-            .log_row(1705321845, vec![DataValue::Int(1)])
-            .unwrap();
+        logger.log_row(1705321845, vec![DataValue::Int(1)]).unwrap();
 
         let csv = logger.to_csv();
         assert!(csv.contains("2024-01-15T12:30:45Z"));
@@ -826,10 +823,7 @@ mod tests {
         logger.add_column("c", ColumnType::Bool).unwrap();
 
         logger
-            .log_row(
-                0,
-                vec![DataValue::Null, DataValue::Null, DataValue::Null],
-            )
+            .log_row(0, vec![DataValue::Null, DataValue::Null, DataValue::Null])
             .unwrap();
 
         let csv = logger.to_csv();
@@ -978,7 +972,10 @@ mod tests {
             assert_eq!(rs_data_logger_set_float(logger, 0, 23.5), ESP_OK);
 
             let text_val = CString::new("kitchen").unwrap();
-            assert_eq!(rs_data_logger_set_text(logger, 1, text_val.as_ptr()), ESP_OK);
+            assert_eq!(
+                rs_data_logger_set_text(logger, 1, text_val.as_ptr()),
+                ESP_OK
+            );
             assert_eq!(rs_data_logger_set_bool(logger, 2, 1), ESP_OK);
             assert_eq!(rs_data_logger_commit_row(logger), ESP_OK);
 
@@ -991,7 +988,10 @@ mod tests {
             // Set correct type
             assert_eq!(rs_data_logger_set_float(logger, 0, 24.0), ESP_OK);
             let text_val2 = CString::new("bedroom").unwrap();
-            assert_eq!(rs_data_logger_set_text(logger, 1, text_val2.as_ptr()), ESP_OK);
+            assert_eq!(
+                rs_data_logger_set_text(logger, 1, text_val2.as_ptr()),
+                ESP_OK
+            );
             assert_eq!(rs_data_logger_set_bool(logger, 2, 0), ESP_OK);
             assert_eq!(rs_data_logger_commit_row(logger), ESP_OK);
 

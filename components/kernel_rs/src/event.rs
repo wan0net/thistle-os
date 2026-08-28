@@ -5,8 +5,8 @@
 // subscribers. Exposes a C-compatible FFI surface for integration with existing
 // C drivers and apps.
 
-use std::sync::Mutex;
 use std::os::raw::c_void;
+use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
 // ESP-IDF error codes (matching esp_err.h)
@@ -34,39 +34,39 @@ pub const EVENT_SUBSCRIBERS_MAX: usize = 8;
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventType {
-    SystemBoot        = 0,
-    SystemShutdown    = 1,
-    AppLaunched       = 2,
-    AppStopped        = 3,
-    AppSwitched       = 4,
-    InputKey          = 5,
-    InputTouch        = 6,
-    RadioRx           = 7,
-    GpsFix            = 8,
-    BatteryLow        = 9,
-    BatteryCharging   = 10,
-    SdMounted         = 11,
-    SdUnmounted       = 12,
-    WifiConnected     = 13,
-    WifiDisconnected  = 14,
-    BleConnected      = 15,
-    BleDisconnected   = 16,
+    SystemBoot = 0,
+    SystemShutdown = 1,
+    AppLaunched = 2,
+    AppStopped = 3,
+    AppSwitched = 4,
+    InputKey = 5,
+    InputTouch = 6,
+    RadioRx = 7,
+    GpsFix = 8,
+    BatteryLow = 9,
+    BatteryCharging = 10,
+    SdMounted = 11,
+    SdUnmounted = 12,
+    WifiConnected = 13,
+    WifiDisconnected = 14,
+    BleConnected = 15,
+    BleDisconnected = 16,
 }
 
 impl EventType {
     /// Convert a raw u32 from C into an EventType, returning None if out of range.
     pub fn from_u32(v: u32) -> Option<Self> {
         match v {
-            0  => Some(Self::SystemBoot),
-            1  => Some(Self::SystemShutdown),
-            2  => Some(Self::AppLaunched),
-            3  => Some(Self::AppStopped),
-            4  => Some(Self::AppSwitched),
-            5  => Some(Self::InputKey),
-            6  => Some(Self::InputTouch),
-            7  => Some(Self::RadioRx),
-            8  => Some(Self::GpsFix),
-            9  => Some(Self::BatteryLow),
+            0 => Some(Self::SystemBoot),
+            1 => Some(Self::SystemShutdown),
+            2 => Some(Self::AppLaunched),
+            3 => Some(Self::AppStopped),
+            4 => Some(Self::AppSwitched),
+            5 => Some(Self::InputKey),
+            6 => Some(Self::InputTouch),
+            7 => Some(Self::RadioRx),
+            8 => Some(Self::GpsFix),
+            9 => Some(Self::BatteryLow),
             10 => Some(Self::BatteryCharging),
             11 => Some(Self::SdMounted),
             12 => Some(Self::SdUnmounted),
@@ -74,7 +74,7 @@ impl EventType {
             14 => Some(Self::WifiDisconnected),
             15 => Some(Self::BleConnected),
             16 => Some(Self::BleDisconnected),
-            _  => None,
+            _ => None,
         }
     }
 }
@@ -96,9 +96,9 @@ impl EventType {
 #[repr(C)]
 pub struct CEvent {
     pub event_type: u32,
-    pub timestamp:  u32,
-    pub data:       *mut c_void,
-    pub data_len:   usize,
+    pub timestamp: u32,
+    pub data: *mut c_void,
+    pub data_len: usize,
 }
 
 // SAFETY: CEvent is only a plain-data carrier. The raw pointer `data` is
@@ -116,7 +116,7 @@ unsafe impl Sync for CEvent {}
 /// The `user_data` raw pointer is caller-managed; the bus never dereferences it.
 #[derive(Clone, Copy)]
 struct Subscriber {
-    handler:   extern "C" fn(*const CEvent, *mut c_void),
+    handler: extern "C" fn(*const CEvent, *mut c_void),
     user_data: *mut c_void,
 }
 
@@ -220,11 +220,11 @@ pub extern "C" fn event_subscribe(
 ) -> i32 {
     let idx = match EventType::from_u32(event_type) {
         Some(t) => t as usize,
-        None    => return ESP_ERR_INVALID_ARG,
+        None => return ESP_ERR_INVALID_ARG,
     };
     match EVENT_BUS.lock() {
         Ok(mut bus) => bus.subscribe(idx, handler, user_data),
-        Err(_)      => ESP_ERR_INVALID_ARG,
+        Err(_) => ESP_ERR_INVALID_ARG,
     }
 }
 
@@ -239,11 +239,11 @@ pub extern "C" fn event_unsubscribe(
 ) -> i32 {
     let idx = match EventType::from_u32(event_type) {
         Some(t) => t as usize,
-        None    => return ESP_ERR_INVALID_ARG,
+        None => return ESP_ERR_INVALID_ARG,
     };
     match EVENT_BUS.lock() {
         Ok(mut bus) => bus.unsubscribe(idx, handler),
-        Err(_)      => ESP_ERR_INVALID_ARG,
+        Err(_) => ESP_ERR_INVALID_ARG,
     }
 }
 
@@ -259,7 +259,7 @@ pub extern "C" fn event_publish(event: *const CEvent) -> i32 {
     }
     match EVENT_BUS.lock() {
         Ok(bus) => bus.publish(event),
-        Err(_)  => ESP_ERR_INVALID_ARG,
+        Err(_) => ESP_ERR_INVALID_ARG,
     }
 }
 
@@ -282,8 +282,8 @@ pub extern "C" fn event_publish_simple(event_type: u32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::os::raw::c_void;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     // Each test manipulates the global bus, so we reset affected slots by
     // unsubscribing after the test rather than sharing mutable state across
@@ -292,9 +292,9 @@ mod tests {
     fn make_event(event_type: EventType) -> CEvent {
         CEvent {
             event_type: event_type as u32,
-            timestamp:  0,
-            data:       std::ptr::null_mut(),
-            data_len:   0,
+            timestamp: 0,
+            data: std::ptr::null_mut(),
+            data_len: 0,
         }
     }
 
@@ -387,9 +387,18 @@ mod tests {
         COUNTER_C.store(0, Ordering::SeqCst);
 
         let etype = EventType::RadioRx as u32;
-        assert_eq!(event_subscribe(etype, handler_a, std::ptr::null_mut()), ESP_OK);
-        assert_eq!(event_subscribe(etype, handler_b, std::ptr::null_mut()), ESP_OK);
-        assert_eq!(event_subscribe(etype, handler_c, std::ptr::null_mut()), ESP_OK);
+        assert_eq!(
+            event_subscribe(etype, handler_a, std::ptr::null_mut()),
+            ESP_OK
+        );
+        assert_eq!(
+            event_subscribe(etype, handler_b, std::ptr::null_mut()),
+            ESP_OK
+        );
+        assert_eq!(
+            event_subscribe(etype, handler_c, std::ptr::null_mut()),
+            ESP_OK
+        );
 
         let ev = make_event(EventType::RadioRx);
         let rc = event_publish(&ev as *const CEvent);
@@ -416,20 +425,29 @@ mod tests {
         let out_of_range = EVENT_MAX as u32; // == 17 == EVENT_MAX
 
         let rc = event_subscribe(out_of_range, handler_dummy, std::ptr::null_mut());
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "subscribe with invalid type must fail");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "subscribe with invalid type must fail"
+        );
 
         let rc = event_unsubscribe(out_of_range, handler_dummy);
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "unsubscribe with invalid type must fail");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "unsubscribe with invalid type must fail"
+        );
 
         // publish: build an event with an out-of-range type directly
         let ev = CEvent {
             event_type: out_of_range,
-            timestamp:  0,
-            data:       std::ptr::null_mut(),
-            data_len:   0,
+            timestamp: 0,
+            data: std::ptr::null_mut(),
+            data_len: 0,
         };
         let rc = event_publish(&ev as *const CEvent);
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "publish with invalid type must fail");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "publish with invalid type must fail"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -451,8 +469,14 @@ mod tests {
     fn test_max_subscribers() {
         let etype = EventType::GpsFix as u32;
         let handlers: [extern "C" fn(*const CEvent, *mut c_void); 8] = [
-            handler_ms0, handler_ms1, handler_ms2, handler_ms3,
-            handler_ms4, handler_ms5, handler_ms6, handler_ms7,
+            handler_ms0,
+            handler_ms1,
+            handler_ms2,
+            handler_ms3,
+            handler_ms4,
+            handler_ms5,
+            handler_ms6,
+            handler_ms7,
         ];
 
         for (i, &h) in handlers.iter().enumerate() {
@@ -462,7 +486,10 @@ mod tests {
 
         // 9th registration must be rejected
         let rc = event_subscribe(etype, handler_ms8, std::ptr::null_mut());
-        assert_eq!(rc, ESP_ERR_NO_MEM, "9th subscriber must return ESP_ERR_NO_MEM");
+        assert_eq!(
+            rc, ESP_ERR_NO_MEM,
+            "9th subscriber must return ESP_ERR_NO_MEM"
+        );
 
         // Clean up all 8 registered handlers
         for &h in &handlers {
@@ -501,22 +528,46 @@ mod tests {
         COUNTER_DT_WIFI.store(0, Ordering::SeqCst);
         COUNTER_DT_BLE.store(0, Ordering::SeqCst);
 
-        event_subscribe(EventType::WifiConnected as u32, handler_dt_wifi, std::ptr::null_mut());
-        event_subscribe(EventType::BleDisconnected as u32, handler_dt_ble, std::ptr::null_mut());
+        event_subscribe(
+            EventType::WifiConnected as u32,
+            handler_dt_wifi,
+            std::ptr::null_mut(),
+        );
+        event_subscribe(
+            EventType::BleDisconnected as u32,
+            handler_dt_ble,
+            std::ptr::null_mut(),
+        );
 
         // Publish only WifiConnected
         let ev = make_event(EventType::WifiConnected);
         event_publish(&ev as *const CEvent);
 
-        assert_eq!(COUNTER_DT_WIFI.load(Ordering::SeqCst), 1, "wifi handler should fire");
-        assert_eq!(COUNTER_DT_BLE.load(Ordering::SeqCst), 0, "ble handler must not fire for wifi event");
+        assert_eq!(
+            COUNTER_DT_WIFI.load(Ordering::SeqCst),
+            1,
+            "wifi handler should fire"
+        );
+        assert_eq!(
+            COUNTER_DT_BLE.load(Ordering::SeqCst),
+            0,
+            "ble handler must not fire for wifi event"
+        );
 
         // Publish only BleDisconnected
         let ev2 = make_event(EventType::BleDisconnected);
         event_publish(&ev2 as *const CEvent);
 
-        assert_eq!(COUNTER_DT_WIFI.load(Ordering::SeqCst), 1, "wifi handler must not fire for ble event");
-        assert_eq!(COUNTER_DT_BLE.load(Ordering::SeqCst), 1, "ble handler should fire");
+        assert_eq!(
+            COUNTER_DT_WIFI.load(Ordering::SeqCst),
+            1,
+            "wifi handler must not fire for ble event"
+        );
+        assert_eq!(
+            COUNTER_DT_BLE.load(Ordering::SeqCst),
+            1,
+            "ble handler should fire"
+        );
 
         // Clean up
         event_unsubscribe(EventType::WifiConnected as u32, handler_dt_wifi);
@@ -549,11 +600,19 @@ mod tests {
     fn test_publish_simple_no_data() {
         COUNTER_SIMPLE.store(0, Ordering::SeqCst);
 
-        event_subscribe(EventType::SdMounted as u32, handler_simple, std::ptr::null_mut());
+        event_subscribe(
+            EventType::SdMounted as u32,
+            handler_simple,
+            std::ptr::null_mut(),
+        );
 
         let rc = event_publish_simple(EventType::SdMounted as u32);
         assert_eq!(rc, ESP_OK, "event_publish_simple must return ESP_OK");
-        assert_eq!(COUNTER_SIMPLE.load(Ordering::SeqCst), 1, "handler must be called once");
+        assert_eq!(
+            COUNTER_SIMPLE.load(Ordering::SeqCst),
+            1,
+            "handler must be called once"
+        );
 
         event_unsubscribe(EventType::SdMounted as u32, handler_simple);
     }
@@ -566,7 +625,10 @@ mod tests {
     #[test]
     fn test_publish_null_event() {
         let rc = event_publish(std::ptr::null());
-        assert_eq!(rc, ESP_ERR_INVALID_ARG, "publish(NULL) must return ESP_ERR_INVALID_ARG");
+        assert_eq!(
+            rc, ESP_ERR_INVALID_ARG,
+            "publish(NULL) must return ESP_ERR_INVALID_ARG"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -635,14 +697,18 @@ mod tests {
     fn test_data_pointer_and_length_forwarded() {
         DATA_LEN_SEEN.store(0, Ordering::SeqCst);
 
-        event_subscribe(EventType::InputKey as u32, handler_data_check, std::ptr::null_mut());
+        event_subscribe(
+            EventType::InputKey as u32,
+            handler_data_check,
+            std::ptr::null_mut(),
+        );
 
         let payload: u32 = 0xCAFE_BABE;
         let ev = CEvent {
             event_type: EventType::InputKey as u32,
-            timestamp:  0,
-            data:       &payload as *const u32 as *mut c_void,
-            data_len:   std::mem::size_of::<u32>(),
+            timestamp: 0,
+            data: &payload as *const u32 as *mut c_void,
+            data_len: std::mem::size_of::<u32>(),
         };
         event_publish(&ev as *const CEvent);
 
@@ -666,6 +732,9 @@ mod tests {
         // The existing test_publish_no_subscribers also covers this but uses
         // event_publish directly; here we verify event_publish_simple too.
         let rc = event_publish_simple(EventType::BatteryCharging as u32);
-        assert_eq!(rc, ESP_OK, "publish_simple with no subscribers must return ESP_OK");
+        assert_eq!(
+            rc, ESP_OK,
+            "publish_simple with no subscribers must return ESP_OK"
+        );
     }
 }

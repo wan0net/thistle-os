@@ -39,30 +39,30 @@ const GPIO_NUM_NC: i32 = -1;
 
 // ── SSD1306 command bytes ─────────────────────────────────────────────────────
 
-const SSD1306_CMD_DISPLAY_OFF:       u8 = 0xAE;
-const SSD1306_CMD_DISPLAY_ON:        u8 = 0xAF;
-const SSD1306_CMD_SET_CONTRAST:      u8 = 0x81;
+const SSD1306_CMD_DISPLAY_OFF: u8 = 0xAE;
+const SSD1306_CMD_DISPLAY_ON: u8 = 0xAF;
+const SSD1306_CMD_SET_CONTRAST: u8 = 0x81;
 const SSD1306_CMD_ENTIRE_DISPLAY_ON: u8 = 0xA4; // follow VRAM
-const SSD1306_CMD_NORMAL_DISPLAY:    u8 = 0xA6; // not inverted
-const SSD1306_CMD_SET_ADDR_MODE:     u8 = 0x20;
-const SSD1306_ADDR_MODE_HORIZONTAL:  u8 = 0x00;
-const SSD1306_CMD_SET_COL_ADDR:      u8 = 0x21;
-const SSD1306_CMD_SET_PAGE_ADDR:     u8 = 0x22;
-const SSD1306_CMD_SET_MUX_RATIO:     u8 = 0xA8;
-const SSD1306_CMD_SET_DISP_OFFSET:   u8 = 0xD3;
-const SSD1306_CMD_SET_START_LINE:    u8 = 0x40; // OR with start line (0)
-const SSD1306_CMD_SET_SEG_REMAP:     u8 = 0xA1; // column 127 → SEG0 (flip H)
-const SSD1306_CMD_SET_COM_SCAN_DIR:  u8 = 0xC8; // remapped (flip V)
-const SSD1306_CMD_SET_COM_PINS:      u8 = 0xDA;
-const SSD1306_CMD_COM_PINS_ALT:      u8 = 0x12; // alternative COM pin config for 128×64
-const SSD1306_CMD_SET_DISP_CLK:      u8 = 0xD5;
-const SSD1306_CMD_DISP_CLK_DEFAULT:  u8 = 0x80;
-const SSD1306_CMD_SET_PRECHARGE:     u8 = 0xD9;
+const SSD1306_CMD_NORMAL_DISPLAY: u8 = 0xA6; // not inverted
+const SSD1306_CMD_SET_ADDR_MODE: u8 = 0x20;
+const SSD1306_ADDR_MODE_HORIZONTAL: u8 = 0x00;
+const SSD1306_CMD_SET_COL_ADDR: u8 = 0x21;
+const SSD1306_CMD_SET_PAGE_ADDR: u8 = 0x22;
+const SSD1306_CMD_SET_MUX_RATIO: u8 = 0xA8;
+const SSD1306_CMD_SET_DISP_OFFSET: u8 = 0xD3;
+const SSD1306_CMD_SET_START_LINE: u8 = 0x40; // OR with start line (0)
+const SSD1306_CMD_SET_SEG_REMAP: u8 = 0xA1; // column 127 → SEG0 (flip H)
+const SSD1306_CMD_SET_COM_SCAN_DIR: u8 = 0xC8; // remapped (flip V)
+const SSD1306_CMD_SET_COM_PINS: u8 = 0xDA;
+const SSD1306_CMD_COM_PINS_ALT: u8 = 0x12; // alternative COM pin config for 128×64
+const SSD1306_CMD_SET_DISP_CLK: u8 = 0xD5;
+const SSD1306_CMD_DISP_CLK_DEFAULT: u8 = 0x80;
+const SSD1306_CMD_SET_PRECHARGE: u8 = 0xD9;
 const SSD1306_CMD_PRECHARGE_DEFAULT: u8 = 0x22;
-const SSD1306_CMD_SET_VCOM_DESEL:    u8 = 0xDB;
-const SSD1306_CMD_VCOM_DESEL_DEFAULT:u8 = 0x30;
-const SSD1306_CMD_CHARGE_PUMP:       u8 = 0x8D;
-const SSD1306_CMD_CHARGE_PUMP_ON:    u8 = 0x14;
+const SSD1306_CMD_SET_VCOM_DESEL: u8 = 0xDB;
+const SSD1306_CMD_VCOM_DESEL_DEFAULT: u8 = 0x30;
+const SSD1306_CMD_CHARGE_PUMP: u8 = 0x8D;
+const SSD1306_CMD_CHARGE_PUMP_ON: u8 = 0x14;
 
 /// I2C control byte prefix for command transmissions.
 /// 0x00 = Co=0, D/C#=0 → following bytes are commands.
@@ -103,8 +103,8 @@ pub struct OledSsd1306Config {
 
 struct OledState {
     cfg: OledSsd1306Config,
-    dev: *mut c_void,                // i2c_master_dev_handle_t
-    fb: [u8; OLED_FB_SIZE],          // 1-bit monochrome framebuffer, page-packed
+    dev: *mut c_void,       // i2c_master_dev_handle_t
+    fb: [u8; OLED_FB_SIZE], // 1-bit monochrome framebuffer, page-packed
     initialized: bool,
     display_on: bool,
 }
@@ -274,63 +274,93 @@ unsafe fn ssd1306_hw_reset(pin_rst: i32) {
 unsafe fn ssd1306_init_sequence() -> i32 {
     // Display off during init
     let mut r = ssd1306_send_cmd(SSD1306_CMD_DISPLAY_OFF);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Oscillator frequency & divide ratio
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_DISP_CLK, SSD1306_CMD_DISP_CLK_DEFAULT);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Multiplex ratio (63 = 64 rows)
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_MUX_RATIO, 63);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Display offset = 0
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_DISP_OFFSET, 0);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Start line 0
     r = ssd1306_send_cmd(SSD1306_CMD_SET_START_LINE | 0);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Charge pump enabled (required for typical SSD1306 modules without VCC pin)
     r = ssd1306_send_cmd2(SSD1306_CMD_CHARGE_PUMP, SSD1306_CMD_CHARGE_PUMP_ON);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Horizontal addressing mode (auto-increment column → page)
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_ADDR_MODE, SSD1306_ADDR_MODE_HORIZONTAL);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Segment remap (column 127 → SEG0 for correct left-to-right)
     r = ssd1306_send_cmd(SSD1306_CMD_SET_SEG_REMAP);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // COM scan direction remapped (for correct top-to-bottom)
     r = ssd1306_send_cmd(SSD1306_CMD_SET_COM_SCAN_DIR);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // COM pins hardware configuration (alt config, no left-right remap)
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_COM_PINS, SSD1306_CMD_COM_PINS_ALT);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Contrast (mid-level default)
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_CONTRAST, 0xCF);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Pre-charge period
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_PRECHARGE, SSD1306_CMD_PRECHARGE_DEFAULT);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // VCOM deselect level
     r = ssd1306_send_cmd2(SSD1306_CMD_SET_VCOM_DESEL, SSD1306_CMD_VCOM_DESEL_DEFAULT);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Entire display on (follow VRAM, not force on)
     r = ssd1306_send_cmd(SSD1306_CMD_ENTIRE_DISPLAY_ON);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Normal (non-inverted) display
     r = ssd1306_send_cmd(SSD1306_CMD_NORMAL_DISPLAY);
-    if r != ESP_OK { return r; }
+    if r != ESP_OK {
+        return r;
+    }
 
     // Display on
     ssd1306_send_cmd(SSD1306_CMD_DISPLAY_ON)
@@ -355,9 +385,9 @@ pub unsafe extern "C" fn ssd1306_init(config: *const c_void) -> i32 {
     }
 
     let cfg = &*(config as *const OledSsd1306Config);
-    s.cfg.i2c_bus  = cfg.i2c_bus;
+    s.cfg.i2c_bus = cfg.i2c_bus;
     s.cfg.i2c_addr = cfg.i2c_addr;
-    s.cfg.pin_rst  = cfg.pin_rst;
+    s.cfg.pin_rst = cfg.pin_rst;
     s.cfg.pin_vext = cfg.pin_vext;
 
     // Clear framebuffer
@@ -366,7 +396,7 @@ pub unsafe extern "C" fn ssd1306_init(config: *const c_void) -> i32 {
     // Enable external power rail (Heltec V3: GPIO 36 driven LOW powers the OLED)
     if s.cfg.pin_vext != GPIO_NUM_NC {
         gpio_set_direction(s.cfg.pin_vext, 2); // GPIO_MODE_OUTPUT
-        gpio_set_level(s.cfg.pin_vext, 0);     // LOW = power on
+        gpio_set_level(s.cfg.pin_vext, 0); // LOW = power on
         vTaskDelay(2); // ~20ms for rail to stabilise
     }
 
@@ -401,7 +431,7 @@ pub unsafe extern "C" fn ssd1306_init(config: *const c_void) -> i32 {
     }
 
     s.initialized = true;
-    s.display_on  = true;
+    s.display_on = true;
     ESP_OK
 }
 
@@ -423,7 +453,7 @@ pub unsafe extern "C" fn ssd1306_deinit() {
     i2c_master_bus_rm_device(s.dev);
     s.dev = std::ptr::null_mut();
     s.initialized = false;
-    s.display_on  = false;
+    s.display_on = false;
 }
 
 /// Flush a rectangular region to the display.
@@ -459,13 +489,13 @@ pub unsafe extern "C" fn ssd1306_flush(area: *const HalArea, color_data: *const 
 
     for py in y1..=y2 {
         let page = py / 8;
-        let bit  = py % 8;
+        let bit = py % 8;
         for px in x1..=x2 {
             // color_data is RGB565 LE: low byte then high byte
             let pixel_idx = (py - y1) * src_w + (px - x1);
             let byte_lo = *color_data.add(pixel_idx * 2) as u16;
             let byte_hi = *color_data.add(pixel_idx * 2 + 1) as u16;
-            let rgb565  = byte_lo | (byte_hi << 8);
+            let rgb565 = byte_lo | (byte_hi << 8);
 
             // Extract 5-bit red channel (bits 15:11)
             let r5 = ((rgb565 >> 11) & 0x1F) as u8;
@@ -491,7 +521,11 @@ pub unsafe extern "C" fn ssd1306_set_brightness(percent: u8) -> i32 {
     if !state().initialized {
         return ESP_ERR_INVALID_STATE;
     }
-    let clamped = if percent > 100 { 100u32 } else { percent as u32 };
+    let clamped = if percent > 100 {
+        100u32
+    } else {
+        percent as u32
+    };
     let contrast = (clamped * 255 / 100) as u8;
     ssd1306_send_cmd2(SSD1306_CMD_SET_CONTRAST, contrast)
 }
@@ -507,7 +541,11 @@ pub unsafe extern "C" fn ssd1306_sleep(enter: bool) -> i32 {
     if !state().initialized {
         return ESP_ERR_INVALID_STATE;
     }
-    let cmd = if enter { SSD1306_CMD_DISPLAY_OFF } else { SSD1306_CMD_DISPLAY_ON };
+    let cmd = if enter {
+        SSD1306_CMD_DISPLAY_OFF
+    } else {
+        SSD1306_CMD_DISPLAY_ON
+    };
     state_mut().display_on = !enter;
     ssd1306_send_cmd(cmd)
 }
@@ -654,7 +692,12 @@ mod tests {
     #[test]
     fn test_flush_before_init_returns_invalid_state() {
         reset_state();
-        let area = HalArea { x1: 0, y1: 0, x2: 10, y2: 10 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 10,
+            y2: 10,
+        };
         let data = vec![0u8; 256];
         let ret = unsafe { ssd1306_flush(&area, data.as_ptr()) };
         assert_eq!(ret, ESP_ERR_INVALID_STATE);
@@ -689,7 +732,12 @@ mod tests {
         };
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
-        let area = HalArea { x1: 0, y1: 0, x2: 0, y2: 0 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+        };
         let ret = unsafe { ssd1306_flush(&area, std::ptr::null()) };
         assert_eq!(ret, ESP_ERR_INVALID_ARG);
 
@@ -708,7 +756,12 @@ mod tests {
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
         // Full 128×64 frame, all white (RGB565 = 0xFFFF → red=31 > 8 → on)
-        let area = HalArea { x1: 0, y1: 0, x2: 127, y2: 63 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 127,
+            y2: 63,
+        };
         let data = vec![0xFFu8; 128 * 64 * 2];
         let ret = unsafe { ssd1306_flush(&area, data.as_ptr()) };
         assert_eq!(ret, ESP_OK);
@@ -733,7 +786,12 @@ mod tests {
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
         // First flush white to set all bits
-        let area = HalArea { x1: 0, y1: 0, x2: 127, y2: 63 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 127,
+            y2: 63,
+        };
         let white = vec![0xFFu8; 128 * 64 * 2];
         unsafe { ssd1306_flush(&area, white.as_ptr()) };
 
@@ -761,13 +819,22 @@ mod tests {
         unsafe { ssd1306_init(&cfg as *const OledSsd1306Config as *const c_void) };
 
         // Flush a single white pixel at (0, 0) — should set bit 0 of fb[0]
-        let area = HalArea { x1: 0, y1: 0, x2: 0, y2: 0 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+        };
         let white_pixel = [0xFFu8, 0xFF]; // RGB565 white
         let ret = unsafe { ssd1306_flush(&area, white_pixel.as_ptr()) };
         assert_eq!(ret, ESP_OK);
 
         // Page 0, column 0, bit 0 should be set
-        assert_eq!(state().fb[0] & 0x01, 0x01, "bit 0 of fb[0] must be set for pixel (0,0)");
+        assert_eq!(
+            state().fb[0] & 0x01,
+            0x01,
+            "bit 0 of fb[0] must be set for pixel (0,0)"
+        );
 
         unsafe { ssd1306_deinit() };
     }

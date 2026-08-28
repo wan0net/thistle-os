@@ -30,9 +30,9 @@ const LCD_DEFAULT_HEIGHT: u16 = 240;
 
 // ── LEDC backlight constants ──────────────────────────────────────────────────
 
-const BL_LEDC_MODE: i32 = 1;     // LEDC_LOW_SPEED_MODE
-const BL_LEDC_TIMER: i32 = 0;    // LEDC_TIMER_0
-const BL_LEDC_CHANNEL: i32 = 0;  // LEDC_CHANNEL_0
+const BL_LEDC_MODE: i32 = 1; // LEDC_LOW_SPEED_MODE
+const BL_LEDC_TIMER: i32 = 0; // LEDC_TIMER_0
+const BL_LEDC_CHANNEL: i32 = 0; // LEDC_CHANNEL_0
 const BL_LEDC_FREQ_HZ: u32 = 5000;
 const BL_LEDC_DUTY_RES: u32 = 8; // LEDC_TIMER_8_BIT
 const BL_LEDC_MAX_DUTY: u32 = 255;
@@ -92,10 +92,10 @@ impl Default for LcdSt7789Config {
 
 struct LcdState {
     cfg: LcdSt7789Config,
-    io: *mut c_void,       // esp_lcd_panel_io_handle_t
-    panel: *mut c_void,    // esp_lcd_panel_handle_t
+    io: *mut c_void,    // esp_lcd_panel_io_handle_t
+    panel: *mut c_void, // esp_lcd_panel_handle_t
     initialized: bool,
-    brightness: u8,        // last non-zero brightness (for sleep/wake)
+    brightness: u8, // last non-zero brightness (for sleep/wake)
 }
 
 // SAFETY: Only mutated during single-threaded board init / driver calls.
@@ -346,11 +346,7 @@ unsafe fn lcd_new_panel_io_spi(
 }
 
 /// Create ST7789 panel handle.
-unsafe fn lcd_new_panel_st7789(
-    io: *mut c_void,
-    pin_rst: i32,
-    panel_out: *mut *mut c_void,
-) -> i32 {
+unsafe fn lcd_new_panel_st7789(io: *mut c_void, pin_rst: i32, panel_out: *mut *mut c_void) -> i32 {
     #[cfg(target_os = "espidf")]
     {
         let panel_cfg = platform::EspLcdPanelDevConfig {
@@ -375,62 +371,105 @@ unsafe fn lcd_new_panel_st7789(
 
 unsafe fn lcd_panel_reset(panel: *mut c_void) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_reset(panel); }
+    {
+        return platform::esp_lcd_panel_reset(panel);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = panel; ESP_OK }
+    {
+        let _ = panel;
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_init(panel: *mut c_void) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_init(panel); }
+    {
+        return platform::esp_lcd_panel_init(panel);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = panel; ESP_OK }
+    {
+        let _ = panel;
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_invert_color(panel: *mut c_void, invert: bool) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_invert_color(panel, invert); }
+    {
+        return platform::esp_lcd_panel_invert_color(panel, invert);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = (panel, invert); ESP_OK }
+    {
+        let _ = (panel, invert);
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_set_gap(panel: *mut c_void, x_gap: i32, y_gap: i32) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_set_gap(panel, x_gap, y_gap); }
+    {
+        return platform::esp_lcd_panel_set_gap(panel, x_gap, y_gap);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = (panel, x_gap, y_gap); ESP_OK }
+    {
+        let _ = (panel, x_gap, y_gap);
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_disp_on_off(panel: *mut c_void, on: bool) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_disp_on_off(panel, on); }
+    {
+        return platform::esp_lcd_panel_disp_on_off(panel, on);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = (panel, on); ESP_OK }
+    {
+        let _ = (panel, on);
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_draw_bitmap(
     panel: *mut c_void,
-    x1: i32, y1: i32, x2: i32, y2: i32,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
     data: *const u8,
 ) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_draw_bitmap(panel, x1, y1, x2, y2, data); }
+    {
+        return platform::esp_lcd_panel_draw_bitmap(panel, x1, y1, x2, y2, data);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = (panel, x1, y1, x2, y2, data); ESP_OK }
+    {
+        let _ = (panel, x1, y1, x2, y2, data);
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_del(panel: *mut c_void) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_del(panel); }
+    {
+        return platform::esp_lcd_panel_del(panel);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = panel; ESP_OK }
+    {
+        let _ = panel;
+        ESP_OK
+    }
 }
 
 unsafe fn lcd_panel_io_del(io: *mut c_void) -> i32 {
     #[cfg(target_os = "espidf")]
-    { return platform::esp_lcd_panel_io_del(io); }
+    {
+        return platform::esp_lcd_panel_io_del(io);
+    }
     #[cfg(not(target_os = "espidf"))]
-    { let _ = io; ESP_OK }
+    {
+        let _ = io;
+        ESP_OK
+    }
 }
 
 // ── Driver vtable functions ───────────────────────────────────────────────────
@@ -502,8 +541,16 @@ pub unsafe extern "C" fn st7789_init(config: *const c_void) -> i32 {
     }
 
     // Update vtable dimensions from config (default if not specified)
-    let w = if s.cfg.width > 0 { s.cfg.width } else { LCD_DEFAULT_WIDTH };
-    let h = if s.cfg.height > 0 { s.cfg.height } else { LCD_DEFAULT_HEIGHT };
+    let w = if s.cfg.width > 0 {
+        s.cfg.width
+    } else {
+        LCD_DEFAULT_WIDTH
+    };
+    let h = if s.cfg.height > 0 {
+        s.cfg.height
+    } else {
+        LCD_DEFAULT_HEIGHT
+    };
     // SAFETY: vtable is written during single-threaded init before any reader.
     LCD_DRIVER.width = w;
     LCD_DRIVER.height = h;
@@ -749,7 +796,12 @@ mod tests {
     #[test]
     fn test_flush_before_init_returns_invalid_state() {
         reset_state();
-        let area = HalArea { x1: 0, y1: 0, x2: 10, y2: 10 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 10,
+            y2: 10,
+        };
         let data = vec![0u8; 256];
         let ret = unsafe { st7789_flush(&area as *const HalArea, data.as_ptr()) };
         assert_eq!(ret, ESP_ERR_INVALID_STATE);
@@ -774,7 +826,12 @@ mod tests {
         let cfg = LcdSt7789Config::default();
         unsafe { st7789_init(&cfg as *const LcdSt7789Config as *const c_void) };
 
-        let area = HalArea { x1: 0, y1: 0, x2: 10, y2: 10 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 10,
+            y2: 10,
+        };
         let ret = unsafe { st7789_flush(&area as *const HalArea, std::ptr::null()) };
         assert_eq!(ret, ESP_ERR_INVALID_ARG);
 
@@ -787,7 +844,12 @@ mod tests {
         let cfg = LcdSt7789Config::default();
         unsafe { st7789_init(&cfg as *const LcdSt7789Config as *const c_void) };
 
-        let area = HalArea { x1: 0, y1: 0, x2: 63, y2: 63 };
+        let area = HalArea {
+            x1: 0,
+            y1: 0,
+            x2: 63,
+            y2: 63,
+        };
         // 64×64 pixels × 2 bytes/pixel (RGB565)
         let data = vec![0u8; 64 * 64 * 2];
         let ret = unsafe { st7789_flush(&area as *const HalArea, data.as_ptr()) };
@@ -838,7 +900,11 @@ mod tests {
         // Setting to 0 should not update brightness field
         let ret = unsafe { st7789_set_brightness(0) };
         assert_eq!(ret, ESP_OK);
-        assert_eq!(state().brightness, 75, "brightness field must not change on zero");
+        assert_eq!(
+            state().brightness,
+            75,
+            "brightness field must not change on zero"
+        );
 
         unsafe { st7789_deinit() };
     }

@@ -189,11 +189,7 @@ impl Manifest {
             "driver" => ManifestType::Driver,
             "firmware" => ManifestType::Firmware,
             "wm" => ManifestType::Wm,
-            other => {
-                return Err(ManifestError::ParseError(format!(
-                    "unknown type: {other}"
-                )))
-            }
+            other => return Err(ManifestError::ParseError(format!("unknown type: {other}"))),
         };
 
         // Identity
@@ -418,8 +414,8 @@ pub fn json_get_detection(json: &str) -> Option<ManifestDetection> {
         return None;
     }
 
-    let address    = json_get_hex_or_int(inner, "address");
-    let chip_id_reg   = json_get_hex_or_int(inner, "chip_id_reg");
+    let address = json_get_hex_or_int(inner, "address");
+    let chip_id_reg = json_get_hex_or_int(inner, "chip_id_reg");
     let chip_id_value = json_get_hex_or_int(inner, "chip_id_value");
 
     Some(ManifestDetection {
@@ -633,9 +629,15 @@ mod tests {
     fn test_empty_manifest() {
         let json = r#"{}"#;
         let result = Manifest::from_json(json);
-        assert!(result.is_err(), "empty manifest must fail with missing 'type'");
+        assert!(
+            result.is_err(),
+            "empty manifest must fail with missing 'type'"
+        );
         if let Err(ManifestError::ParseError(msg)) = result {
-            assert!(msg.contains("type"), "error should mention missing type field");
+            assert!(
+                msg.contains("type"),
+                "error should mention missing type field"
+            );
         }
     }
 
@@ -713,9 +715,18 @@ mod tests {
             compatible_boards: vec![],
             ..Default::default()
         };
-        assert!(m.is_board_compatible("tdeck-pro"), "empty compatible_boards means universal");
-        assert!(m.is_board_compatible("tdeck"), "empty compatible_boards means universal");
-        assert!(m.is_board_compatible("unknown-board"), "empty compatible_boards means universal");
+        assert!(
+            m.is_board_compatible("tdeck-pro"),
+            "empty compatible_boards means universal"
+        );
+        assert!(
+            m.is_board_compatible("tdeck"),
+            "empty compatible_boards means universal"
+        );
+        assert!(
+            m.is_board_compatible("unknown-board"),
+            "empty compatible_boards means universal"
+        );
     }
 
     #[test]
@@ -749,7 +760,10 @@ mod tests {
     fn test_compatible_boards_absent_is_empty() {
         let json = r#"{"type": "app", "id": "x"}"#;
         let m = Manifest::from_json(json).unwrap();
-        assert!(m.compatible_boards.is_empty(), "absent field means universal (empty vec)");
+        assert!(
+            m.compatible_boards.is_empty(),
+            "absent field means universal (empty vec)"
+        );
     }
 
     #[test]
@@ -877,7 +891,10 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(universal.is_compatible(current_arch()), "universal manifest must be compatible");
+        assert!(
+            universal.is_compatible(current_arch()),
+            "universal manifest must be compatible"
+        );
 
         // A manifest targeting the current arch must be compatible.
         let same_arch = Manifest {
@@ -887,10 +904,17 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(same_arch.is_compatible(current_arch()), "same-arch manifest must be compatible");
+        assert!(
+            same_arch.is_compatible(current_arch()),
+            "same-arch manifest must be compatible"
+        );
 
         // A manifest targeting a different arch must not be compatible.
-        let other_arch = if current_arch() == "esp32s3" { "esp32c3" } else { "esp32s3" };
+        let other_arch = if current_arch() == "esp32s3" {
+            "esp32c3"
+        } else {
+            "esp32s3"
+        };
         let cross = Manifest {
             manifest_type: ManifestType::App,
             id: "x".into(),
@@ -898,7 +922,10 @@ mod tests {
             min_os: "0.1.0".into(),
             ..Default::default()
         };
-        assert!(!cross.is_compatible(current_arch()), "cross-arch manifest must not be compatible");
+        assert!(
+            !cross.is_compatible(current_arch()),
+            "cross-arch manifest must not be compatible"
+        );
     }
 
     #[test]

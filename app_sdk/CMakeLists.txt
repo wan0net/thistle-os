@@ -10,23 +10,36 @@ cmake_minimum_required(VERSION 3.16)
 function(thistle_app APP_NAME)
     cmake_parse_arguments(ARG "" "" "SRCS" ${ARGN})
 
-    add_executable(${APP_NAME} ${ARG_SRCS})
+    if(THISTLE_HOST_APP)
+        add_library(${APP_NAME} MODULE ${ARG_SRCS})
+    else()
+        add_executable(${APP_NAME} ${ARG_SRCS})
+    endif()
 
     target_include_directories(${APP_NAME} PRIVATE
         ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/include
     )
 
-    # Build as relocatable ELF (no standard libs, position independent)
-    target_compile_options(${APP_NAME} PRIVATE
-        -fPIC
-        -nostdlib
-        -fno-exceptions
-    )
+    if(THISTLE_HOST_APP)
+        target_compile_definitions(${APP_NAME} PRIVATE THISTLE_HOST_APP=1)
+        target_compile_options(${APP_NAME} PRIVATE -fPIC)
+        if(APPLE)
+            target_link_options(${APP_NAME} PRIVATE -Wl,-undefined,dynamic_lookup)
+        endif()
+        set_target_properties(${APP_NAME} PROPERTIES PREFIX "")
+    else()
+        # Build as relocatable ELF (no standard libs, position independent)
+        target_compile_options(${APP_NAME} PRIVATE
+            -fPIC
+            -nostdlib
+            -fno-exceptions
+        )
 
-    target_link_options(${APP_NAME} PRIVATE
-        -nostdlib
-        -Wl,-relocatable
-    )
+        target_link_options(${APP_NAME} PRIVATE
+            -nostdlib
+            -Wl,-relocatable
+        )
+    endif()
 
     set_target_properties(${APP_NAME} PROPERTIES
         SUFFIX ".app.elf"

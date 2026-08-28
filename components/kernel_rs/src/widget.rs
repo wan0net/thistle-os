@@ -74,7 +74,10 @@ pub unsafe extern "C" fn thistle_ui_create_button(parent: u32, text: *const c_ch
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn thistle_ui_create_text_input(parent: u32, placeholder: *const c_char) -> u32 {
+pub unsafe extern "C" fn thistle_ui_create_text_input(
+    parent: u32,
+    placeholder: *const c_char,
+) -> u32 {
     wm_widget_create_text_input(parent, placeholder)
 }
 
@@ -164,7 +167,12 @@ pub unsafe extern "C" fn thistle_ui_set_radius(widget: u32, r: i32) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn thistle_ui_on_event(widget: u32, event_type: i32, cb: *const c_void, ud: *mut c_void) {
+pub unsafe extern "C" fn thistle_ui_on_event(
+    widget: u32,
+    event_type: i32,
+    cb: *const c_void,
+    ud: *mut c_void,
+) {
     wm_widget_on_event(widget, event_type, cb, ud)
 }
 

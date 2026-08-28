@@ -32,7 +32,7 @@ CASES = (
         None,
         240,
         320,
-        "4c4bb06c6a0d9f79330e6650c90ceadbc100ceb4cb85518e72616a0dafa317b4",
+        "6ac5f8a1336cb356f90fd29634c2f85994e5d4f60a2582ecf16eb64d5c4fad2e",
         True,
     ),
     Case(
@@ -42,7 +42,7 @@ CASES = (
         "120,295",
         240,
         320,
-        "acaf9bcaf054b9c5577fe9f00fdf30cb89ece9f90cd2c012d28cd04ef46fe2cc",
+        "524fffb0106a76c1570d65d75bb1f620a601d2e0e2d7ef8231ccc9a02c0db6cc",
     ),
     Case(
         "lcd-home",
@@ -51,17 +51,17 @@ CASES = (
         None,
         320,
         240,
-        "262d7fd552cc445ae3f4483446cfc82fd4e6ff452af09c2f0d935c1b351d3ba6",
+        "8815a8bc57f7aa32c68db8b2ee0a85ea779a355e981dd8e90a5f425d01b9018e",
         True,
     ),
     Case(
         "lcd-apps",
         "tdeck",
         3000,
-        "183,215",
+        "159,215",
         320,
         240,
-        "49262aedee08e1614e66e6fdbdc982d62b94d30c525c76ed6aa8a1a59d421567",
+        "44662c390dd0816c0b473a049c58d3d3bb984d0ad6d8b27969dee259741b6317",
     ),
 )
 

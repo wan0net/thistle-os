@@ -25,9 +25,15 @@ typedef struct {
 } thistle_app_t;
 
 /* Macro to declare an app's entry point */
+#if defined(THISTLE_HOST_APP)
 #define THISTLE_APP(app_var) \
-    __attribute__((section(".thistle_app"))) \
+    __attribute__((used, visibility("default"))) \
     const thistle_app_t *_thistle_app_entry = &(app_var)
+#else
+#define THISTLE_APP(app_var) \
+    __attribute__((section(".thistle_app"), used, visibility("default"))) \
+    const thistle_app_t *_thistle_app_entry = &(app_var)
+#endif
 
 /* === System calls (resolved at load time by ELF loader) === */
 
@@ -38,7 +44,7 @@ extern void     thistle_delay(uint32_t ms);
 extern void    *thistle_malloc(size_t size);
 extern void     thistle_free(void *ptr);
 
-/* Display -- apps use LVGL directly (symbols exported by kernel) */
+/* Display geometry. UI is created through the toolkit-neutral widget API. */
 extern uint16_t thistle_display_get_width(void);
 extern uint16_t thistle_display_get_height(void);
 
@@ -62,6 +68,33 @@ extern void *thistle_fs_open(const char *path, const char *mode);
 extern int   thistle_fs_read(void *buf, size_t size, size_t count, void *stream);
 extern int   thistle_fs_write(const void *buf, size_t size, size_t count, void *stream);
 extern int   thistle_fs_close(void *stream);
+
+#define THISTLE_FS_NAME_MAX 64
+#define THISTLE_FS_TYPE_FILE 1
+#define THISTLE_FS_TYPE_DIR  2
+
+typedef struct {
+    char     name[THISTLE_FS_NAME_MAX];
+    uint64_t size_bytes;
+    uint64_t modified_ms;
+    uint8_t  entry_type;
+    uint8_t  reserved[7];
+} thistle_fs_entry_t;
+
+/* List one private-app directory into a caller-owned bounded array. Entries
+ * are sorted by name. Returns the number written, or -1 on failure. */
+extern int thistle_fs_list(const char *path,
+                           thistle_fs_entry_t *entries,
+                           size_t max_entries);
+
+/* Atomically activate a completed temporary file within the app sandbox.
+ * On filesystems that cannot rename over an existing file, the kernel uses a
+ * backup-and-restore transaction so the old destination survives failure. */
+extern int thistle_fs_replace(const char *source, const char *destination);
+
+/* Remove one regular file from the app sandbox. Directories and links are
+ * rejected. App data is never removed implicitly when uninstalling an app. */
+extern int thistle_fs_remove(const char *path);
 
 /* IPC */
 extern int thistle_msg_send(uint32_t dst_app, uint32_t type, const void *data, size_t len);
@@ -171,6 +204,10 @@ extern void thistle_ui_set_placeholder(thistle_widget_t widget, const char *text
 #define THISTLE_LAYOUT_NONE        0
 #define THISTLE_LAYOUT_FLEX_COLUMN 1
 #define THISTLE_LAYOUT_FLEX_ROW    2
+#define THISTLE_ALIGN_START         0
+#define THISTLE_ALIGN_CENTER        1
+#define THISTLE_ALIGN_END           2
+#define THISTLE_ALIGN_SPACE_BETWEEN 3
 #define THISTLE_EVENT_CLICK        0
 #define THISTLE_EVENT_VALUE_CHANGED 1
 #define THISTLE_EVENT_KEY          2

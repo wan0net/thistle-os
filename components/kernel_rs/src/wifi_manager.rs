@@ -50,8 +50,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 const ESP_LOG_ERROR: i32 = 1;
 const ESP_LOG_DEBUG: i32 = 4;
 
@@ -91,7 +91,7 @@ extern "C" {
     fn esp_event_loop_create_default() -> i32;
     fn esp_netif_get_handle_from_ifkey(key: *const c_char) -> *mut c_void;
     fn esp_netif_create_default_wifi_sta() -> *mut c_void;
-    fn thistle_wifi_init() -> i32;  // C shim: WIFI_INIT_CONFIG_DEFAULT + esp_wifi_init
+    fn thistle_wifi_init() -> i32; // C shim: WIFI_INIT_CONFIG_DEFAULT + esp_wifi_init
     fn esp_event_handler_register(
         base: *const c_char,
         id: i32,
@@ -206,38 +206,72 @@ pub extern "C" fn wifi_manager_init() -> i32 {
         if !S_WIFI_HW_INITIALIZED {
             let ret = esp_netif_init();
             if ret != ESP_OK && ret != ESP_ERR_INVALID_STATE {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"netif init failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"netif init failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
             let ret = esp_event_loop_create_default();
             if ret != ESP_OK && ret != ESP_ERR_INVALID_STATE {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"event loop failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"event loop failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
             // Check if STA interface already exists before creating
-            let existing = esp_netif_get_handle_from_ifkey(b"WIFI_STA_DEF\0".as_ptr() as *const c_char);
-            let sta = if !existing.is_null() { existing } else { esp_netif_create_default_wifi_sta() };
+            let existing =
+                esp_netif_get_handle_from_ifkey(b"WIFI_STA_DEF\0".as_ptr() as *const c_char);
+            let sta = if !existing.is_null() {
+                existing
+            } else {
+                esp_netif_create_default_wifi_sta()
+            };
             if sta.is_null() {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"netif create sta failed\0".as_ptr());
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"netif create sta failed\0".as_ptr(),
+                );
                 return -1;
             }
             // Use the C shim: WIFI_INIT_CONFIG_DEFAULT is a macro that can't be
             // called from Rust. The shim sets the magic field required by v6.
             let ret = thistle_wifi_init();
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_init failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"esp_wifi_init failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
 
             let ret = esp_wifi_set_mode(WIFI_MODE_STA);
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_set_mode failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"esp_wifi_set_mode failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
 
             let ret = esp_wifi_start();
             if ret != ESP_OK && ret != ESP_ERR_INVALID_STATE {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"esp_wifi_start failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"esp_wifi_start failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
 
@@ -252,7 +286,12 @@ pub extern "C" fn wifi_manager_init() -> i32 {
                 std::ptr::null_mut(),
             );
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"wifi event register failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"wifi event register failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
 
@@ -263,7 +302,12 @@ pub extern "C" fn wifi_manager_init() -> i32 {
                 std::ptr::null_mut(),
             );
             if ret != ESP_OK {
-                esp_log_write(ESP_LOG_ERROR, TAG.as_ptr(), b"ip event register failed: %d\0".as_ptr(), ret);
+                esp_log_write(
+                    ESP_LOG_ERROR,
+                    TAG.as_ptr(),
+                    b"ip event register failed: %d\0".as_ptr(),
+                    ret,
+                );
                 return ret;
             }
             S_WIFI_EVENTS_REGISTERED = true;
@@ -275,7 +319,11 @@ pub extern "C" fn wifi_manager_init() -> i32 {
     }
 
     unsafe {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"WiFi manager initialized\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"WiFi manager initialized\0".as_ptr(),
+        );
     }
 
     ESP_OK
@@ -349,7 +397,7 @@ pub unsafe extern "C" fn wifi_manager_scan(
             r.ssid[..copy_len].copy_from_slice(&ssid_bytes[..copy_len]);
 
             r.channel = *rec.add(AP_CHANNEL_OFFSET);
-            r.rssi    = *rec.add(AP_RSSI_OFFSET) as i8;
+            r.rssi = *rec.add(AP_RSSI_OFFSET) as i8;
             // authmode is a u32 at offset 44
             let authmode = (rec.add(AP_AUTHMODE_OFFSET) as *const u32).read_unaligned();
             r.is_open = authmode == WIFI_AUTH_OPEN;
@@ -368,7 +416,11 @@ pub unsafe extern "C" fn wifi_manager_scan(
 
     #[cfg(not(target_os = "espidf"))]
     {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"WiFi scan: simulator stub\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"WiFi scan: simulator stub\0".as_ptr(),
+        );
     }
 
     ESP_OK
@@ -431,7 +483,11 @@ pub unsafe extern "C" fn wifi_manager_connect(
             return connect_ret;
         }
 
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Connecting to WiFi...\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Connecting to WiFi...\0".as_ptr(),
+        );
 
         let timeout = if timeout_ms == 0 { 10000 } else { timeout_ms };
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout as u64);
@@ -478,7 +534,11 @@ pub unsafe extern "C" fn wifi_manager_connect(
 
     #[cfg(not(target_os = "espidf"))]
     {
-        esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"WiFi connect: simulator stub\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_WARN,
+            TAG.as_ptr(),
+            b"WiFi connect: simulator stub\0".as_ptr(),
+        );
         ESP_ERR_NOT_SUPPORTED
     }
 }
@@ -511,7 +571,10 @@ pub extern "C" fn wifi_manager_disconnect() -> i32 {
 /// Return the current WiFi state (matches wifi_state_t enum).
 #[no_mangle]
 pub extern "C" fn wifi_manager_get_state() -> u32 {
-    WIFI_STATE.lock().map(|s| s.state).unwrap_or(WIFI_STATE_DISCONNECTED)
+    WIFI_STATE
+        .lock()
+        .map(|s| s.state)
+        .unwrap_or(WIFI_STATE_DISCONNECTED)
 }
 
 /// Return the current IP address as a NUL-terminated C string, or NULL if not connected.
@@ -593,7 +656,11 @@ pub extern "C" fn wifi_manager_ntp_sync() -> i32 {
 
     #[cfg(target_os = "espidf")]
     unsafe {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Starting NTP sync...\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Starting NTP sync...\0".as_ptr(),
+        );
         // NTP sync stub — implement with SNTP when needed
         return ESP_OK;
     }
@@ -601,7 +668,11 @@ pub extern "C" fn wifi_manager_ntp_sync() -> i32 {
     #[cfg(not(target_os = "espidf"))]
     {
         unsafe {
-            esp_log_write(ESP_LOG_WARN, TAG.as_ptr(), b"NTP sync: simulator stub\0".as_ptr());
+            esp_log_write(
+                ESP_LOG_WARN,
+                TAG.as_ptr(),
+                b"NTP sync: simulator stub\0".as_ptr(),
+            );
         }
         ESP_ERR_NOT_SUPPORTED
     }
@@ -699,7 +770,16 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let month_days: [u64; 12] = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
 
     let mut month = 1u64;
@@ -748,7 +828,10 @@ fn update_wifi_object(json: &str, ssid: &str, password: &str, enabled: bool) -> 
         root.get_mut("wifi")?.as_object_mut()?
     };
 
-    wifi.insert("ssid".to_string(), serde_json::Value::String(ssid.to_string()));
+    wifi.insert(
+        "ssid".to_string(),
+        serde_json::Value::String(ssid.to_string()),
+    );
     wifi.insert(
         "password".to_string(),
         serde_json::Value::String(password.to_string()),
@@ -758,9 +841,7 @@ fn update_wifi_object(json: &str, ssid: &str, password: &str, enabled: bool) -> 
 }
 
 fn valid_wifi_credentials(ssid: &str, password: &str) -> bool {
-    !ssid.is_empty()
-        && ssid.len() <= WIFI_SSID_MAX_LEN
-        && password.len() <= WIFI_PASSWORD_MAX_LEN
+    !ssid.is_empty() && ssid.len() <= WIFI_SSID_MAX_LEN && password.len() <= WIFI_PASSWORD_MAX_LEN
 }
 
 fn parse_wifi_credentials(json: &str) -> Result<Option<(bool, String, String)>, ()> {
@@ -1034,7 +1115,8 @@ mod tests {
 
         unsafe { wifi_manager_set_state(WIFI_STATE_CONNECTING, std::ptr::null()) };
         assert_eq!(
-            wifi_manager_get_state(), WIFI_STATE_CONNECTING,
+            wifi_manager_get_state(),
+            WIFI_STATE_CONNECTING,
             "state must be CONNECTING after set"
         );
 
@@ -1084,9 +1166,9 @@ mod tests {
             assert!(bytes[4].is_ascii_digit(), "M units must be a digit");
 
             let hours: u32 = s[..2].parse().unwrap();
-            let mins:  u32 = s[3..].parse().unwrap();
+            let mins: u32 = s[3..].parse().unwrap();
             assert!(hours < 24, "hours must be < 24");
-            assert!(mins  < 60, "minutes must be < 60");
+            assert!(mins < 60, "minutes must be < 60");
         }
     }
 
@@ -1107,12 +1189,12 @@ mod tests {
             assert_eq!(bytes[4], b'-', "first separator must be '-'");
             assert_eq!(bytes[7], b'-', "second separator must be '-'");
 
-            let year:  u32 = s[..4].parse().unwrap();
+            let year: u32 = s[..4].parse().unwrap();
             let month: u32 = s[5..7].parse().unwrap();
-            let day:   u32 = s[8..].parse().unwrap();
-            assert!(year >= 2024,  "year must be >= 2024 if clock is set");
+            let day: u32 = s[8..].parse().unwrap();
+            assert!(year >= 2024, "year must be >= 2024 if clock is set");
             assert!(month >= 1 && month <= 12, "month must be 1..=12");
-            assert!(day >= 1 && day <= 31,     "day must be 1..=31");
+            assert!(day >= 1 && day <= 31, "day must be 1..=31");
         }
     }
 
@@ -1156,8 +1238,8 @@ mod tests {
     fn test_days_to_ymd_epoch() {
         let (year, month, day) = days_to_ymd(0);
         assert_eq!(year, 1970, "epoch day 0 must be 1970");
-        assert_eq!(month, 1,   "epoch day 0 must be January");
-        assert_eq!(day,   1,   "epoch day 0 must be the 1st");
+        assert_eq!(month, 1, "epoch day 0 must be January");
+        assert_eq!(day, 1, "epoch day 0 must be the 1st");
     }
 
     // -----------------------------------------------------------------------
@@ -1228,7 +1310,10 @@ mod tests {
     #[test]
     fn test_wifi_credential_bounds() {
         assert!(valid_wifi_credentials(&"s".repeat(WIFI_SSID_MAX_LEN), ""));
-        assert!(valid_wifi_credentials("network", &"p".repeat(WIFI_PASSWORD_MAX_LEN)));
+        assert!(valid_wifi_credentials(
+            "network",
+            &"p".repeat(WIFI_PASSWORD_MAX_LEN)
+        ));
         assert!(!valid_wifi_credentials("", "password"));
         assert!(!valid_wifi_credentials(
             &"s".repeat(WIFI_SSID_MAX_LEN + 1),

@@ -158,10 +158,7 @@ impl SosMessage {
         // Verify checksum: CRC over all fields except the last 2 bytes
         let payload = &data[..SOS_PACKET_SIZE - 2];
         let expected_crc = crc16_ccitt(payload);
-        let stored_crc = u16::from_be_bytes([
-            data[SOS_PACKET_SIZE - 2],
-            data[SOS_PACKET_SIZE - 1],
-        ]);
+        let stored_crc = u16::from_be_bytes([data[SOS_PACKET_SIZE - 2], data[SOS_PACKET_SIZE - 1]]);
         if expected_crc != stored_crc {
             return Err(ESP_FAIL);
         }
@@ -182,26 +179,36 @@ impl SosMessage {
         device_id.copy_from_slice(&data[off..off + 8]);
         off += 8;
 
-        let timestamp = u32::from_be_bytes([
-            data[off], data[off + 1], data[off + 2], data[off + 3],
-        ]);
+        let timestamp =
+            u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
         off += 4;
 
         let latitude = f64::from_be_bytes([
-            data[off], data[off + 1], data[off + 2], data[off + 3],
-            data[off + 4], data[off + 5], data[off + 6], data[off + 7],
+            data[off],
+            data[off + 1],
+            data[off + 2],
+            data[off + 3],
+            data[off + 4],
+            data[off + 5],
+            data[off + 6],
+            data[off + 7],
         ]);
         off += 8;
 
         let longitude = f64::from_be_bytes([
-            data[off], data[off + 1], data[off + 2], data[off + 3],
-            data[off + 4], data[off + 5], data[off + 6], data[off + 7],
+            data[off],
+            data[off + 1],
+            data[off + 2],
+            data[off + 3],
+            data[off + 4],
+            data[off + 5],
+            data[off + 6],
+            data[off + 7],
         ]);
         off += 8;
 
-        let altitude_m = f32::from_be_bytes([
-            data[off], data[off + 1], data[off + 2], data[off + 3],
-        ]);
+        let altitude_m =
+            f32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
         off += 4;
 
         let satellites = data[off];
@@ -429,9 +436,8 @@ impl SosBeacon {
         if !self.active {
             return None;
         }
-        self.activation_timestamp.map(|act_ts| {
-            self.timestamp.saturating_sub(act_ts)
-        })
+        self.activation_timestamp
+            .map(|act_ts| self.timestamp.saturating_sub(act_ts))
     }
 
     /// Device identifier.
@@ -527,7 +533,11 @@ pub unsafe extern "C" fn rs_sos_beacon_is_active(beacon: *const SosBeacon) -> i3
     if beacon.is_null() {
         return ESP_FAIL;
     }
-    if (*beacon).is_active() { 1 } else { 0 }
+    if (*beacon).is_active() {
+        1
+    } else {
+        0
+    }
 }
 
 /// Update GPS position.
@@ -551,10 +561,7 @@ pub unsafe extern "C" fn rs_sos_beacon_update_position(
 /// # Safety
 /// `beacon` must be a valid pointer.
 #[no_mangle]
-pub unsafe extern "C" fn rs_sos_beacon_update_battery(
-    beacon: *mut SosBeacon,
-    pct: u8,
-) -> i32 {
+pub unsafe extern "C" fn rs_sos_beacon_update_battery(beacon: *mut SosBeacon, pct: u8) -> i32 {
     if beacon.is_null() {
         return ESP_ERR_INVALID_ARG;
     }
@@ -747,7 +754,9 @@ mod tests {
     #[test]
     fn test_set_message() {
         let mut beacon = SosBeacon::new(make_device_id());
-        beacon.activate(SosStatus::Active, Some("Help me!")).unwrap();
+        beacon
+            .activate(SosStatus::Active, Some("Help me!"))
+            .unwrap();
 
         let pkt = beacon.next_packet().unwrap();
         let msg = SosMessage::from_bytes(&pkt).unwrap();
@@ -880,7 +889,9 @@ mod tests {
         let pos = make_gps_position(55.9533, -3.1883, 47.0, 12, 1711483200);
         beacon.update_position(&pos);
         beacon.update_battery(72);
-        beacon.activate(SosStatus::Medical, Some("Broken leg")).unwrap();
+        beacon
+            .activate(SosStatus::Medical, Some("Broken leg"))
+            .unwrap();
 
         let pkt = beacon.next_packet().unwrap();
         assert_eq!(pkt.len(), SOS_PACKET_SIZE);
@@ -955,7 +966,9 @@ mod tests {
     #[test]
     fn test_packet_size_with_message() {
         let mut beacon = SosBeacon::new(make_device_id());
-        beacon.activate(SosStatus::Active, Some("Hello world")).unwrap();
+        beacon
+            .activate(SosStatus::Active, Some("Hello world"))
+            .unwrap();
         let pkt = beacon.next_packet().unwrap();
         assert_eq!(pkt.len(), SOS_PACKET_SIZE);
     }
@@ -995,9 +1008,8 @@ mod tests {
         assert!(!beacon.is_null());
 
         // Activate
-        let rc = unsafe {
-            rs_sos_beacon_activate(beacon, SosStatus::Active as u8, std::ptr::null())
-        };
+        let rc =
+            unsafe { rs_sos_beacon_activate(beacon, SosStatus::Active as u8, std::ptr::null()) };
         assert_eq!(rc, ESP_OK);
         assert_eq!(unsafe { rs_sos_beacon_is_active(beacon) }, 1);
 
@@ -1010,9 +1022,7 @@ mod tests {
 
     #[test]
     fn test_ffi_activate_null_beacon() {
-        let rc = unsafe {
-            rs_sos_beacon_activate(std::ptr::null_mut(), 0, std::ptr::null())
-        };
+        let rc = unsafe { rs_sos_beacon_activate(std::ptr::null_mut(), 0, std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1071,9 +1081,7 @@ mod tests {
 
     #[test]
     fn test_ffi_update_position_null() {
-        let rc = unsafe {
-            rs_sos_beacon_update_position(std::ptr::null_mut(), std::ptr::null())
-        };
+        let rc = unsafe { rs_sos_beacon_update_position(std::ptr::null_mut(), std::ptr::null()) };
         assert_eq!(rc, ESP_ERR_INVALID_ARG);
     }
 
@@ -1102,9 +1110,7 @@ mod tests {
         let id = make_device_id();
         let beacon = unsafe { rs_sos_beacon_create(id.as_ptr()) };
         let msg = std::ffi::CString::new("Help!").unwrap();
-        let rc = unsafe {
-            rs_sos_beacon_activate(beacon, SosStatus::Medical as u8, msg.as_ptr())
-        };
+        let rc = unsafe { rs_sos_beacon_activate(beacon, SosStatus::Medical as u8, msg.as_ptr()) };
         assert_eq!(rc, ESP_OK);
 
         let mut buf = [0u8; 256];

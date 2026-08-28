@@ -35,7 +35,7 @@ extern "C" {
 }
 
 // ESP log levels
-const ESP_LOG_INFO:  i32 = 3;
+const ESP_LOG_INFO: i32 = 3;
 const ESP_LOG_ERROR: i32 = 1;
 
 static TAG: &[u8] = b"drv_mgr\0";

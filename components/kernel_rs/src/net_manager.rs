@@ -41,8 +41,8 @@ extern "C" {
     fn esp_log_write(level: i32, tag: *const u8, format: *const u8, ...);
 }
 
-const ESP_LOG_INFO:  i32 = 3;
-const ESP_LOG_WARN:  i32 = 2;
+const ESP_LOG_INFO: i32 = 3;
+const ESP_LOG_WARN: i32 = 2;
 
 // ---------------------------------------------------------------------------
 // hal_net_driver_t vtable — mirrors the C struct exactly.
@@ -85,13 +85,17 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 // WiFi state constants (match wifi_manager.h)
-const WIFI_STATE_CONNECTED: u32  = 2;
+const WIFI_STATE_CONNECTED: u32 = 2;
 const WIFI_STATE_CONNECTING: u32 = 1;
 
 unsafe extern "C" fn wifi_net_get_state() -> u32 {
     let ws = wifi_manager_get_state();
-    if ws == WIFI_STATE_CONNECTED  { return HAL_NET_STATE_CONNECTED; }
-    if ws == WIFI_STATE_CONNECTING { return HAL_NET_STATE_CONNECTING; }
+    if ws == WIFI_STATE_CONNECTED {
+        return HAL_NET_STATE_CONNECTED;
+    }
+    if ws == WIFI_STATE_CONNECTING {
+        return HAL_NET_STATE_CONNECTING;
+    }
     HAL_NET_STATE_DISCONNECTED
 }
 
@@ -185,7 +189,11 @@ pub extern "C" fn net_manager_init() -> i32 {
     }
 
     unsafe {
-        esp_log_write(ESP_LOG_INFO, TAG.as_ptr(), b"Network manager initialized\0".as_ptr());
+        esp_log_write(
+            ESP_LOG_INFO,
+            TAG.as_ptr(),
+            b"Network manager initialized\0".as_ptr(),
+        );
     }
 
     ESP_OK
@@ -241,10 +249,14 @@ pub extern "C" fn net_is_connected() -> bool {
 
     for i in 0..state.count {
         let drv = state.transports[i];
-        if drv.is_null() { continue; }
+        if drv.is_null() {
+            continue;
+        }
         unsafe {
             if let Some(f) = (*drv).is_connected {
-                if f() { return true; }
+                if f() {
+                    return true;
+                }
             }
         }
     }
@@ -303,12 +315,18 @@ pub extern "C" fn net_get_state() -> u32 {
 
     for i in 0..state.count {
         let drv = state.transports[i];
-        if drv.is_null() { continue; }
+        if drv.is_null() {
+            continue;
+        }
         unsafe {
             if let Some(f) = (*drv).get_state {
                 let st = f();
-                if st == HAL_NET_STATE_CONNECTED  { return HAL_NET_STATE_CONNECTED; }
-                if st == HAL_NET_STATE_CONNECTING { best = HAL_NET_STATE_CONNECTING; }
+                if st == HAL_NET_STATE_CONNECTED {
+                    return HAL_NET_STATE_CONNECTED;
+                }
+                if st == HAL_NET_STATE_CONNECTING {
+                    best = HAL_NET_STATE_CONNECTING;
+                }
             }
         }
     }
@@ -403,7 +421,11 @@ pub unsafe extern "C" fn net_connect_best(timeout_ms: u32) -> i32 {
                         ESP_LOG_INFO,
                         TAG.as_ptr(),
                         b"Connected via %s\0".as_ptr(),
-                        if (*drv).name.is_null() { b"?\0".as_ptr() as *const c_char } else { (*drv).name },
+                        if (*drv).name.is_null() {
+                            b"?\0".as_ptr() as *const c_char
+                        } else {
+                            (*drv).name
+                        },
                     );
                     return ESP_OK;
                 }
@@ -413,7 +435,9 @@ pub unsafe extern "C" fn net_connect_best(timeout_ms: u32) -> i32 {
 
     for i in 0..count {
         let drv = transports[i];
-        if drv.is_null() { continue; }
+        if drv.is_null() {
+            continue;
+        }
         if is_vpn_transport(drv) {
             continue;
         }
@@ -429,7 +453,11 @@ pub unsafe extern "C" fn net_connect_best(timeout_ms: u32) -> i32 {
                     ESP_LOG_INFO,
                     TAG.as_ptr(),
                     b"Connected via %s\0".as_ptr(),
-                    if (*drv).name.is_null() { b"?\0".as_ptr() as *const c_char } else { (*drv).name },
+                    if (*drv).name.is_null() {
+                        b"?\0".as_ptr() as *const c_char
+                    } else {
+                        (*drv).name
+                    },
                 );
                 return ESP_OK;
             }
@@ -458,10 +486,7 @@ pub extern "C" fn net_ntp_sync() -> i32 {
 /// # Safety
 /// `out` must point to an array of at least `max` pointers.
 #[no_mangle]
-pub unsafe extern "C" fn net_list_transports(
-    out: *mut *const HalNetDriver,
-    max: i32,
-) -> i32 {
+pub unsafe extern "C" fn net_list_transports(out: *mut *const HalNetDriver, max: i32) -> i32 {
     if out.is_null() || max <= 0 {
         return 0;
     }
@@ -515,17 +540,27 @@ mod tests {
     // Mock drivers
     // -----------------------------------------------------------------------
 
-    unsafe extern "C" fn mock_not_connected() -> bool { false }
-    unsafe extern "C" fn mock_is_connected()  -> bool { true  }
-    unsafe extern "C" fn mock_state_disconnected() -> u32 { HAL_NET_STATE_DISCONNECTED }
-    unsafe extern "C" fn mock_state_connected()    -> u32 { HAL_NET_STATE_CONNECTED    }
+    unsafe extern "C" fn mock_not_connected() -> bool {
+        false
+    }
+    unsafe extern "C" fn mock_is_connected() -> bool {
+        true
+    }
+    unsafe extern "C" fn mock_state_disconnected() -> u32 {
+        HAL_NET_STATE_DISCONNECTED
+    }
+    unsafe extern "C" fn mock_state_connected() -> u32 {
+        HAL_NET_STATE_CONNECTED
+    }
     unsafe extern "C" fn mock_get_ip() -> *const c_char {
         b"192.168.1.100\0".as_ptr() as *const c_char
     }
     unsafe extern "C" fn mock_vpn_get_ip() -> *const c_char {
         b"100.64.0.42\0".as_ptr() as *const c_char
     }
-    unsafe extern "C" fn mock_get_rssi() -> i8 { -55 }
+    unsafe extern "C" fn mock_get_rssi() -> i8 {
+        -55
+    }
 
     static MOCK_DISCONNECTED: HalNetDriver = HalNetDriver {
         transport_type: 0,
@@ -584,10 +619,14 @@ mod tests {
     fn local_is_connected(s: &NetManagerState) -> bool {
         for i in 0..s.count {
             let drv = s.transports[i];
-            if drv.is_null() { continue; }
+            if drv.is_null() {
+                continue;
+            }
             unsafe {
                 if let Some(f) = (*drv).is_connected {
-                    if f() { return true; }
+                    if f() {
+                        return true;
+                    }
                 }
             }
         }
@@ -598,12 +637,18 @@ mod tests {
         let mut best = HAL_NET_STATE_DISCONNECTED;
         for i in 0..s.count {
             let drv = s.transports[i];
-            if drv.is_null() { continue; }
+            if drv.is_null() {
+                continue;
+            }
             unsafe {
                 if let Some(f) = (*drv).get_state {
                     let st = f();
-                    if st == HAL_NET_STATE_CONNECTED  { return HAL_NET_STATE_CONNECTED; }
-                    if st == HAL_NET_STATE_CONNECTING { best = HAL_NET_STATE_CONNECTING; }
+                    if st == HAL_NET_STATE_CONNECTED {
+                        return HAL_NET_STATE_CONNECTED;
+                    }
+                    if st == HAL_NET_STATE_CONNECTING {
+                        best = HAL_NET_STATE_CONNECTING;
+                    }
                 }
             }
         }
@@ -624,18 +669,26 @@ mod tests {
 
     fn local_get_ip(s: &NetManagerState) -> *const c_char {
         let active = local_get_active(s);
-        if active.is_null() { return std::ptr::null(); }
+        if active.is_null() {
+            return std::ptr::null();
+        }
         unsafe {
-            if let Some(f) = (*active).get_ip { return f(); }
+            if let Some(f) = (*active).get_ip {
+                return f();
+            }
         }
         std::ptr::null()
     }
 
     fn local_get_transport_name(s: &NetManagerState) -> *const c_char {
         let active = local_get_active(s);
-        if active.is_null() { return b"None\0".as_ptr() as *const c_char; }
+        if active.is_null() {
+            return b"None\0".as_ptr() as *const c_char;
+        }
         unsafe {
-            if !(*active).name.is_null() { return (*active).name; }
+            if !(*active).name.is_null() {
+                return (*active).name;
+            }
         }
         b"None\0".as_ptr() as *const c_char
     }
@@ -660,7 +713,10 @@ mod tests {
     #[test]
     fn test_disconnected_mock_not_connected() {
         let s = make_state_with(&[&MOCK_DISCONNECTED as *const HalNetDriver]);
-        assert!(!local_is_connected(&s), "disconnected mock must not be connected");
+        assert!(
+            !local_is_connected(&s),
+            "disconnected mock must not be connected"
+        );
         assert_eq!(local_get_state(&s), HAL_NET_STATE_DISCONNECTED);
     }
 
@@ -672,7 +728,10 @@ mod tests {
     #[test]
     fn test_connected_mock_is_connected() {
         let s = make_state_with(&[&MOCK_CONNECTED as *const HalNetDriver]);
-        assert!(local_is_connected(&s), "connected mock must report connected");
+        assert!(
+            local_is_connected(&s),
+            "connected mock must report connected"
+        );
         assert_eq!(local_get_state(&s), HAL_NET_STATE_CONNECTED);
     }
 
@@ -685,7 +744,10 @@ mod tests {
     fn test_get_ip_from_connected_mock() {
         let s = make_state_with(&[&MOCK_CONNECTED as *const HalNetDriver]);
         let ip_ptr = local_get_ip(&s);
-        assert!(!ip_ptr.is_null(), "get_ip must return non-null for connected transport");
+        assert!(
+            !ip_ptr.is_null(),
+            "get_ip must return non-null for connected transport"
+        );
         let ip_str = unsafe { std::ffi::CStr::from_ptr(ip_ptr).to_str().unwrap() };
         assert_eq!(ip_str, "192.168.1.100");
     }
@@ -699,7 +761,10 @@ mod tests {
     fn test_get_ip_null_when_disconnected() {
         let s = make_state_with(&[&MOCK_DISCONNECTED as *const HalNetDriver]);
         let ip_ptr = local_get_ip(&s);
-        assert!(ip_ptr.is_null(), "get_ip must return null when disconnected");
+        assert!(
+            ip_ptr.is_null(),
+            "get_ip must return null when disconnected"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -738,7 +803,7 @@ mod tests {
     fn test_multiple_transports_picks_connected() {
         let s = make_state_with(&[
             &MOCK_DISCONNECTED as *const HalNetDriver,
-            &MOCK_CONNECTED    as *const HalNetDriver,
+            &MOCK_CONNECTED as *const HalNetDriver,
         ]);
         assert!(local_is_connected(&s));
         let active = local_get_active(&s);
@@ -789,8 +854,8 @@ mod tests {
     #[test]
     fn test_state_constant_values() {
         assert_eq!(HAL_NET_STATE_DISCONNECTED, 0);
-        assert_eq!(HAL_NET_STATE_CONNECTING,   1);
-        assert_eq!(HAL_NET_STATE_CONNECTED,    2);
+        assert_eq!(HAL_NET_STATE_CONNECTING, 1);
+        assert_eq!(HAL_NET_STATE_CONNECTED, 2);
         assert_eq!(HAL_NET_VPN, 5);
     }
 }

@@ -19,8 +19,10 @@
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hal_registry::{HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData,
-                          HalInputEventType, HalInputTouchData};
+use crate::hal_registry::{
+    HalInputCb, HalInputDriver, HalInputEvent, HalInputEventData, HalInputEventType,
+    HalInputTouchData,
+};
 
 // ── ESP error codes ─────────────────────────────────────────────────────────
 
@@ -30,8 +32,8 @@ const ESP_ERR_INVALID_STATE: i32 = 0x103;
 
 // ── XPT2046 SPI control bytes ───────────────────────────────────────────────
 
-const XPT2046_CMD_READ_X: u8 = 0xD0;  // Channel 101, 12-bit, differential
-const XPT2046_CMD_READ_Y: u8 = 0x90;  // Channel 001, 12-bit, differential
+const XPT2046_CMD_READ_X: u8 = 0xD0; // Channel 101, 12-bit, differential
+const XPT2046_CMD_READ_Y: u8 = 0x90; // Channel 001, 12-bit, differential
 const XPT2046_CMD_READ_Z1: u8 = 0xB0; // Channel 011, 12-bit, differential
 const XPT2046_CMD_READ_Z2: u8 = 0xC0; // Channel 100, 12-bit, differential
 
@@ -64,21 +66,21 @@ struct SpiBusConfig {
 // sample_point (i32) added between input_delay_ns and spics_io_num.
 #[repr(C)]
 struct SpiDeviceInterfaceConfig {
-    command_bits: u8,       // offset 0
-    address_bits: u8,       // offset 1
-    dummy_bits: u8,         // offset 2
-    mode: u8,               // offset 3
-    clock_source: i32,      // offset 4  (0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT)
-    duty_cycle_pos: u16,    // offset 8
-    cs_ena_pretrans: u16,   // offset 10
-    cs_ena_posttrans: u8,   // offset 12  (+ 3 bytes implicit padding → offset 16)
-    clock_speed_hz: i32,    // offset 16
-    input_delay_ns: i32,    // offset 20
-    sample_point: i32,      // offset 24  (spi_sampling_point_t; 0 = default)
-    spics_io_num: i32,      // offset 28
-    flags: u32,             // offset 32
-    queue_size: i32,        // offset 36
-    pre_cb: Option<unsafe extern "C" fn(*mut c_void)>,  // offset 40
+    command_bits: u8,                                   // offset 0
+    address_bits: u8,                                   // offset 1
+    dummy_bits: u8,                                     // offset 2
+    mode: u8,                                           // offset 3
+    clock_source: i32,    // offset 4  (0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT)
+    duty_cycle_pos: u16,  // offset 8
+    cs_ena_pretrans: u16, // offset 10
+    cs_ena_posttrans: u8, // offset 12  (+ 3 bytes implicit padding → offset 16)
+    clock_speed_hz: i32,  // offset 16
+    input_delay_ns: i32,  // offset 20
+    sample_point: i32,    // offset 24  (spi_sampling_point_t; 0 = default)
+    spics_io_num: i32,    // offset 28
+    flags: u32,           // offset 32
+    queue_size: i32,      // offset 36
+    pre_cb: Option<unsafe extern "C" fn(*mut c_void)>, // offset 40
     post_cb: Option<unsafe extern "C" fn(*mut c_void)>, // offset 44
 }
 
@@ -87,8 +89,8 @@ struct SpiTransaction {
     flags: u32,
     cmd: u16,
     addr: u64,
-    length: usize,     // Total data length, in bits
-    rxlength: usize,   // Receive length, in bits
+    length: usize,   // Total data length, in bits
+    rxlength: usize, // Receive length, in bits
     user: *mut c_void,
     tx_buffer: *const u8,
     rx_buffer: *mut u8,
@@ -154,7 +156,7 @@ pub struct TouchXpt2046Config {
 // ── Driver state ─────────────────────────────────────────────────────────────
 
 struct TouchState {
-    spi_dev: *mut c_void,        // spi_device_handle_t
+    spi_dev: *mut c_void, // spi_device_handle_t
     cfg: TouchXpt2046Config,
     cb: HalInputCb,
     cb_data: *mut c_void,
@@ -163,9 +165,9 @@ struct TouchState {
     last_x: u16,
     last_y: u16,
     initialized: bool,
-    pending_down: bool,          // debounce: first valid reading pending confirmation
-    pending_x: i32,              // debounce: raw X from first reading
-    pending_y: i32,              // debounce: raw Y from first reading
+    pending_down: bool, // debounce: first valid reading pending confirmation
+    pending_x: i32,     // debounce: raw X from first reading
+    pending_y: i32,     // debounce: raw Y from first reading
 }
 
 // SAFETY: The state is guarded by the single-threaded init / poll contract
@@ -283,11 +285,7 @@ extern "C" {
 // ── Stub implementations (simulator / host tests) ────────────────────────────
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn spi_bus_initialize(
-    _host: i32,
-    _bus_cfg: *const SpiBusConfig,
-    _dma_chan: i32,
-) -> i32 {
+unsafe fn spi_bus_initialize(_host: i32, _bus_cfg: *const SpiBusConfig, _dma_chan: i32) -> i32 {
     ESP_OK
 }
 
@@ -312,10 +310,7 @@ unsafe fn spi_bus_free(_host: i32) -> i32 {
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn spi_device_polling_transmit(
-    _handle: *mut c_void,
-    trans: *mut SpiTransaction,
-) -> i32 {
+unsafe fn spi_device_polling_transmit(_handle: *mut c_void, trans: *mut SpiTransaction) -> i32 {
     // Read the command byte from tx_buffer to determine which channel is
     // being queried, then return the appropriate simulated value.
     let tx = (*trans).tx_buffer;
@@ -325,12 +320,20 @@ unsafe fn spi_device_polling_transmit(
             XPT2046_CMD_READ_X => SIM_TOUCH.raw_x,
             XPT2046_CMD_READ_Y => SIM_TOUCH.raw_y,
             XPT2046_CMD_READ_Z1 => {
-                if SIM_TOUCH.pressure > 0 { SIM_TOUCH.pressure } else { 0 }
+                if SIM_TOUCH.pressure > 0 {
+                    SIM_TOUCH.pressure
+                } else {
+                    0
+                }
             }
             XPT2046_CMD_READ_Z2 => {
                 // Z2 is inverse-related to pressure; for simulation
                 // return 4095 - pressure to make the pressure formula work.
-                if SIM_TOUCH.pressure > 0 { 4095 - SIM_TOUCH.pressure } else { 4095 }
+                if SIM_TOUCH.pressure > 0 {
+                    4095 - SIM_TOUCH.pressure
+                } else {
+                    4095
+                }
             }
             _ => 0,
         };
@@ -353,7 +356,11 @@ unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 {
 #[cfg(not(target_os = "espidf"))]
 unsafe fn gpio_get_level(_pin: i32) -> i32 {
     // Return 0 (active low = touched) when simulated touch is active.
-    if SIM_TOUCH.irq_active { 0 } else { 1 }
+    if SIM_TOUCH.irq_active {
+        0
+    } else {
+        1
+    }
 }
 
 #[cfg(not(target_os = "espidf"))]
@@ -394,8 +401,8 @@ unsafe fn xpt2046_read_channel(cmd: u8) -> i32 {
         flags: 0,
         cmd: 0,
         addr: 0,
-        length: 8,       // 1 byte = 8 bits TX
-        rxlength: 16,    // 2 bytes = 16 bits RX
+        length: 8,    // 1 byte = 8 bits TX
+        rxlength: 16, // 2 bytes = 16 bits RX
         user: std::ptr::null_mut(),
         tx_buffer: tx_buf.as_ptr(),
         rx_buffer: rx_buf.as_mut_ptr(),
@@ -531,10 +538,18 @@ unsafe fn calibrate_xy(raw_x: i32, raw_y: i32) -> (u16, u16) {
     }
 
     // Final clamp
-    if cx < 0 { cx = 0; }
-    if cy < 0 { cy = 0; }
-    if cx >= S_TOUCH.cfg.max_x { cx = S_TOUCH.cfg.max_x - 1; }
-    if cy >= S_TOUCH.cfg.max_y { cy = S_TOUCH.cfg.max_y - 1; }
+    if cx < 0 {
+        cx = 0;
+    }
+    if cy < 0 {
+        cy = 0;
+    }
+    if cx >= S_TOUCH.cfg.max_x {
+        cx = S_TOUCH.cfg.max_x - 1;
+    }
+    if cy >= S_TOUCH.cfg.max_y {
+        cy = S_TOUCH.cfg.max_y - 1;
+    }
 
     (cx as u16, cy as u16)
 }
@@ -619,7 +634,7 @@ unsafe extern "C" fn xpt2046_init(config: *const c_void) -> i32 {
         command_bits: 0,
         address_bits: 0,
         dummy_bits: 0,
-        mode: 0, // SPI mode 0 (CPOL=0, CPHA=0)
+        mode: 0,         // SPI mode 0 (CPOL=0, CPHA=0)
         clock_source: 0, // 0 → ESP-IDF uses SPI_CLK_SRC_DEFAULT
         duty_cycle_pos: 0,
         cs_ena_pretrans: 0,
@@ -657,7 +672,13 @@ unsafe extern "C" fn xpt2046_init(config: *const c_void) -> i32 {
             return ret;
         }
 
-        gpio_install_isr_service(0); // idempotent
+        let ret = crate::gpio_isr_service::ensure_installed(0);
+        if ret != ESP_OK {
+            spi_bus_remove_device(S_TOUCH.spi_dev);
+            S_TOUCH.spi_dev = std::ptr::null_mut();
+            spi_bus_free(S_TOUCH.cfg.spi_host);
+            return ret;
+        }
 
         let ret = gpio_isr_handler_add(
             S_TOUCH.cfg.pin_irq,
@@ -1017,10 +1038,7 @@ mod tests {
                 ESP_OK,
             );
 
-            unsafe extern "C" fn dummy_cb(
-                _event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {}
+            unsafe extern "C" fn dummy_cb(_event: *const HalInputEvent, _user_data: *mut c_void) {}
 
             assert_eq!(
                 xpt2046_register_callback(Some(dummy_cb), std::ptr::null_mut()),
@@ -1212,10 +1230,7 @@ mod tests {
             static mut LAST_X: u16 = 0;
             static mut LAST_Y: u16 = 0;
 
-            unsafe extern "C" fn test_cb(
-                event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn test_cb(event: *const HalInputEvent, _user_data: *mut c_void) {
                 EVENT_COUNT += 1;
                 LAST_EVENT_TYPE = (*event).event_type as i32;
                 LAST_X = (*event).data.touch.x;
@@ -1408,10 +1423,7 @@ mod tests {
             static mut EVENT_COUNT: i32 = 0;
             static mut LAST_EVENT_TYPE: i32 = -1;
 
-            unsafe extern "C" fn debounce_cb(
-                event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn debounce_cb(event: *const HalInputEvent, _user_data: *mut c_void) {
                 EVENT_COUNT += 1;
                 LAST_EVENT_TYPE = (*event).event_type as i32;
             }
@@ -1489,10 +1501,7 @@ mod tests {
             static mut EVENT_COUNT: i32 = 0;
             static mut LAST_EVENT_TYPE: i32 = -1;
 
-            unsafe extern "C" fn move_cb(
-                event: *const HalInputEvent,
-                _user_data: *mut c_void,
-            ) {
+            unsafe extern "C" fn move_cb(event: *const HalInputEvent, _user_data: *mut c_void) {
                 EVENT_COUNT += 1;
                 LAST_EVENT_TYPE = (*event).event_type as i32;
             }

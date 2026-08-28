@@ -62,7 +62,11 @@ struct GpioConfig {
 
 #[cfg(target_os = "espidf")]
 extern "C" {
-    fn i2c_master_bus_add_device(bus: *mut c_void, cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32;
+    fn i2c_master_bus_add_device(
+        bus: *mut c_void,
+        cfg: *const I2cDeviceConfig,
+        handle: *mut *mut c_void,
+    ) -> i32;
     fn i2c_master_bus_rm_device(handle: *mut c_void) -> i32;
     fn i2c_master_transmit_receive(
         handle: *mut c_void,
@@ -72,7 +76,12 @@ extern "C" {
         read_size: usize,
         timeout_ms: i32,
     ) -> i32;
-    fn i2c_master_transmit(handle: *mut c_void, data: *const u8, len: usize, timeout_ms: i32) -> i32;
+    fn i2c_master_transmit(
+        handle: *mut c_void,
+        data: *const u8,
+        len: usize,
+        timeout_ms: i32,
+    ) -> i32;
     fn gpio_config(cfg: *const GpioConfig) -> i32;
     fn gpio_set_level(pin: i32, level: u32) -> i32;
     fn gpio_reset_pin(pin: i32) -> i32;
@@ -81,12 +90,18 @@ extern "C" {
 }
 
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_bus_add_device(_bus: *mut c_void, _cfg: *const I2cDeviceConfig, handle: *mut *mut c_void) -> i32 {
+unsafe fn i2c_master_bus_add_device(
+    _bus: *mut c_void,
+    _cfg: *const I2cDeviceConfig,
+    handle: *mut *mut c_void,
+) -> i32 {
     *handle = 1usize as *mut c_void;
     ESP_OK
 }
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 { ESP_OK }
+unsafe fn i2c_master_bus_rm_device(_handle: *mut c_void) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
 unsafe fn i2c_master_transmit_receive(
     _handle: *mut c_void,
@@ -100,15 +115,30 @@ unsafe fn i2c_master_transmit_receive(
     ESP_OK
 }
 #[cfg(not(target_os = "espidf"))]
-unsafe fn i2c_master_transmit(_handle: *mut c_void, _data: *const u8, _len: usize, _timeout_ms: i32) -> i32 { ESP_OK }
+unsafe fn i2c_master_transmit(
+    _handle: *mut c_void,
+    _data: *const u8,
+    _len: usize,
+    _timeout_ms: i32,
+) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 { ESP_OK }
+unsafe fn gpio_config(_cfg: *const GpioConfig) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 { ESP_OK }
+unsafe fn gpio_set_level(_pin: i32, _level: u32) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn gpio_reset_pin(_pin: i32) -> i32 { ESP_OK }
+unsafe fn gpio_reset_pin(_pin: i32) -> i32 {
+    ESP_OK
+}
 #[cfg(not(target_os = "espidf"))]
-unsafe fn esp_timer_get_time() -> i64 { 0 }
+unsafe fn esp_timer_get_time() -> i64 {
+    0
+}
 #[cfg(not(target_os = "espidf"))]
 unsafe fn vTaskDelay(_ticks: u32) {}
 
@@ -159,7 +189,14 @@ unsafe fn state_mut() -> &'static mut TouchState {
 
 unsafe fn read_reg(reg: u16, data: &mut [u8]) -> i32 {
     let addr = [(reg >> 8) as u8, reg as u8];
-    i2c_master_transmit_receive(state_mut().dev, addr.as_ptr(), addr.len(), data.as_mut_ptr(), data.len(), 50)
+    i2c_master_transmit_receive(
+        state_mut().dev,
+        addr.as_ptr(),
+        addr.len(),
+        data.as_mut_ptr(),
+        data.len(),
+        50,
+    )
 }
 
 unsafe fn write_reg(reg: u16, data: &[u8]) -> i32 {
@@ -190,7 +227,11 @@ unsafe fn read_config() -> i32 {
     vTaskDelay(10);
 
     let mut data = [0u8; 4];
-    for reg in [CST9217_CHECKCODE_REG, CST9217_RESOLUTION_REG, CST9217_PROJECT_ID_REG] {
+    for reg in [
+        CST9217_CHECKCODE_REG,
+        CST9217_RESOLUTION_REG,
+        CST9217_PROJECT_ID_REG,
+    ] {
         let ret = read_reg(reg, &mut data);
         if ret != ESP_OK {
             return ret;
@@ -257,7 +298,9 @@ unsafe extern "C" fn cst9217_init(config: *const c_void) -> i32 {
             intr_type: 0,
         };
         let ret = gpio_config(&cfg);
-        if ret != ESP_OK { return ret; }
+        if ret != ESP_OK {
+            return ret;
+        }
         hw_reset();
     }
 
