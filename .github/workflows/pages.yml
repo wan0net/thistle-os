@@ -78,6 +78,7 @@ jobs:
           if [ ! -f "$HOME/.cargo/bin/cargo" ]; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           fi
+          export PATH="$HOME/.cargo/bin:$PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup target add wasm32-unknown-emscripten
 
