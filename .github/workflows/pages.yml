@@ -46,11 +46,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/bin
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            ~/.rustup
           key: rust-wasm-${{ runner.os }}-${{ hashFiles('components/kernel_rs/Cargo.lock') }}
           restore-keys: rust-wasm-${{ runner.os }}-
 
@@ -80,7 +78,17 @@ jobs:
           fi
           export PATH="$HOME/.cargo/bin:$PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          rustup target add wasm32-unknown-emscripten
+          # A self-hosted runner may already have a usable target even when a
+          # previously restored rustup cache has stale component metadata.
+          # Probe the compiler first so rustup does not collide with files that
+          # are already installed.
+          if ! printf '#![no_std]\n' | rustc \
+            --crate-name thistle_wasm_target_probe \
+            --crate-type lib \
+            --target wasm32-unknown-emscripten \
+            --out-dir "$RUNNER_TEMP" -; then
+            rustup target add wasm32-unknown-emscripten
+          fi
 
       - name: Build Rust kernel for WASM
         working-directory: components/kernel_rs
