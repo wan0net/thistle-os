@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev
+          sudo apt-get install -y libsdl2-dev pkg-config cmake build-essential libcurl4-openssl-dev python3-venv
 
       - name: Configure simulator unit tests
         run: cmake -S simulator -B simulator/build-tests
@@ -95,6 +95,15 @@ jobs:
             -o /tmp/test_board_bus_init
           /tmp/test_board_bus_init
 
+      - name: Test strict board fingerprints
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -Icomponents/kernel/include \
+            components/kernel/src/board_fingerprint.c \
+            components/kernel/tests/test_board_fingerprint.c \
+            -o /tmp/test_board_fingerprint
+          /tmp/test_board_fingerprint
+
       - name: Test SX1262 interrupt lifecycle
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -pthread \
@@ -123,14 +132,16 @@ jobs:
 
       - name: Test secure signing-key generation
         run: |
-          python3 -m pip install -r tools/requirements.txt
-          python3 tools/test_sign.py
+          python3 -m venv /tmp/thistle-test-signing-venv
+          /tmp/thistle-test-signing-venv/bin/pip install -r tools/requirements.txt
+          /tmp/thistle-test-signing-venv/bin/python tools/test_sign.py
 
       - name: Test standalone package publication
         run: |
           python3 tools/test_build_catalog.py
           python3 tools/test_package_workflow.py
           python3 tools/test_target_matrix.py
+          python3 tools/test_validate_board_catalog.py
           python3 tools/test_wasm_migration.py
           python3 tools/test_validate_package_matrix.py
 

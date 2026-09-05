@@ -103,6 +103,7 @@ set(SIM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../simulator")
 set(WASM_SRCS
     main.c
     platform_stubs.c
+    ${THISTLE_DIR}/components/kernel_rs/http_client_shim.c
     # Simulator drivers (SDL2 display/input, board init)
     ${SIM_DIR}/drivers/sim_display.c
     ${SIM_DIR}/drivers/sim_input.c

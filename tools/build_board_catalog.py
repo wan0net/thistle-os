@@ -38,6 +38,8 @@ def build_catalog(board_dir: Path, base_url: str) -> dict:
                 "sha256": hashlib.sha256(data).hexdigest(),
                 "size_bytes": len(data),
                 "driver_count": len(config.get("drivers", [])),
+                "fingerprint": config.get("fingerprint", {}),
+                "variants": config.get("variants", {}),
             }
         )
 

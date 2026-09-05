@@ -1,6 +1,6 @@
 # T-Watch Ultra and Apple ANCS Build Plan
 
-Status: proposed implementation plan
+Status: software profile corrected; hardware verification remains pending
 Target: the owner's physical LilyGo T-Watch Ultra
 Primary milestone: a flashable, recoverable watch build with working display,
 touch, power management, and iPhone notifications through Apple ANCS
@@ -29,8 +29,9 @@ The repository already has a useful foundation:
 - GitHub issue #120 tracks production T-Watch Ultra support, with issues
   #121-#127 covering profile/discovery, power, display/touch, RTC/haptics,
   audio, NFC, and radio/peripheral bring-up.
-- `sdcard_layout/config/boards/twatch-ultra.json` is a bring-up profile, not a
-  production profile.
+- `sdcard_layout/config/boards/twatch-ultra.json` now records the correct
+  component tuple and requires explicit radio selection. It remains a bring-up
+  profile until the signed artifact and physical board are verified together.
 - Rust prototypes exist for CO5300 and CST9217, but they are kernel-internal,
   are not the signed standalone `.drv.elf` files named by the profile, and are
   not hardware-verified.
@@ -40,10 +41,8 @@ The repository already has a useful foundation:
   act as a GATT client/notification consumer.
 - `notification.rs` provides an in-memory notification model, but it is not yet
   wired into boot or the watch UI.
-- The existing T-Watch profile contains known incorrect identities: CST9217 is
-  set to `0x5A` instead of the documented `0x1A`, the RTC is named PCF8563
-  instead of PCF85063A, and audio is named PCM5102A instead of MAX98357A plus
-  T3902.
+- The earlier T-Watch profile's incorrect CST9217, RTC, and audio identities
+  have been removed. Catalog validation now rejects their reintroduction.
 - The current built-in driver fallback only covers the T-Deck Pro display,
   keyboard, and touch path. A board JSON that names nonexistent T-Watch driver
   ELFs will therefore skip the essential watch hardware rather than provide a
