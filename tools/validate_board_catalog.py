@@ -12,6 +12,7 @@ from pathlib import Path
 
 REQUIRED_BOARD_KEYS = {"name", "arch", "board_id", "version"}
 VALID_ARCHES = {"esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"}
+VALID_FINGERPRINT_BUSES = {"i2c", "spi", "uart"}
 DRIVER_ENTRY_ALIASES = {
     "lcd-st7789-i80.drv.elf": "lcd-st7789.drv.elf",
     "qmi8658.drv.elf": "accel-qmi8658.drv.elf",
@@ -66,6 +67,66 @@ def validate_board(path: Path, known_ids: set[str], known_entries: set[str]) -> 
             errors.append(f"{path}: {drv_id} entry must end with .drv.elf")
         if "hal" not in drv:
             errors.append(f"{path}: {drv_id} missing hal")
+
+    fingerprint = data.get("fingerprint")
+    if fingerprint is not None:
+        if fingerprint.get("match") != "all":
+            errors.append(f"{path}: fingerprint match must be 'all'")
+        required = fingerprint.get("required")
+        if not isinstance(required, list) or len(required) < 2:
+            errors.append(f"{path}: fingerprint requires at least two components")
+        else:
+            seen: set[tuple[str, int, int]] = set()
+            for idx, component in enumerate(required):
+                bus = component.get("bus")
+                bus_index = component.get("bus_index")
+                address = component.get("address")
+                if bus not in VALID_FINGERPRINT_BUSES:
+                    errors.append(f"{path}: fingerprint.required[{idx}] has invalid bus")
+                    continue
+                if not isinstance(bus_index, int) or bus_index < 0:
+                    errors.append(f"{path}: fingerprint.required[{idx}] has invalid bus_index")
+                    continue
+                try:
+                    numeric_address = int(address, 0) if isinstance(address, str) else int(address)
+                except (TypeError, ValueError):
+                    errors.append(f"{path}: fingerprint.required[{idx}] has invalid address")
+                    continue
+                if bus == "i2c" and not 0 < numeric_address < 0x80:
+                    errors.append(f"{path}: fingerprint.required[{idx}] I2C address is out of range")
+                key = (bus, bus_index, numeric_address)
+                if key in seen:
+                    errors.append(f"{path}: fingerprint contains duplicate component address {key}")
+                seen.add(key)
+        if fingerprint.get("reject_partial") is not True:
+            errors.append(f"{path}: fingerprint must reject partial matches")
+
+    if board.get("board_id") == "twatch-ultra":
+        expected_addresses = {0x1A, 0x20, 0x28, 0x34, 0x51, 0x5A}
+        actual_addresses = set()
+        for item in data.get("fingerprint", {}).get("required", []):
+            if item.get("bus") != "i2c":
+                continue
+            try:
+                address = item.get("address")
+                actual_addresses.add(int(address, 0) if isinstance(address, str) else int(address))
+            except (TypeError, ValueError):
+                pass
+        if actual_addresses != expected_addresses:
+            errors.append(f"{path}: T-Watch Ultra fingerprint must use the complete I2C tuple")
+        forbidden = {"com.thistle.drv.audio-pcm5102a", "com.thistle.drv.rtc-pcf8563"}
+        configured_ids = {driver.get("id") for driver in data.get("drivers", [])}
+        if configured_ids & forbidden:
+            errors.append(f"{path}: T-Watch Ultra declares an incorrect audio or RTC driver")
+        touch = next((driver for driver in data.get("drivers", []) if driver.get("id") == "com.thistle.drv.touch-cst9217"), None)
+        if not touch or touch.get("config", {}).get("i2c_addr") != "0x1A":
+            errors.append(f"{path}: T-Watch Ultra CST9217 address must be 0x1A")
+        radio = data.get("variants", {}).get("radio", {})
+        supported = set(radio.get("supported", []))
+        if radio.get("selection") != "explicit" or not {"sx1262", "sx1280"} <= supported:
+            errors.append(f"{path}: T-Watch Ultra radio variant must require explicit selection")
+        if any(driver.get("hal") == "radio" for driver in data.get("drivers", [])):
+            errors.append(f"{path}: T-Watch Ultra base profile must not preselect a radio driver")
     return errors
 
 

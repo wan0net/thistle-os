@@ -3,8 +3,46 @@
         "name": "LilyGo T-Watch Ultra",
         "arch": "esp32s3",
         "board_id": "twatch-ultra",
-        "version": "0.1"
+        "version": "0.2"
     },
+    "fingerprint": {
+        "match": "all",
+        "required": [
+            { "bus": "i2c", "bus_index": 0, "address": "0x1A", "component": "cst9217" },
+            { "bus": "i2c", "bus_index": 0, "address": "0x20", "component": "xl9555" },
+            { "bus": "i2c", "bus_index": 0, "address": "0x28", "component": "bhi260ap" },
+            { "bus": "i2c", "bus_index": 0, "address": "0x34", "component": "axp2101" },
+            { "bus": "i2c", "bus_index": 0, "address": "0x51", "component": "pcf85063a" },
+            { "bus": "i2c", "bus_index": 0, "address": "0x5A", "component": "drv2605" }
+        ],
+        "reject_partial": true
+    },
+    "variants": {
+        "radio": {
+            "selection": "explicit",
+            "supported": [
+                "sx1262",
+                "sx1280",
+                "cc1101",
+                "lr1121",
+                "si4432"
+            ]
+        }
+    },
+    "components": [
+        { "id": "co5300", "bus": "qspi", "status": "prototype" },
+        { "id": "cst9217", "bus": "i2c", "address": "0x1A", "status": "prototype" },
+        { "id": "xl9555", "bus": "i2c", "address": "0x20", "status": "driver-required" },
+        { "id": "bhi260ap", "bus": "i2c", "address": "0x28", "status": "prototype" },
+        { "id": "axp2101", "bus": "i2c", "address": "0x34", "status": "driver-required" },
+        { "id": "pcf85063a", "bus": "i2c", "address": "0x51", "status": "driver-required" },
+        { "id": "drv2605", "bus": "i2c", "address": "0x5A", "status": "driver-required" },
+        { "id": "max98357a", "bus": "i2s", "status": "driver-required" },
+        { "id": "t3902", "bus": "pdm", "status": "driver-required" },
+        { "id": "mia-m10q", "bus": "uart", "status": "prototype" },
+        { "id": "st25r3916", "bus": "spi", "status": "driver-required" },
+        { "id": "microsd", "bus": "spi", "status": "prototype" }
+    ],
     "buses": {
         "spi": [
             {
@@ -61,25 +99,13 @@
             "entry": "touch-cst9217.drv.elf",
             "config": {
                 "i2c_bus": 0,
-                "i2c_addr": "0x5A",
+                "i2c_addr": "0x1A",
                 "pin_rst_expander": {
                     "driver": "xl9555",
                     "pin": 10
                 },
                 "max_x": 410,
                 "max_y": 502
-            }
-        },
-        {
-            "id": "com.thistle.drv.radio-sx1262",
-            "hal": "radio",
-            "entry": "radio-sx1262.drv.elf",
-            "config": {
-                "spi_bus": 0,
-                "cs": 36,
-                "dio1": 14,
-                "rst": 47,
-                "busy": 48
             }
         },
         {
@@ -105,26 +131,6 @@
             }
         },
         {
-            "id": "com.thistle.drv.audio-pcm5102a",
-            "hal": "audio",
-            "entry": "audio-pcm5102a.drv.elf",
-            "config": {
-                "i2s_bck": 9,
-                "i2s_ws": 10,
-                "i2s_data": 11
-            }
-        },
-        {
-            "id": "com.thistle.drv.rtc-pcf8563",
-            "hal": "rtc",
-            "entry": "pcf8563.drv.elf",
-            "config": {
-                "i2c_bus": 0,
-                "i2c_addr": "0x51",
-                "pin_int": 1
-            }
-        },
-        {
             "id": "com.thistle.drv.sdcard",
             "hal": "storage",
             "entry": "sdcard.drv.elf",
@@ -141,6 +147,7 @@
     ],
     "notes": {
         "status": "bringup",
-        "variant": "SX1262 radio revision. SX1280/CC1101/LR1121/SI4432 revisions need matching radio drivers."
+        "variant": "Radio selection is mandatory during provisioning; the base profile never guesses a fitted radio.",
+        "hardware_verified": false
     }
 }

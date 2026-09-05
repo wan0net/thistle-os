@@ -162,7 +162,7 @@ impl TouchState {
             dev: std::ptr::null_mut(),
             cfg: TouchCst9217Config {
                 i2c_bus: std::ptr::null_mut(),
-                i2c_addr: 0x5A,
+                i2c_addr: 0x1A,
                 pin_int: GPIO_NUM_NC,
                 pin_rst: GPIO_NUM_NC,
                 max_x: 410,
@@ -280,7 +280,7 @@ unsafe extern "C" fn cst9217_init(config: *const c_void) -> i32 {
 
     s.cfg = *(config as *const TouchCst9217Config);
     if s.cfg.i2c_addr == 0 {
-        s.cfg.i2c_addr = 0x5A;
+        s.cfg.i2c_addr = 0x1A;
     }
     if s.cfg.max_x == 0 {
         s.cfg.max_x = 410;
@@ -429,7 +429,7 @@ mod tests {
     fn transform_clamps() {
         let cfg = TouchCst9217Config {
             i2c_bus: std::ptr::null_mut(),
-            i2c_addr: 0x5A,
+            i2c_addr: 0x1A,
             pin_int: -1,
             pin_rst: -1,
             max_x: 410,

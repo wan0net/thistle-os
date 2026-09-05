@@ -12,6 +12,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #include "hal/board.h"
+#include "board_fingerprint.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
@@ -36,6 +37,7 @@ static const i2c_pins_t I2C_PIN_COMBOS[] = {
     { 18,  8 },   /* T-Deck, T-Deck Plus */
     { 18, 17 },   /* T-Display-S3, T3-S3 */
     { 13, 14 },   /* T-Deck Pro */
+    {  3,  2 },   /* T-Watch Ultra */
     { 17, 18 },   /* Heltec V3 */
     {  1,  2 },   /* Cardputer */
     {  4,  5 },   /* RAK3312 */
@@ -71,6 +73,9 @@ typedef struct {
     bool has_cst816;
     bool has_ssd1306;
     bool has_cardkb;
+    bool has_xl9555;
+    bool has_pcf85063a;
+    bool has_drv2605;
     int  sda;
     int  scl;
 } scan_result_t;
@@ -101,12 +106,16 @@ static bool try_pin_combo(const i2c_pins_t *pins, scan_result_t *out)
     out->has_cst816   = i2c_probe(bus, ADDR_CST816);
     out->has_ssd1306  = i2c_probe(bus, ADDR_SSD1306);
     out->has_cardkb   = i2c_probe(bus, ADDR_CARDKB);
+    out->has_xl9555   = i2c_probe(bus, 0x20);
+    out->has_pcf85063a = i2c_probe(bus, 0x51);
+    out->has_drv2605  = i2c_probe(bus, 0x5A);
 
     i2c_del_master_bus(bus);
 
     /* Return true if ANY device responded */
     return out->has_tca8418 || out->has_cst328 || out->has_bhi260ap ||
-           out->has_cst816  || out->has_ssd1306 || out->has_cardkb;
+           out->has_cst816  || out->has_ssd1306 || out->has_cardkb ||
+           out->has_xl9555 || out->has_pcf85063a || out->has_drv2605;
 }
 #endif /* !THISTLE_SIMULATOR */
 
@@ -227,19 +236,6 @@ static const char *JSON_T3_S3 =
 "    ]\n"
 "}\n";
 
-static const char *JSON_RAK3312 =
-"{\n"
-"    \"board\": { \"name\": \"RAK WisBlock RAK3312\", \"arch\": \"esp32s3\", \"board_id\": \"rak3312\", \"version\": \"1.0\" },\n"
-"    \"buses\": {\n"
-"        \"spi\": [],\n"
-"        \"i2c\": [{ \"port\": 0, \"sda\": 4, \"scl\": 5, \"freq_hz\": 400000 }]\n"
-"    },\n"
-"    \"drivers\": [\n"
-"        { \"id\": \"com.thistle.drv.radio-sx1262\", \"hal\": \"radio\", \"entry\": \"radio-sx1262.drv.elf\",\n"
-"          \"config\": { \"spi_bus\": -1, \"cs\": -1, \"dio1\": -1, \"rst\": -1, \"busy\": -1, \"internal\": true } }\n"
-"    ]\n"
-"}\n";
-
 /* ── Write board.json to SPIFFS ───────────────────────────────────────────── */
 
 static esp_err_t write_board_json(const char *json_content)
@@ -344,6 +340,24 @@ esp_err_t board_detect_and_write(void)
                      result.has_tca8418, result.has_cst328, result.has_bhi260ap,
                      result.has_cst816, result.has_ssd1306, result.has_cardkb);
 
+            /* The T-Watch Ultra is accepted only when its complete shared-I2C
+             * tuple responds on the documented pins. ACKs cannot prove the
+             * fitted radio, so this base-board fingerprint is only a prompt to
+             * install a signed profile through Recovery; it is never written
+             * as an unsigned embedded board.json. */
+            uint8_t watch_devices =
+                (result.has_cst328 ? TWATCH_ULTRA_I2C_CST9217 : 0) |
+                (result.has_xl9555 ? TWATCH_ULTRA_I2C_XL9555 : 0) |
+                (result.has_bhi260ap ? TWATCH_ULTRA_I2C_BHI260AP : 0) |
+                (result.has_tca8418 ? TWATCH_ULTRA_I2C_AXP2101 : 0) |
+                (result.has_pcf85063a ? TWATCH_ULTRA_I2C_PCF85063A : 0) |
+                (result.has_drv2605 ? TWATCH_ULTRA_I2C_DRV2605 : 0);
+            if (board_fingerprint_twatch_ultra_complete(
+                    result.sda, result.scl, watch_devices)) {
+                ESP_LOGW(TAG, "T-Watch Ultra component tuple detected; signed profile and explicit radio selection required");
+                return ESP_ERR_NOT_SUPPORTED;
+            }
+
             matched_json = match_fingerprint(&result);
             if (matched_json) {
                 break;
@@ -352,9 +366,8 @@ esp_err_t board_detect_and_write(void)
     }
 
     if (!matched_json) {
-        /* No I2C devices found on any pin combo — headless board */
-        ESP_LOGI(TAG, "No I2C devices found on any pin combo — assuming headless (RAK3312)");
-        matched_json = JSON_RAK3312;
+        ESP_LOGW(TAG, "No unique board fingerprint; refusing unsafe fallback");
+        return ESP_ERR_NOT_FOUND;
     }
 
     /* Write the detected config to SPIFFS */

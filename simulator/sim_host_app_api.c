@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Simulator implementations for host TAP app imports not exported by Rust.
 
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "sim_vfs.h"
 #include "thistle_app.h"
 

@@ -2,7 +2,8 @@
 
 set(KERNEL_SRCS
     "src/kernel_shims.c" "src/tk_wm_shims.c" "src/sdcard_shim.c"
-    "src/link_deps.c" "src/board_fallback.c" "src/board_builtin_drivers.c"
+    "src/link_deps.c" "src/board_fallback.c" "src/board_fingerprint.c"
+    "src/board_builtin_drivers.c"
 )
 set(KERNEL_REQUIRES
     thistle_hal kernel_rs esp_timer freertos esp_partition fatfs vfs app_update

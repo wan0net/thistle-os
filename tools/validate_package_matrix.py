@@ -28,9 +28,15 @@ def validate_entries(entries: list[dict]) -> list[str]:
             errors.append(f"{package_id}: unsupported architecture {arch!r}")
             continue
         coverage[arch].add(entry_type)
-        if not entry.get("is_signed") or not entry.get("sig_url"):
+        if entry_type == "app":
+            package_url = entry.get("package_url", "")
+            signature_url = entry.get("package_sig_url", "")
+        else:
+            package_url = entry.get("url", "")
+            signature_url = entry.get("sig_url", "")
+        if not entry.get("is_signed") or not signature_url:
             errors.append(f"{package_id} ({arch}): package is not signed")
-        if f"/{arch}/" not in entry.get("url", ""):
+        if f"/{arch}/" not in package_url:
             errors.append(f"{package_id} ({arch}): URL is not architecture-qualified")
 
     for arch, present_types in sorted(coverage.items()):

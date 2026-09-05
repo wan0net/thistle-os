@@ -404,8 +404,7 @@ static esp_err_t load_catalog_local(void)
         else if (strcmp(type_str, "driver") == 0) e->type = CATALOG_TYPE_DRIVER;
         else                                       e->type = CATALOG_TYPE_APP;
 
-        e->is_signed    = (e->sig_url[0] != '\0');
-        e->is_installed = (e->id[0] != '\0') && app_is_installed(e->id);
+        e->is_signed = (e->sig_url[0] != '\0');
 
         free(obj);
 
@@ -552,7 +551,6 @@ static void install_btn_cb(lv_event_t *e)
     esp_err_t ret = appstore_install_entry(entry, NULL, NULL);
     if (ret == ESP_OK) {
         toast_show("Installed!", TOAST_SUCCESS, 3000);
-        entry->is_installed = true;
         /* Go back and refresh the list so the [i] badge appears */
         back_to_catalog_cb(NULL);
         build_catalog_list();
@@ -613,7 +611,6 @@ static void remove_btn_cb(lv_event_t *e)
     snprintf(path, sizeof(path), "%s/%s.app.elf", APPS_DIR, entry->id);
 
     if (remove(path) == 0) {
-        entry->is_installed = false;
         toast_show("App removed", TOAST_SUCCESS, 2000);
         ESP_LOGI(TAG, "Removed: %s", path);
         back_to_catalog_cb(NULL);
@@ -876,7 +873,7 @@ static void build_catalog_list(void)
         char top_line[80];
         snprintf(top_line, sizeof(top_line), "> %s%s%s   %s",
                  e->name,
-                 e->is_installed ? " [i]" : "",
+                 (e->type == CATALOG_TYPE_APP && app_is_installed(e->id)) ? " [i]" : "",
                  (e->type == CATALOG_TYPE_DRIVER) ? " [drv]" : "",
                  e->version);
 
@@ -1038,12 +1035,6 @@ static void refresh_server_cb(lv_event_t *e)
         /* Replace in-memory catalog with the fresh data */
         memcpy(s_store.entries, fetched, sizeof(catalog_entry_t) * (size_t)count);
         s_store.entry_count = count;
-
-        /* Mark installed state */
-        for (int i = 0; i < s_store.entry_count; i++) {
-            catalog_entry_t *en = &s_store.entries[i];
-            en->is_installed = (en->type == CATALOG_TYPE_APP) && app_is_installed(en->id);
-        }
 
         /* Persist as local cache */
         save_catalog_cache();
